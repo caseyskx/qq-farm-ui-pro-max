@@ -55,16 +55,24 @@ echo -e "${GREEN}✅ 部署文件下载完成${NC}"
 # ---------- 4. 配置密码 ----------
 echo ""
 echo -e "${YELLOW}🔐 请设置管理后台密码（直接回车使用默认密码 qq007qq008）：${NC}"
-# 注意：在 curl | bash 管道模式下，必须从 /dev/tty 读取输入，否则 read 会读取脚本后续行导致语法错误
-read -r USER_PASSWORD < /dev/tty
+# 尝试从 tty 读取，如果失败则跳过交互（针对 curl | bash 管道模式）
+USER_PASSWORD=""
+if [ -t 0 ]; then
+    read -r USER_PASSWORD
+else
+    # 管道模式尝试从 tty 重定向
+    read -r USER_PASSWORD < /dev/tty 2>/dev/null || USER_PASSWORD=""
+fi
+
+# 替换 .env 中的密码
 if [ -n "$USER_PASSWORD" ]; then
-    # macOS 和 Linux 的 sed 兼容写法
+    # 采用更稳健的 sed 兼容方案
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=${USER_PASSWORD}/" .env
+        sed -i "" "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=${USER_PASSWORD}/" .env
     else
         sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=${USER_PASSWORD}/" .env
     fi
-    echo -e "${GREEN}✅ 密码已设置${NC}"
+    echo -e "${GREEN}✅ 密码已成功设置${NC}"
 else
     echo -e "${GREEN}✅ 使用默认密码${NC}"
 fi

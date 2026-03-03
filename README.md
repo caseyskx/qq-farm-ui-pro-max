@@ -243,15 +243,17 @@ ADMIN_PASSWORD='你的强密码' pnpm dev:core
 
 > 适合所有用户的最快部署方案。在服务器上执行一条命令，自动下载文件、配置密码、启动所有服务。
 
-**一条命令搞定：**
+**一条命令搞定（GitHub 国内访问有时较慢，可多次尝试）：**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/deploy/setup.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/deploy/setup.sh)
 ```
+
+> **注意**：如果执行后发现内容没更新，请在 URL 后面加个随机数尝试：`https://.../setup.sh?v=1`
 
 脚本会自动完成：
 1. ✅ 检测并安装 Docker（如果未安装）
 2. ✅ 从 GitHub 下载 `docker-compose.yml` + `.env` + 数据库初始化脚本
-3. ✅ 交互式设置管理密码
+3. ✅ 交互式设置管理密码（安全兼容模式）
 4. ✅ 启动全部 4 个服务（主应用 + MySQL + Redis + 微信协议）
 5. ✅ 显示访问地址和状态
 

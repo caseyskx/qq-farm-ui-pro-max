@@ -40,6 +40,16 @@ build/
 *.app
 *.dmg
 
+# 大文件与离线包（防止超过 GitHub 100M 限制）
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+deploy/offline/
+/services/
+/wxcode/
+
 # 临时文件
 *.tmp
 *.swp

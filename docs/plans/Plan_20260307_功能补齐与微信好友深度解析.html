@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>功能补齐与微信好友深度解析实施计划</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --text-color: #e2e8f0;
+            --container-bg: #1e293b;
+            --border-color: #334155;
+            --primary: #3b82f6;
+            --success: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+            --card-radius: 12px;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1,
+        h2,
+        h3 {
+            color: #f8fafc;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            text-align: center;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        h2 {
+            font-size: 1.75rem;
+            margin-top: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        h2::before {
+            content: "🎯";
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            color: #93c5fd;
+        }
+
+        .card {
+            background-color: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--card-radius);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .phase-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .badge.critical {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+
+        .badge.feature {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: #93c5fd;
+            border: 1px solid rgba(59, 130, 246, 0.5);
+        }
+
+        ul {
+            padding-left: 1.5rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        code {
+            background: #334155;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #a78bfa;
+        }
+
+        .impact-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .impact-table th,
+        .impact-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .impact-table th {
+            background-color: #0f172a;
+        }
+
+        .mermaid-wrapper {
+            background-color: #f8fafc;
+            border-radius: var(--card-radius);
+            padding: 1rem;
+            margin: 1.5rem 0;
+            text-align: center;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>功能补齐与微信好友深度解析 (Plan_20260307)</h1>
+
+        <p>基于此前的三版本基准对比报告，针对用户提出的“微信好友无法获取”以及“通告单独管理功能”等痛点进行深度解析，并制定原子级实施计划。</p>
+
+        <div class="card">
+            <h2>深度解析一：微信好友列表获取差异</h2>
+            <p><strong>现状描述：</strong> 用户当前程序（副本）无法成功获取微信好友列表，而“偷菜版”可以。</p>
+            <h3>源码比对结果：</h3>
+            <ul>
+                <li><strong>偷菜版：</strong> 强制使用 <code>GetAllFriendsRequest</code>
+                    获取好友，不再区分平台。代码极其纯粹：<br><code>sendMsgAsync('gamepb.friendpb.FriendService', 'GetAll', body)</code>
+                </li>
+                <li><strong>当前程序：</strong> 在 <code>friend-actions.js</code> 中有完整的 <code>SyncAll</code> 降级
+                    <code>GetAll</code> 的逻辑。其针对微信会走到 <code>GetAll</code>。</li>
+            </ul>
+            <h3>核心断症（为什么我们的不工作？）：</h3>
+            <p>由于代码层面的 Protobuf 请求构造完全一致，出现数据空置或失败的根本原因通常是以下三种：</p>
+            <ol>
+                <li><strong>解析缓存问题：</strong> 微信协议层返回 <code>replyBody</code> 后，如果我们的
+                    <code>types.GetAllFriendsReply.decode(replyBody)</code> 反序列化结构在长期的重构中由于 <code>proto</code>
+                    文件的变动导致字段丢失。</li>
+                <li><strong>平台标识问题 (Platform)：</strong> 尽管有 <code>WeChatPlatform.js</code>，若因为前端传值或某些缓存导致
+                    <code>platformInst.allowSyncAll()</code> 判断异常，可能走了 <code>SyncAll</code>（引发 1000020 错误），降级时
+                    <code>GetAll</code> 收到了上下文污染。</li>
+                <li><strong>微信环境强验证：</strong> 微信农场需要特定的 Header 或登陆态。若偷菜版处理了额外的登陆验证而我们遗漏了。</li>
+            </ol>
+            <h3>解决方案策略：</h3>
+            <p>彻底重构并强化 <code>GetAll</code> 后备方案，增加“强制使用兼容模式(GetAll)”的前端开关，跳过任何平台猜测，并且在日志中原样 Dump 返回值以便诊断。</p>
+        </div>
+
+        <div class="card">
+            <h2>深度解析二：公告展示与管理功能</h2>
+            <p><strong>现状描述：</strong> 偷菜版有一个独立的“全服公告”管理菜单及弹窗，用于管理员在页面直接向所有用户广播信息；当前程序无此功能。</p>
+            <h3>架构逆向分析 (基于偷菜版)：</h3>
+            <ul>
+                <li><strong>存储：</strong> SQLite的 <code>announcements</code> 表（包含 title, content, updated_at）。</li>
+                <li><strong>接口：</strong> <code>GET /api/announcement</code> (公开), <code>PUT /api/announcement</code>
+                    (仅限管理员)。</li>
+                <li><strong>展示：</strong> Vue 前端 <code>AnnouncementDialog.vue</code>，并且利用
+                    <code>localStorage('announcement_seen_id')</code> 避免弹窗骚扰。管理员可在弹窗直接编辑保存。</li>
+            </ul>
+            <h3>实施策略：</h3>
+            <p>利用当前程序更成熟的 <strong>MySQL + Redis</strong> 设施，实现一个更具弹性的公告系统。前台右上角 Navbar 增加 🔔 小喇叭带红点，点击展示；后台 Settings
+                提供富文本编辑器或专用管理面板。</p>
+        </div>
+
+        <!-- 实施阶段规划 -->
+        <h2>实施阶段规划 (Atomize Tasks)</h2>
+
+        <div class="card">
+            <div class="phase-header">
+                <h3>Phase 1: 微信好友深度修复与强兼容模式</h3>
+                <span class="badge critical">高优先级 | 异常修复</span>
+            </div>
+            <ul>
+                <li>[ ] <strong>修改 <code>friend-actions.js</code></strong>：在 <code>getAllFriends</code> 增加极致调试日志（记录
+                    decode 前的 buffer 长度）。若 <code>GetAll</code> 返回好友数为0，记录更详细的错误事件。</li>
+                <li>[ ] <strong>新增强制配置</strong>：在用户模型 (<code>store.js</code> / MySQL) 中新增字段 <code>force_get_all</code>
+                    (布尔值)。</li>
+                <li>[ ] <strong>更新前端设置</strong>：在 "高级设置" 中增加开关：「兼容模式：强制使用 GetAll 接口获取好友（针对微信没好友的情况）」，选中后无论什么平台均强走
+                    <code>GetAll</code>。</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="phase-header">
+                <h3>Phase 2: 系统公共公告管理系统实施 (System Announcement)</h3>
+                <span class="badge feature">新功能 | 全局广播</span>
+            </div>
+            <ul>
+                <li>[ ] <strong>数据库建表 (MySQL)</strong>：在初始化脚本 (<code>database-init.js</code>) 中增加
+                    <code>system_announcements</code> 表 (id, title, content, enabled, updated_at)。</li>
+                <li>[ ] <strong>后端 API (<code>api/routes.js</code>)</strong>：
+                    <ul>
+                        <li><code>GET /api/system/announcement</code> => 所有人可读，取最新启用的一条。</li>
+                        <li><code>PUT /api/system/announcement</code> => 校验 JWT 的 admin 角色，执行更新。</li>
+                    </ul>
+                </li>
+                <li>[ ] <strong>前端读取与展示</strong>：开发组件 <code>AnnouncementModal.vue</code>，利用 <code>localStorage</code>
+                    存储最后阅读时间（如有新公告显示红点并自动弹窗一次）。在 Navbar 或主界面增加入口。</li>
+                <li>[ ] <strong>前端管理编辑</strong>：开发 <code>AnnouncementManager.vue</code> （限管理员访问），允许管理公告内容与发布状态。</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <div class="phase-header">
+                <h3>Phase 3: 补齐其他剩余高优功能 (对比报告遗留)</h3>
+                <span class="badge feature">功能移植</span>
+            </div>
+            <ul>
+                <li>[ ] <strong>点券自动购买有机肥</strong>：在 <code>mall.js</code> 中加入自动使用点券兑换有机肥的业务逻辑。</li>
+                <li>[ ] <strong>跳过白萝卜配置</strong>：在 <code>friend-decision.js</code> 增加过滤逻辑，并在前端
+                    <code>StealSettings.vue</code> 加入「偷菜忽略白萝卜」开关。</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>影响面分析 (Impact Analysis)</h2>
+            <table class="impact-table">
+                <thead>
+                    <tr>
+                        <th>修改模块</th>
+                        <th>涉及文件</th>
+                        <th>风险等级</th>
+                        <th>回滚/缓解措施</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>好友获取逻辑</td>
+                        <td><code>friend-actions.js</code>, <code>store.js</code></td>
+                        <td>中等</td>
+                        <td>新增兼容强制开关默认关闭，完全不影响现有 QQ 用户。针对微信启用容错。</td>
+                    </tr>
+                    <tr>
+                        <td>公告子系统</td>
+                        <td><code>database-init.js</code>, 后端路由, Vue端</td>
+                        <td>低</td>
+                        <td>独立的表和 API 路由组件，未侵入任何现有农场自动化跑批任务。</td>
+                    </tr>
+                    <tr>
+                        <td>点券与偷菜逻辑</td>
+                        <td><code>mall.js</code>, <code>friend-decision.js</code></td>
+                        <td>低</td>
+                        <td>均受单独配置开关控制，默认保持当前逻辑不变。</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
+</body>
+
+</html>

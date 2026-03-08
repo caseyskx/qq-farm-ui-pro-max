@@ -209,6 +209,7 @@ async function loadUsers() {
             username: r.username,
             password: r.password_hash,
             role: r.role,
+            status: r.status || 'active',
             createdAt: new Date(r.created_at).getTime()
         }));
 
@@ -223,9 +224,9 @@ async function loadUsers() {
                     description: c.description,
                     type: c.type,
                     typeChar: c.type,
-                    days: c.days,
+                    days: Number.isFinite(Number(c.days)) ? Number(c.days) : getDefaultDaysForType(c.type),
                     expiresAt: c.expires_at ? new Date(c.expires_at).getTime() : null,
-                    enabled: c.enabled === 1
+                    enabled: (u.status || 'active') !== 'banned'
                 };
             }
         });
@@ -238,8 +239,8 @@ async function saveUsers() {
         await transaction(async (conn) => {
             for (const u of users) {
                 await conn.query(
-                    "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE password_hash=?, role=?",
-                    [u.username, u.password, u.role || 'user', u.password, u.role || 'user']
+                    "INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE password_hash=?, role=?, status=?",
+                    [u.username, u.password, u.role || 'user', u.status || 'active', u.password, u.role || 'user', u.status || 'active']
                 );
             }
         });
@@ -258,6 +259,7 @@ async function loadCards() {
             type: r.type,
             typeChar: r.type,
             description: r.description,
+            days: Number.isFinite(Number(r.days)) ? Number(r.days) : getDefaultDaysForType(r.type),
             enabled: r.enabled === 1,
             usedBy: r.usedBy,
             usedAt: r.used_at ? new Date(r.used_at).getTime() : null,
@@ -274,11 +276,11 @@ async function saveCards() {
             for (const c of cards) {
                 if (c.code) {
                     await conn.query(
-                        "INSERT INTO cards (code, type, description, enabled, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, (SELECT id FROM users WHERE username = ?), ?, ?) ON DUPLICATE KEY UPDATE description=?, enabled=?, used_by=(SELECT id FROM users WHERE username = ?), used_at=?, expires_at=?",
+                        "INSERT INTO cards (code, type, description, days, enabled, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, (SELECT id FROM users WHERE username = ?), ?, ?) ON DUPLICATE KEY UPDATE description=?, days=?, enabled=?, used_by=(SELECT id FROM users WHERE username = ?), used_at=?, expires_at=?",
                         [
-                            c.code, c.type, c.description || '', c.enabled ? 1 : 0, c.usedBy || null,
+                            c.code, c.type, c.description || '', c.days || getDefaultDaysForType(c.type), c.enabled ? 1 : 0, c.usedBy || null,
                             c.usedAt ? new Date(c.usedAt) : null, c.expiresAt ? new Date(c.expiresAt) : null,
-                            c.description || '', c.enabled ? 1 : 0, c.usedBy || null,
+                            c.description || '', c.days || getDefaultDaysForType(c.type), c.enabled ? 1 : 0, c.usedBy || null,
                             c.usedAt ? new Date(c.usedAt) : null, c.expiresAt ? new Date(c.expiresAt) : null
                         ]
                     );
@@ -301,6 +303,7 @@ async function initDefaultAdmin() {
             username: 'admin',
             password: hashPassword(defaultPassword),
             role: 'admin',
+            status: 'active',
             card: null,
             createdAt: Date.now()
         });
@@ -332,14 +335,16 @@ async function validateUser(username, password) {
         return {
             username: user.username,
             role: user.role,
+            status: user.status || 'active',
             card: null
         };
     }
 
+    if ((user.status || 'active') === 'banned') {
+        return { ...user, error: '账号已被封禁' };
+    }
+
     if (user.card) {
-        if (user.card.enabled === false) {
-            return { ...user, error: '账号已被封禁' };
-        }
         if (user.card.expiresAt && user.card.expiresAt < Date.now()) {
             return { ...user, error: '账号已过期' };
         }
@@ -348,7 +353,10 @@ async function validateUser(username, password) {
     return {
         username: user.username,
         role: user.role,
-        card: user.card || null
+        status: user.status || 'active',
+        card: user.card
+            ? { ...user.card, enabled: (user.status || 'active') !== 'banned' }
+            : null
     };
 }
 
@@ -406,6 +414,7 @@ async function registerUser(username, password, cardCode) {
         username,
         password: hashPassword(password),
         role: 'user',
+        status: 'active',
         cardCode,
         card: {
             code: card.code,
@@ -422,8 +431,8 @@ async function registerUser(username, password, cardCode) {
 
     await transaction(async (conn) => {
         await conn.query(
-            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-            [newUser.username, newUser.password, newUser.role || 'user']
+            "INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, ?)",
+            [newUser.username, newUser.password, newUser.role || 'user', newUser.status]
         );
         await conn.query(
             "UPDATE cards SET enabled=?, used_by=(SELECT id FROM users WHERE username = ?), used_at=?, expires_at=? WHERE code=?",
@@ -522,6 +531,9 @@ async function renewUser(username, cardCode) {
     user.card.days = renewDays;
     user.card.expiresAt = newExpiresAt;
     user.card.enabled = true;
+    if (user.status !== 'banned') {
+        user.status = 'active';
+    }
 
     card.usedBy = username;
     card.usedAt = now;
@@ -543,7 +555,10 @@ async function getAllUsers() {
     return users.map(u => ({
         username: u.username,
         role: u.role,
+        status: u.status || 'active',
         card: u.card
+            ? { ...u.card, enabled: (u.status || 'active') !== 'banned' }
+            : u.card
     }));
 }
 
@@ -553,7 +568,10 @@ async function getAllUsersWithPassword() {
         username: u.username,
         password: u.plainPassword || '',
         role: u.role,
+        status: u.status || 'active',
         card: u.card
+            ? { ...u.card, enabled: (u.status || 'active') !== 'banned' }
+            : u.card
     }));
 }
 
@@ -572,6 +590,7 @@ async function updateUser(username, updates) {
 
     if (updates.enabled !== undefined) {
         if (!user.card) user.card = {};
+        user.status = updates.enabled ? 'active' : 'banned';
         user.card.enabled = updates.enabled;
     }
 
@@ -581,15 +600,26 @@ async function updateUser(username, updates) {
     if (pool) {
         // cards 结构更新
         await pool.query(
-            "UPDATE cards SET expires_at=?, enabled=? WHERE used_by=(SELECT id FROM users WHERE username = ?)",
-            [user.card.expiresAt ? new Date(user.card.expiresAt) : null, user.card.enabled ? 1 : 0, username]
+            "UPDATE cards SET expires_at=? WHERE used_by=(SELECT id FROM users WHERE username = ?)",
+            [user.card.expiresAt ? new Date(user.card.expiresAt) : null, username]
+        ).catch(e => console.error("Update User Card Data Error:", e.message));
+        await pool.query(
+            "UPDATE users SET status=? WHERE username=?",
+            [user.status || 'active', username]
         ).catch(e => console.error("Update User Card Data Error:", e.message));
     } else {
         await saveUsers();
     }
     console.log('[保存完成] 用户状态已保存到数据库');
 
-    return { username: user.username, role: user.role, card: user.card };
+    return {
+        username: user.username,
+        role: user.role,
+        status: user.status || 'active',
+        card: user.card
+            ? { ...user.card, enabled: (user.status || 'active') !== 'banned' }
+            : user.card
+    };
 }
 
 async function deleteUser(username) {
@@ -702,8 +732,8 @@ async function createCard(description, type, days, forcedCode) {
     const pool = getPool();
     if (pool) {
         await pool.query(
-            "INSERT INTO cards (code, type, description, enabled) VALUES (?, ?, ?, ?)",
-            [newCard.code, newCard.type, newCard.description || '', 1]
+            "INSERT INTO cards (code, type, description, days, enabled) VALUES (?, ?, ?, ?, ?)",
+            [newCard.code, newCard.type, newCard.description || '', newCard.days, 1]
         ).catch(e => console.error("Insert New Card Error:", e.message));
     } else {
         await saveCards();
@@ -775,8 +805,11 @@ async function getUserInfo(username) {
     return {
         username: u.username,
         role: u.role || 'user',
+        status: u.status || 'active',
         cardCode: u.cardCode || null,
-        card: u.card || null,
+        card: u.card
+            ? { ...u.card, enabled: (u.status || 'active') !== 'banned' }
+            : null,
         isExpired,
     };
 }

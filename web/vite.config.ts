@@ -13,7 +13,7 @@ export default defineConfig({
     vue(),
     UnoCSS() as any,
     viteCompression({
-      verbose: true,
+      verbose: false,
       disable: false,
       threshold: 10240,
       algorithm: 'gzip',

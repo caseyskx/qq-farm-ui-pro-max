@@ -411,6 +411,13 @@ function sanitizeGlobalConfigBeforeSave() {
     accountFallbackConfig = normalizeAccountConfig(globalConfig.defaultAccountConfig, DEFAULT_ACCOUNT_CONFIG);
     globalConfig.defaultAccountConfig = cloneAccountConfig(accountFallbackConfig);
 
+    const currentAccountIds = new Set(
+        normalizeAccountsData(loadAccounts()).accounts
+            .map(acc => String((acc && acc.id) || '').trim())
+            .filter(Boolean)
+    );
+    const hasLoadedAccountSnapshot = _accountsLoadedAt > 0;
+
     // 每个账号配置也统一净化
     const map = (globalConfig.accountConfigs && typeof globalConfig.accountConfigs === 'object')
         ? globalConfig.accountConfigs
@@ -419,6 +426,7 @@ function sanitizeGlobalConfigBeforeSave() {
     for (const [id, cfg] of Object.entries(map)) {
         const sid = String(id || '').trim();
         if (!sid) continue;
+        if (hasLoadedAccountSnapshot && !currentAccountIds.has(sid)) continue;
         nextMap[sid] = normalizeAccountConfig(cfg, accountFallbackConfig);
     }
     globalConfig.accountConfigs = nextMap;
@@ -811,6 +819,7 @@ async function loadAccountsFromDB() {
                 running: r.running === 1,
                 avatar: r.avatar || '',
                 qq,
+                authTicket: String(authData.authTicket || '').trim(),
                 username: r.username || '',
                 createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
                 updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
@@ -876,6 +885,7 @@ function saveAccounts(data, touchedAccountIds) {
                     uin: String(acc.uin || '').trim(),
                     qq: String(acc.qq || '').trim(),
                     code: acc.code || '',
+                    authTicket: String(acc.authTicket || '').trim(),
                 });
                 pool.query(
                     "INSERT INTO accounts (id, uin, nick, name, platform, running, code, username, avatar, auth_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE uin=COALESCE(NULLIF(VALUES(uin),''), uin), nick=VALUES(nick), name=VALUES(name), platform=VALUES(platform), running=VALUES(running), code=COALESCE(NULLIF(VALUES(code),''), code), username=COALESCE(NULLIF(VALUES(username),''), username), avatar=COALESCE(NULLIF(VALUES(avatar),''), avatar), auth_data=COALESCE(NULLIF(VALUES(auth_data),''), auth_data)",
@@ -944,6 +954,7 @@ async function getAccountFull(accountId) {
             uin: row.uin ? String(row.uin) : String((authData && authData.uin) || ''),
             qq: String((authData && authData.qq) || (row.platform === 'qq' ? (row.uin ? String(row.uin) : '') : '')),
             code: row.code || (authData && authData.code) || '',
+            authTicket: String((authData && authData.authTicket) || ''),
             nick: row.nick || '',
             name: row.name || '',
             platform: row.platform || 'qq',
@@ -992,6 +1003,7 @@ function addOrUpdateAccount(acc) {
             platform: acc.platform || 'qq',
             uin: acc.uin ? String(acc.uin) : '',
             qq: acc.qq ? String(acc.qq) : ((acc.platform || 'qq') === 'qq' && acc.uin ? String(acc.uin) : ''),
+            authTicket: acc.authTicket ? String(acc.authTicket) : '',
             avatar: acc.avatar || acc.avatarUrl || '',
             username: acc.username || '',
             createdAt: Date.now(),

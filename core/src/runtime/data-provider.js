@@ -238,8 +238,7 @@ function createDataProvider(options) {
                     acc = { ...fullAcc, ...acc };
                 }
             }
-            startWorker(acc);
-            return true;
+            return !!(await startWorker(acc));
         },
 
         stopAccount: async (accountRef) => {
@@ -261,8 +260,7 @@ function createDataProvider(options) {
                     acc = { ...fullAcc, ...acc };
                 }
             }
-            restartWorker(acc);
-            return true;
+            return !!(await restartWorker(acc));
         },
 
         isAccountRunning: async (accountRef) => {

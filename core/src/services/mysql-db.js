@@ -137,6 +137,17 @@ async function initMysql() {
                 logger.info('✅ cards.used_at 列添加完成');
             }
 
+            const [cardDaysCols] = await pool.execute(
+                `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'cards' AND COLUMN_NAME = 'days'`,
+                [DB_NAME]
+            );
+            if (cardDaysCols.length === 0) {
+                await runMigrationFile(
+                    path.join(migrationsDir, '010-card-days.sql'),
+                    '检测到 cards 表缺少 days 列，正在执行迁移 010-card-days.sql',
+                );
+            }
+
             const [modeCols] = await pool.execute(
                 `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'account_configs' AND COLUMN_NAME = 'account_mode'`,
                 [DB_NAME]
@@ -179,6 +190,17 @@ async function initMysql() {
                 await runMigrationFile(
                     path.join(migrationsDir, '008-refresh-tokens.sql'),
                     '检测到缺少 refresh_tokens 表，正在执行迁移 008-refresh-tokens.sql',
+                );
+            }
+
+            const [userStatusCols] = await pool.execute(
+                `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status'`,
+                [DB_NAME]
+            );
+            if (userStatusCols.length === 0) {
+                await runMigrationFile(
+                    path.join(migrationsDir, '009-user-status.sql'),
+                    '检测到 users 表缺少 status 列，正在执行迁移 009-user-status.sql',
                 );
             }
 

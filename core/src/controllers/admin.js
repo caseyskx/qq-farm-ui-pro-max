@@ -195,7 +195,7 @@ function startAdminServer(dataProvider) {
 
         const currentPath = req.path.replace(/^\/api/, '');
 
-        if (req.currentUser.card?.enabled === false) {
+        if (req.currentUser.status === 'banned') {
             if (BANNED_WHITELIST.has(currentPath)) return next();
             return res.status(403).json({ ok: false, error: '账号已被封禁' });
         }
@@ -2151,7 +2151,7 @@ function startAdminServer(dataProvider) {
                         avatar = `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=640`;
                     }
 
-                    res.json({ ok: true, data: { status: 'OK', code: authCode, uin, avatar, nickname } });
+                    res.json({ ok: true, data: { status: 'OK', code: authCode, ticket, uin, avatar, nickname } });
                 } else if (result.status === 'Used') {
                     res.json({ ok: true, data: { status: 'Used' } });
                 } else if (result.status === 'Wait') {

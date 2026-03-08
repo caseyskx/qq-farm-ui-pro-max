@@ -2,6 +2,7 @@ const { createScheduler } = require('../services/scheduler');
 const { getPool } = require('../services/mysql-db');
 const store = require('../models/store');
 const { CONFIG } = require('../config/config');
+const { MiniProgramLoginSession } = require('../services/qrlogin');
 
 let systemLogBatch = [];
 setInterval(() => {
@@ -52,6 +53,22 @@ function createWorkerManager(options) {
 
     function looksLikeWxId(uin) {
         return /[a-z]/i.test(String(uin || '').trim());
+    }
+
+    async function refreshQQAuthCode(account) {
+        const platform = String(account && account.platform || '').trim();
+        const ticket = String(account && account.authTicket || '').trim();
+        if (platform !== 'qq' || !ticket) {
+            throw new Error('当前账号不满足 QQ 启动换码条件');
+        }
+        const authCode = String(await MiniProgramLoginSession.getAuthCode(ticket, '1112386029') || '').trim();
+        if (!authCode) {
+            throw new Error('QQ ticket 未换回新的 authCode');
+        }
+        return {
+            ...account,
+            code: authCode,
+        };
     }
 
     async function refreshWechatAuthCode(account) {
@@ -127,47 +144,70 @@ function createWorkerManager(options) {
         return createForkWorker(account);
     }
 
-    function startWorker(account) {
+    async function startWorker(account) {
         if (!account || !account.id) return false;
         if (workers[account.id]) return false; // 已运行
 
-        log('系统', `正在启动账号: ${account.name}`, { accountId: String(account.id), accountName: account.name });
+        let launchAccount = { ...account };
+        if (String(launchAccount.platform || '') === 'qq' && launchAccount.authTicket) {
+            try {
+                const refreshedAccount = await refreshQQAuthCode(launchAccount);
+                if (refreshedAccount.code && refreshedAccount.code !== launchAccount.code) {
+                    launchAccount = refreshedAccount;
+                    addOrUpdateAccount({
+                        id: launchAccount.id,
+                        code: launchAccount.code,
+                        authTicket: launchAccount.authTicket,
+                    });
+                    addAccountLog('auth_refresh', `账号 ${launchAccount.name} 启动前自动刷新 QQ 授权成功`, launchAccount.id, launchAccount.name);
+                }
+            } catch (error) {
+                log('系统', `账号 ${launchAccount.name} QQ 启动换码失败，回退使用现有 Code`, {
+                    accountId: String(launchAccount.id),
+                    accountName: launchAccount.name,
+                    reason: error && error.message ? error.message : String(error || ''),
+                });
+            }
+        }
+
+        log('系统', `正在启动账号: ${launchAccount.name}`, { accountId: String(launchAccount.id), accountName: launchAccount.name });
 
         let child = null;
         try {
-            child = createWorkerProcess(account);
+            child = createWorkerProcess(launchAccount);
         } catch (err) {
             const reason = err && err.message ? err.message : String(err || 'unknown error');
-            log('错误', `账号 ${account.name} 启动失败: ${reason}`, { accountId: String(account.id), accountName: account.name });
-            addAccountLog('start_failed', `账号 ${account.name} 启动失败`, account.id, account.name, { reason });
+            log('错误', `账号 ${launchAccount.name} 启动失败: ${reason}`, { accountId: String(launchAccount.id), accountName: launchAccount.name });
+            addAccountLog('start_failed', `账号 ${launchAccount.name} 启动失败`, launchAccount.id, launchAccount.name, { reason });
             return false;
         }
 
-        workers[account.id] = {
+        workers[launchAccount.id] = {
             process: child,
             status: null, // 最新状态快照
             logs: [],
             requests: new Map(), // pending API requests
             reqId: 1,
-            name: account.name,
+            name: launchAccount.name,
             stopping: false,
             disconnectedSince: 0,
             autoDeleteTriggered: false,
             wsError: null,
             authRefreshing: false,
             account: {
-                id: account.id,
-                name: account.name,
-                platform: account.platform,
-                uin: account.uin || account.qq || '',
-                qq: account.qq || '',
-                code: account.code || '',
+                id: launchAccount.id,
+                name: launchAccount.name,
+                platform: launchAccount.platform,
+                uin: launchAccount.uin || launchAccount.qq || '',
+                qq: launchAccount.qq || '',
+                code: launchAccount.code || '',
+                authTicket: launchAccount.authTicket || '',
             },
         };
 
         try {
             addOrUpdateAccount({
-                id: account.id,
+                id: launchAccount.id,
                 running: true,
                 wsError: null,
             });
@@ -177,37 +217,37 @@ function createWorkerManager(options) {
         child.send({
             type: 'start',
             config: {
-                code: account.code,
-                platform: account.platform,
-                uin: account.uin || account.qq || '',
+                code: launchAccount.code,
+                platform: launchAccount.platform,
+                uin: launchAccount.uin || launchAccount.qq || '',
             },
         });
-        child.send({ type: 'config_sync', config: buildConfigSnapshotForAccount(account.id) });
+        child.send({ type: 'config_sync', config: buildConfigSnapshotForAccount(launchAccount.id) });
 
         // 监听消息
         child.on('message', (msg) => {
-            handleWorkerMessage(account.id, msg);
+            handleWorkerMessage(launchAccount.id, msg);
         });
 
         child.on('error', (err) => {
-            log('系统', `账号 ${account.name} 子进程启动失败: ${err && err.message ? err.message : err}`, { accountId: String(account.id), accountName: account.name });
+            log('系统', `账号 ${launchAccount.name} 子进程启动失败: ${err && err.message ? err.message : err}`, { accountId: String(launchAccount.id), accountName: launchAccount.name });
         });
 
         child.on('exit', (code, signal) => {
-            const current = workers[account.id];
-            const displayName = (current && current.name) || account.name;
+            const current = workers[launchAccount.id];
+            const displayName = (current && current.name) || launchAccount.name;
             log('系统', `账号 ${displayName} 进程退出 (code=${code}, signal=${signal || 'none'})`, {
-                accountId: String(account.id),
+                accountId: String(launchAccount.id),
                 accountName: displayName,
                 runtimeMode: useThreadRuntime ? 'thread' : 'fork',
             });
 
-            managerScheduler.clear(`force_kill_${account.id}`);
-            managerScheduler.clear(`restart_fallback_${account.id}`);
+            managerScheduler.clear(`force_kill_${launchAccount.id}`);
+            managerScheduler.clear(`restart_fallback_${launchAccount.id}`);
 
             if (current && current.requests && current.requests.size > 0) {
                 for (const [reqId, req] of current.requests.entries()) {
-                    managerScheduler.clear(`api_timeout_${account.id}_${reqId}`);
+                    managerScheduler.clear(`api_timeout_${launchAccount.id}_${reqId}`);
                     try {
                         req.reject(new Error('Worker exited'));
                     } catch { }
@@ -218,12 +258,12 @@ function createWorkerManager(options) {
             if (current && current.process === child) {
                 try {
                     addOrUpdateAccount({
-                        id: account.id,
+                        id: launchAccount.id,
                         running: false,
                         wsError: current.wsError || null,
                     });
                 } catch { }
-                delete workers[account.id];
+                delete workers[launchAccount.id];
             }
         });
         return true;
@@ -253,8 +293,8 @@ function createWorkerManager(options) {
         });
     }
 
-    function restartWorker(account) {
-        if (!account) return;
+    async function restartWorker(account) {
+        if (!account) return false;
         const accountId = account.id;
         const worker = workers[accountId];
         if (!worker) return startWorker(account);
@@ -289,6 +329,7 @@ function createWorkerManager(options) {
             killIfStale();
             startOnce();
         });
+        return true;
     }
 
     function handleWorkerMessage(accountId, msg) {

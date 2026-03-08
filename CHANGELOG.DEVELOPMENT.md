@@ -6,6 +6,51 @@
 
 ## 📅 最近更新
 
+### v4.5.6 - QQ 官方扫码续航、用户状态解耦与发布前回归 (2026-03-08)
+
+#### 🔐 用户状态与权限修复
+- ✅ **修复体验卡用户误封禁**: 新增 `users.status` 字段，彻底拆分“卡密是否还能被再次使用”和“用户账号是否被封禁”两套语义。
+- ✅ **普通用户鉴权恢复准确**: 注册后的普通用户不再因为已消费卡密被误判成“账号已被封禁”，现在访问管理员接口会正确返回 `403 Forbidden`。
+- ✅ **自动迁移旧库**: 新增 `009-user-status.sql`，启动时会自动为旧数据库补充 `users.status` 列并回填为 `active`。
+- ✅ **卡密天数持久化补齐**: 新增 `cards.days` 字段与 `010-card-days.sql` 迁移，修复卡密管理页出现 `undefined天` 的问题，并保留自定义天数。
+
+#### 📱 QQ / 微信登录链路增强
+- ✅ **QQ 官方扫码主链路保留**: 继续使用 `q.qq.com` 官方二维码流程，不依赖 UIN 也能创建二维码。
+- ✅ **微信重启自愈续签**: `wx_car / wx_ipad` 账号在重启后如果遇到旧 `code` 失效，会自动调用 `JSLogin` 换新 `code` 并重新拉起。
+- ✅ **QQ 票据持久化能力补齐**: QQ 扫码成功后，前后端现在会同时保存官方返回的 `ticket`，为后续“启动前动态换新 authCode”打通数据链路。
+- ✅ **QQ 启动前预刷新**: Worker 启动前若存在已保存的 QQ `ticket`，系统会优先尝试换取新的 `authCode` 再登录，减少重启后立即 `400` 的概率。
+
+#### 🧾 日志与可观测性优化
+- ✅ **访客匿名来源文案优化**: 当农场访客事件返回 `gid <= 0` 时，不再误显示为 `GID:0`，改为更贴近业务语义的“匿名好友”。
+- ✅ **访客日志元信息增强**: 新增 `sourceKnown` 元字段，便于区分“已识别好友”与“匿名/未知来源”。
+
+#### 🛠️ 构建与发布链路优化
+- ✅ **前端构建通过**: `vue-tsc -b` 与 `pnpm build:web` 持续通过。
+- ✅ **部署脚本语法检查通过**: `scripts/deploy/fresh-install.sh` 与 `scripts/deploy/update-app.sh` 的 Bash 语法校验通过。
+- ✅ **压缩插件日志降噪**: 关闭 `vite-plugin-compression` 的冗长 verbose 输出，避免构建日志中出现误导性的绝对路径展示。
+- ✅ **全局配置落库防脏数据**: 保存 `account_configs` 前会剔除已删除账号的孤儿配置，避免远端出现外键错误刷屏。
+
+#### 🔎 本轮回归结论
+- ✅ **普通用户权限回归通过**: 新注册体验卡用户访问 `/api/users`、`/api/cards` 时均返回 `403 Forbidden`。
+- ✅ **微信真实链路回归通过**: 本地 `3000` 实例重启后，微信账号仍可自动续签并恢复在线。
+- ⚠️ **QQ 仍需一次补扫完成最终闭环**: 在本次代码补齐 `ticket` 持久化之前保存的老 QQ 账号只持有一次性 `authCode`，重启后仍会 `400`。需要再扫码一次，让新 `ticket` 落库，之后才能验证“重启自动换码”链路。
+
+#### 📁 涉及文件
+| 文件 | 说明 |
+|------|------|
+| `core/src/database/migrations/009-user-status.sql` | 新增用户状态迁移 |
+| `core/src/database/migrations/010-card-days.sql` | 新增卡密天数字段迁移 |
+| `core/src/services/mysql-db.js` | 启动时自动执行用户状态迁移 |
+| `core/src/models/user-store.js` | 用户状态加载、登录校验、卡密天数持久化 |
+| `core/src/controllers/admin.js` | 用户中间件改看 `users.status`，QQ 扫码回传 `ticket` |
+| `core/src/runtime/worker-manager.js` | QQ 启动前尝试基于 `ticket` 换新 `authCode` |
+| `core/src/models/store.js` | 账号 `auth_data` 增加 `authTicket` 持久化，保存时过滤孤儿账号配置 |
+| `web/src/components/AccountModal.vue` | QQ 扫码成功后提交 `ticket` 保存 |
+| `core/src/services/farm.js` | 访客匿名来源日志文案优化 |
+| `web/vite.config.ts` | 构建日志降噪 |
+
+---
+
 ### v4.4.0 - 多用户安全体系全面改造 (2026-03-07)
 
 #### 🔐 JWT + Refresh Token 双令牌认证体系 [NEW]

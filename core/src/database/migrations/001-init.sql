@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT DEFAULT 'user',  -- 'admin' | 'user'
+  status TEXT DEFAULT 'active', -- 'active' | 'banned'
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS cards (
   code TEXT UNIQUE NOT NULL,
   type TEXT NOT NULL,  -- D|W|M|F
   description TEXT,
+  days INTEGER,
   used_by INTEGER,     -- users.id
   enabled BOOLEAN DEFAULT true,
   expires_at DATETIME,

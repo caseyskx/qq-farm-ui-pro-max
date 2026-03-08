@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `username` VARCHAR(100) NOT NULL UNIQUE,
     `password_hash` VARCHAR(255) NOT NULL,
     `role` VARCHAR(50) DEFAULT 'user',
+    `status` VARCHAR(20) NOT NULL DEFAULT 'active',
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS `cards` (
     `code` VARCHAR(100) NOT NULL UNIQUE,
     `type` VARCHAR(20) NOT NULL,
     `description` TEXT,
+    `days` INT NULL,
     `used_by` INT NULL,
     `used_at` DATETIME NULL,
     `enabled` TINYINT(1) DEFAULT 1,

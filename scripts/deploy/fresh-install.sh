@@ -457,27 +457,33 @@ if (!password) {
 }
 
 const security = require('./src/services/security');
-const { getPool } = require('./src/services/mysql-db');
+const { initMysql, getPool } = require('./src/services/mysql-db');
 
 (async () => {
+    await initMysql();
     const pool = getPool();
-    const passwordHash = security.hashPassword(password);
-    const [rows] = await pool.query('SELECT id FROM users WHERE username = ? LIMIT 1', ['admin']);
+    try {
+        const passwordHash = security.hashPassword(password);
+        const [rows] = await pool.query('SELECT id FROM users WHERE username = ? LIMIT 1', ['admin']);
 
-    if (rows.length > 0) {
+        if (rows.length > 0) {
+            await pool.query(
+                'UPDATE users SET password_hash = ?, role = ?, status = ? WHERE username = ?',
+                [passwordHash, 'admin', 'active', 'admin']
+            );
+            console.log('[deploy] admin password updated');
+            return;
+        }
+
         await pool.query(
-            'UPDATE users SET password_hash = ?, role = ?, status = ? WHERE username = ?',
-            [passwordHash, 'admin', 'active', 'admin']
+            'INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, ?)',
+            ['admin', passwordHash, 'admin', 'active']
         );
-        console.log('[deploy] admin password updated');
-        return;
+        console.log('[deploy] admin password created');
+    } finally {
+        security.stopLoginLockCleanup?.();
+        await pool.end();
     }
-
-    await pool.query(
-        'INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, ?)',
-        ['admin', passwordHash, 'admin', 'active']
-    );
-    console.log('[deploy] admin password created');
 })().catch((err) => {
     console.error(err && err.message ? err.message : String(err));
     process.exit(1);

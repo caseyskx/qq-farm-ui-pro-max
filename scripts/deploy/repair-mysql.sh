@@ -161,14 +161,18 @@ wait_for_mysql() {
     while true; do
         local status="missing"
         local health="none"
+        local exec_mode=""
 
         if status="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "${MYSQL_CONTAINER_NAME}" 2>/dev/null)"; then
             health="$("${DOCKER[@]}" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${MYSQL_CONTAINER_NAME}" 2>/dev/null || true)"
         fi
 
         if [ "${status}" = "running" ] && { [ "${health}" = "healthy" ] || [ "${health}" = "none" ]; }; then
-            print_success "${MYSQL_CONTAINER_NAME} 已就绪 (${health})"
-            return 0
+            exec_mode="$(detect_mysql_exec_mode)"
+            if mysql_cli_exec "${exec_mode}" mysqladmin --protocol=TCP -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" ping >/dev/null 2>&1; then
+                print_success "${MYSQL_CONTAINER_NAME} 已就绪 (${health})"
+                return 0
+            fi
         fi
 
         if [ $(( $(date +%s) - started_at )) -ge "${timeout}" ]; then
@@ -186,7 +190,7 @@ mysql_exec() {
     local exec_mode
     exec_mode="$(detect_mysql_exec_mode)"
     mysql_cli_exec "${exec_mode}" \
-        mysql --default-character-set=utf8mb4 -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" -Nse "${sql}"
+        mysql --protocol=TCP -h 127.0.0.1 --default-character-set=utf8mb4 -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" -Nse "${sql}"
 }
 
 mysql_file() {
@@ -194,7 +198,7 @@ mysql_file() {
     local exec_mode
     exec_mode="$(detect_mysql_exec_mode)"
     mysql_cli_exec "${exec_mode}" \
-        mysql --default-character-set=utf8mb4 -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" < "${sql_file}"
+        mysql --protocol=TCP -h 127.0.0.1 --default-character-set=utf8mb4 -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" < "${sql_file}"
 }
 
 column_exists() {
@@ -241,7 +245,7 @@ backup_database() {
     print_info "备份当前 MySQL 数据到 ${backup_file}"
     exec_mode="$(detect_mysql_exec_mode)"
     mysql_cli_exec "${exec_mode}" \
-        mysqldump -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" > "${backup_file}"
+        mysqldump --protocol=TCP -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" > "${backup_file}"
     print_success "数据库备份完成"
 }
 

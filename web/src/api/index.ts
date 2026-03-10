@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { useToastStore } from '@/stores/toast'
 import { clearLocalAuthState, currentAccountId } from '@/utils/auth'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 const api = axios.create({
   baseURL: '/',
@@ -80,14 +81,14 @@ api.interceptors.response.use((response) => {
 
   if (error.response) {
     if (error.response.status >= 500) {
-      const backendError = String(error.response.data?.error || error.response.data?.message || '')
-      if (backendError === '账号未运行' || backendError === 'API Timeout') {
+      const backendError = localizeRuntimeText(error.response.data?.error || error.response.data?.message || '')
+      if (backendError === '账号未运行' || backendError === '接口超时') {
         return Promise.reject(error)
       }
       toast.error(`服务器错误: ${error.response.status} ${error.response.statusText}`)
     }
     else if (error.response.status !== 401) {
-      const msg = error.response.data?.message || error.message
+      const msg = localizeRuntimeText(error.response.data?.error || error.response.data?.message || error.message)
       toast.error(`请求失败: ${msg}`)
     }
   }
@@ -95,7 +96,7 @@ api.interceptors.response.use((response) => {
     toast.error('网络错误，无法连接到服务器')
   }
   else {
-    toast.error(`错误: ${error.message}`)
+    toast.error(`错误: ${localizeRuntimeText(error.message)}`)
   }
 
   return Promise.reject(error)

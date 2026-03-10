@@ -88,7 +88,10 @@ watch(adminToken, async (newToken, oldToken) => {
 </script>
 
 <template>
-  <div class="ui-app-root relative z-0 h-screen w-screen overflow-hidden bg-theme-bg transition-colors duration-300 dark:bg-theme-darkbg">
+  <div
+    class="ui-app-root relative z-0 w-screen bg-theme-bg transition-colors duration-300 dark:bg-theme-darkbg"
+    :class="isLoginRoute ? 'ui-app-root--login min-h-screen overflow-visible' : 'ui-app-root--workspace h-screen overflow-hidden'"
+  >
     <div
       v-if="showWorkspaceBackground"
       class="app-scene-background"
@@ -143,6 +146,14 @@ body {
 
 .ui-app-root {
   color: var(--ui-text-1);
+}
+
+.ui-app-root--login {
+  min-height: 100vh;
+}
+
+.ui-app-root--workspace {
+  min-height: 100vh;
 }
 
 .app-scene-background {

@@ -4,7 +4,9 @@
  */
 
 const OpenVikingClient = require('../../../services/openviking/client');
-const logger = require('./utils/logger');
+const { createModuleLogger } = require('./logger');
+
+const logger = createModuleLogger('context-manager');
 
 class ContextManager {
   constructor() {

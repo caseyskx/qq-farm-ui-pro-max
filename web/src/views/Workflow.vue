@@ -7,6 +7,7 @@ import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSwitch from '@/components/ui/BaseSwitch.vue'
 import { useAccountStore } from '@/stores/account'
 import { useToastStore } from '@/stores/toast'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 const accountStore = useAccountStore()
 const { currentAccountId } = storeToRefs(accountStore)
@@ -37,12 +38,7 @@ interface NodeTemplate {
   label: string
   icon: string
   color: string
-  bgLight: string
-  bgDark: string
-  borderLight: string
-  borderDark: string
-  textLight: string
-  textDark: string
+  chipClass: string
   category: 'farm' | 'friend' | 'common'
   hasParams: boolean
   defaultParams?: Record<string, any>
@@ -52,24 +48,24 @@ interface NodeTemplate {
 
 const NODE_TEMPLATES: NodeTemplate[] = [
   // Farm Specific
-  { type: 'stage_fertilize', label: '阶段施肥', icon: '🧪', color: '#4f46e5', bgLight: 'bg-indigo-50', bgDark: 'dark:bg-indigo-950/30', borderLight: 'border-indigo-200', borderDark: 'dark:border-indigo-800', textLight: 'text-indigo-700', textDark: 'dark:text-indigo-400', category: 'farm', hasParams: true, defaultParams: { mode: 'normal', phases: ['seed', 'sprout', 'leaf'] } },
-  { type: 'wait_mature', label: '等待成熟', icon: '⏳', color: '#ef4444', bgLight: 'bg-red-50', bgDark: 'dark:bg-red-950/30', borderLight: 'border-red-200', borderDark: 'dark:border-red-800', textLight: 'text-red-700', textDark: 'dark:text-red-400', category: 'farm', hasParams: true, defaultParams: { stopIfNotMature: true } },
-  { type: 'harvest', label: '收获', icon: '🌾', color: '#f59e0b', bgLight: 'bg-amber-50', bgDark: 'dark:bg-amber-950/30', borderLight: 'border-amber-200', borderDark: 'dark:border-amber-800', textLight: 'text-amber-700', textDark: 'dark:text-amber-400', category: 'farm', hasParams: false },
-  { type: 'remove_dead', label: '铲除', icon: '💀', color: '#6b7280', bgLight: 'bg-gray-50', bgDark: 'dark:bg-gray-800/50', borderLight: 'border-gray-200', borderDark: 'dark:border-gray-700', textLight: 'text-gray-700', textDark: 'dark:text-gray-400', category: 'farm', hasParams: false },
-  { type: 'select_seed', label: '选种', icon: '🌱', color: '#059669', bgLight: 'bg-emerald-50', bgDark: 'dark:bg-emerald-950/30', borderLight: 'border-emerald-200', borderDark: 'dark:border-emerald-800', textLight: 'text-emerald-700', textDark: 'dark:text-emerald-400', category: 'farm', hasParams: true, defaultParams: { strategy: 'preferred' } },
-  { type: 'plant', label: '种植', icon: '🌱', color: '#059669', bgLight: 'bg-emerald-50', bgDark: 'dark:bg-emerald-950/30', borderLight: 'border-emerald-200', borderDark: 'dark:border-emerald-800', textLight: 'text-emerald-700', textDark: 'dark:text-emerald-400', category: 'farm', hasParams: false },
-  { type: 'fertilize', label: '施肥', icon: '🧪', color: '#8b5cf6', bgLight: 'bg-purple-50', bgDark: 'dark:bg-purple-950/30', borderLight: 'border-purple-200', borderDark: 'dark:border-purple-800', textLight: 'text-purple-700', textDark: 'dark:text-purple-400', category: 'farm', hasParams: true, defaultParams: { mode: 'normal' } },
+  { type: 'stage_fertilize', label: '阶段施肥', icon: '🧪', color: 'var(--ui-brand-500)', chipClass: 'ui-meta-chip--brand', category: 'farm', hasParams: true, defaultParams: { mode: 'normal', phases: ['seed', 'sprout', 'leaf'] } },
+  { type: 'wait_mature', label: '等待成熟', icon: '⏳', color: 'var(--ui-status-danger)', chipClass: 'ui-meta-chip--danger', category: 'farm', hasParams: true, defaultParams: { stopIfNotMature: true } },
+  { type: 'harvest', label: '收获', icon: '🌾', color: 'var(--ui-status-warning)', chipClass: 'ui-meta-chip--warning', category: 'farm', hasParams: false },
+  { type: 'remove_dead', label: '铲除', icon: '💀', color: 'var(--ui-text-2)', chipClass: 'ui-meta-chip--neutral', category: 'farm', hasParams: false },
+  { type: 'select_seed', label: '选种', icon: '🌱', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'farm', hasParams: true, defaultParams: { strategy: 'preferred' } },
+  { type: 'plant', label: '种植', icon: '🌱', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'farm', hasParams: false },
+  { type: 'fertilize', label: '施肥', icon: '🧪', color: 'var(--ui-brand-600)', chipClass: 'ui-meta-chip--brand', category: 'farm', hasParams: true, defaultParams: { mode: 'normal' } },
 
   // Friend Specific
-  { type: 'steal', label: '偷菜', icon: '🤏', color: '#f97316', bgLight: 'bg-orange-50', bgDark: 'dark:bg-orange-950/30', borderLight: 'border-orange-200', borderDark: 'dark:border-orange-800', textLight: 'text-orange-700', textDark: 'dark:text-orange-400', category: 'friend', hasParams: false },
-  { type: 'put_bug', label: '放虫', icon: '😈', color: '#ef4444', bgLight: 'bg-red-50', bgDark: 'dark:bg-red-950/30', borderLight: 'border-red-200', borderDark: 'dark:border-red-800', textLight: 'text-red-700', textDark: 'dark:text-red-400', category: 'friend', hasParams: false },
-  { type: 'put_weed', label: '放草', icon: '🌿', color: '#059669', bgLight: 'bg-emerald-50', bgDark: 'dark:bg-emerald-950/30', borderLight: 'border-emerald-200', borderDark: 'dark:border-emerald-800', textLight: 'text-emerald-700', textDark: 'dark:text-emerald-400', category: 'friend', hasParams: false },
+  { type: 'steal', label: '偷菜', icon: '🤏', color: 'var(--ui-status-warning)', chipClass: 'ui-meta-chip--warning', category: 'friend', hasParams: false },
+  { type: 'put_bug', label: '放虫', icon: '😈', color: 'var(--ui-status-danger)', chipClass: 'ui-meta-chip--danger', category: 'friend', hasParams: false },
+  { type: 'put_weed', label: '放草', icon: '🌿', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'friend', hasParams: false },
 
   // Common
-  { type: 'weed', label: '除草', icon: '✂️', color: '#10b981', bgLight: 'bg-green-50', bgDark: 'dark:bg-green-950/30', borderLight: 'border-green-200', borderDark: 'dark:border-green-800', textLight: 'text-green-700', textDark: 'dark:text-green-400', category: 'common', hasParams: false },
-  { type: 'bug', label: '除虫', icon: '🐛', color: '#f43f5e', bgLight: 'bg-rose-50', bgDark: 'dark:bg-rose-950/30', borderLight: 'border-rose-200', borderDark: 'dark:border-rose-800', textLight: 'text-rose-700', textDark: 'dark:text-rose-400', category: 'common', hasParams: false },
-  { type: 'water', label: '浇水', icon: '💧', color: '#0ea5e9', bgLight: 'bg-sky-50', bgDark: 'dark:bg-sky-950/30', borderLight: 'border-sky-200', borderDark: 'dark:border-sky-800', textLight: 'text-sky-700', textDark: 'dark:text-sky-400', category: 'common', hasParams: false },
-  { type: 'delay', label: '延迟', icon: '⏱️', color: '#64748b', bgLight: 'bg-slate-50', bgDark: 'dark:bg-slate-800/50', borderLight: 'border-slate-200', borderDark: 'dark:border-slate-700', textLight: 'text-slate-700', textDark: 'dark:text-slate-400', category: 'common', hasParams: true, defaultParams: { sec: 5 } },
+  { type: 'weed', label: '除草', icon: '✂️', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'common', hasParams: false },
+  { type: 'bug', label: '除虫', icon: '🐛', color: 'var(--ui-status-danger)', chipClass: 'ui-meta-chip--danger', category: 'common', hasParams: false },
+  { type: 'water', label: '浇水', icon: '💧', color: 'var(--ui-status-info)', chipClass: 'ui-meta-chip--info', category: 'common', hasParams: false },
+  { type: 'delay', label: '延迟', icon: '⏱️', color: 'var(--ui-text-2)', chipClass: 'ui-meta-chip--neutral', category: 'common', hasParams: true, defaultParams: { sec: 5 } },
 ]
 
 function getTemplate(type: string): NodeTemplate | undefined {
@@ -181,8 +177,8 @@ function animateLoop(time: number) {
     }
 
     if (dragSource.value === 'queue' && isOutside) {
-      ghostEl.value.style.borderColor = '#ef4444' // red-500
-      ghostEl.value.style.background = 'rgba(239, 68, 68, 0.1)'
+      ghostEl.value.style.borderColor = 'var(--ui-status-danger)'
+      ghostEl.value.style.background = 'color-mix(in srgb, var(--ui-status-danger-soft) 70%, transparent)'
       ghostEl.value.style.opacity = '0.8'
     }
     else {
@@ -204,7 +200,9 @@ function initDrag(e: PointerEvent, template: NodeTemplate, _scope: 'farm' | 'fri
     ghostEl.value.remove()
 
   const el = document.createElement('div')
-  el.className = `fixed z-[9999] pointer-events-none px-5 py-2.5 border-2 rounded-full font-bold shadow-xl flex items-center gap-2.5 whitespace-nowrap bg-gray-900/90 text-white backdrop-blur-md text-base`
+  el.className = `fixed z-[9999] pointer-events-none px-5 py-2.5 border-2 rounded-full font-bold shadow-xl flex items-center gap-2.5 whitespace-nowrap backdrop-blur-md text-base`
+  el.style.background = 'color-mix(in srgb, var(--ui-bg-surface-raised) 94%, transparent)'
+  el.style.color = 'var(--ui-text-1)'
   el.style.borderColor = template.color
   el.innerHTML = `<span>${template.icon}</span><span>${template.label}</span>`
 
@@ -529,7 +527,7 @@ async function loadData() {
     }
   }
   catch (e) {
-    console.error('Failed to load workflow config', e)
+    console.error('加载流程配置失败:', e)
   }
   finally {
     loading.value = false
@@ -565,7 +563,7 @@ async function saveConfigData(scope: 'farm' | 'friend') {
       editingNodeId.value = null
     }
     else {
-      toast.error(`保存失败: ${res.data?.error}`)
+      toast.error(`保存失败: ${localizeRuntimeText(res.data?.error || '未知错误')}`)
     }
   }
   catch {
@@ -616,9 +614,9 @@ watch(() => currentAccountId.value, () => {
 </script>
 
 <template>
-  <div class="min-h-screen p-4 pb-28 space-y-6 md:p-6">
+  <div class="workflow-page ui-page-shell ui-page-density-relaxed min-h-full w-full pb-28 space-y-6">
     <!-- Header -->
-    <div class="flex flex-col justify-between gap-4 border-b border-gray-100/50 pb-4 md:flex-row md:items-center dark:border-gray-700/50">
+    <div class="workflow-header flex flex-col justify-between gap-4 pb-4 md:flex-row md:items-center">
       <div>
         <h1 class="glass-text-main flex items-center gap-2 text-2xl font-bold">
           <span class="text-primary-500 font-normal">🚀</span> 策略流程编排
@@ -627,30 +625,30 @@ watch(() => currentAccountId.value, () => {
           通过水平拖拽节点组织自动化流水线，高级弹簧交互，随心所欲定制策略。
         </p>
       </div>
-      <div>
+      <div class="ui-page-actions ui-bulk-actions">
         <BaseButton variant="outline" size="sm" :loading="loading" @click="loadData">
           刷新配置
         </BaseButton>
       </div>
     </div>
 
-    <div v-if="!currentAccountId" class="flex flex-1 flex-col items-center justify-center py-20 text-gray-400">
+    <div v-if="!currentAccountId" class="workflow-empty-state flex flex-1 flex-col items-center justify-center py-20">
       <div class="i-carbon-user-settings mb-4 text-4xl" />
       <p>请先在右上角选择指定账号</p>
     </div>
 
     <template v-else>
       <!-- ================= 农场流程 ================= -->
-      <div class="glass-panel overflow-hidden border border-white/20 rounded-xl shadow-sm dark:border-white/10 dark:bg-black/20">
+      <div class="workflow-lane-shell glass-panel overflow-hidden rounded-xl shadow-sm">
         <!-- Title Bar -->
-        <div class="flex flex-wrap items-center justify-between border-b border-gray-200/50 bg-black/5 p-4 dark:border-gray-700/50 dark:bg-white/5">
+        <div class="workflow-lane-header flex flex-wrap items-center justify-between p-4">
           <div class="flex items-center gap-3">
             <h2 class="glass-text-main flex items-center gap-2 text-base font-bold">
               <span>🚜</span> 农场流程编排
             </h2>
             <span
               class="rounded px-2 py-0.5 text-xs font-bold transition-colors"
-              :class="config.farm.enabled ? 'bg-primary-500/20 text-primary-600 dark:text-primary-400' : 'bg-gray-200/50 text-gray-500 dark:bg-gray-700/50'"
+              :class="config.farm.enabled ? 'workflow-enabled-badge ui-meta-chip--brand' : 'workflow-enabled-badge ui-meta-chip--neutral'"
             >
               {{ config.farm.enabled ? '已启用' : '未启用' }}
             </span>
@@ -660,32 +658,32 @@ watch(() => currentAccountId.value, () => {
 
         <div class="p-4 space-y-4">
           <!-- Description & Interval -->
-          <div class="text-xs text-gray-500 dark:text-gray-400">
+          <div class="workflow-note text-xs">
             启用后，巡田时按以下流程执行，未启用时使用传统模式。可拖拽节点调整顺序。
             推荐顺序: 阶段施肥 -> 等待成熟 -> 收获/铲除/种植
           </div>
 
-          <div class="grid grid-cols-2 gap-4 rounded-lg bg-black/5 p-3 md:w-1/2 dark:bg-white/5">
+          <div class="workflow-interval-card grid grid-cols-1 gap-4 rounded-lg p-3 sm:grid-cols-2 md:w-1/2">
             <div class="space-y-1">
-              <label class="text-xs text-gray-500 font-bold">最小间隔 (秒)</label>
+              <label class="workflow-label text-xs font-bold">最小间隔 (秒)</label>
               <input
                 v-model.number="config.farm.minInterval" type="number" min="1"
-                class="glass-panel w-full border border-white/20 rounded bg-transparent px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="workflow-input glass-panel w-full rounded bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
               >
             </div>
             <div class="space-y-1">
-              <label class="text-xs text-gray-500 font-bold">最大间隔 (秒)</label>
+              <label class="workflow-label text-xs font-bold">最大间隔 (秒)</label>
               <input
                 v-model.number="config.farm.maxInterval" type="number" min="1"
-                class="glass-panel w-full border border-white/20 rounded bg-transparent px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="workflow-input glass-panel w-full rounded bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
               >
             </div>
           </div>
 
           <!-- Status Bar -->
           <div
-            class="flex items-center justify-between border border-transparent rounded bg-black/5 px-3 py-2 text-xs transition-colors dark:bg-white/5"
-            :class="{ 'border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400': hasFarmChanges, 'border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400': !hasFarmChanges }"
+            class="workflow-status-banner flex flex-col items-start gap-2 rounded px-3 py-2 text-xs transition-colors sm:flex-row sm:items-center sm:justify-between"
+            :class="hasFarmChanges ? 'ui-meta-chip--warning' : 'ui-meta-chip--success'"
           >
             <div class="font-bold font-mono">
               {{ hasFarmChanges ? '农场流程有未保存改动' : '农场流程已就绪 (未保存改动)' }}
@@ -695,13 +693,41 @@ watch(() => currentAccountId.value, () => {
             </div>
           </div>
 
+          <div class="workflow-mobile-toolbar ui-mobile-sticky-panel ui-mobile-action-panel md:hidden">
+            <div class="workflow-mobile-toolbar-group">
+              <div class="workflow-mobile-toolbar-label">
+                快速添加节点
+              </div>
+              <div class="ui-bulk-actions">
+                <button
+                  v-for="tpl in farmTemplates" :key="tpl.type"
+                  class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
+                  :class="tpl.chipClass"
+                  @pointerdown="(e) => handlePointerDownPool(e, 'farm', tpl)"
+                >
+                  <span class="text-base">{{ tpl.icon }}</span>
+                  <span>{{ tpl.label }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="ui-bulk-actions">
+              <BaseButton variant="outline" size="sm" @click="resetDefault('farm')">
+                重置默认流程
+              </BaseButton>
+              <BaseButton variant="primary" size="sm" :loading="saving" @click="saveConfigData('farm')">
+                保存农场流程
+              </BaseButton>
+            </div>
+          </div>
+
           <!-- THE TRACK -->
           <div
             ref="farmTrackRef"
-            class="custom-scrollbar relative flex select-none items-center overflow-x-auto overflow-y-hidden border-y border-gray-200 border-dashed p-3 transition-colors dark:border-gray-800 sm:py-6"
-            :class="{ 'bg-primary-500/5 border-primary-500/30': isDragging && dragScope === 'farm' }"
+            class="workflow-track custom-scrollbar relative flex select-none items-center overflow-x-auto overflow-y-hidden p-3 transition-colors sm:py-6"
+            :class="{ 'workflow-track-active': isDragging && dragScope === 'farm' }"
           >
-            <div v-if="config.farm.nodes.length === 0" class="pointer-events-none py-4 pl-2 text-sm text-gray-400 italic">
+            <div v-if="config.farm.nodes.length === 0" class="workflow-track-empty pointer-events-none py-4 pl-2 text-sm italic">
               拖拽底部节点到这里，或者直接点击下方节点...
             </div>
 
@@ -709,12 +735,12 @@ watch(() => currentAccountId.value, () => {
               <template v-for="(node, idx) in config.farm.nodes" :key="node.id">
                 <div
                   v-if="isDragging && dragScope === 'farm' && dropPlaceholderIndex === idx"
-                  class="wf-ph mx-2 h-[36px] w-[80px] shrink-0 border-2 border-primary-500/50 rounded-full border-dashed bg-primary-500/10 transition-all"
+                  class="workflow-placeholder wf-ph mx-2 h-[36px] w-[80px] shrink-0 rounded-full border-dashed transition-all"
                 />
 
                 <template v-if="!(isDragging && dragSource === 'queue' && dragScope === 'farm' && dragIndex === idx)">
                   <!-- Arrow between nodes -->
-                  <div v-if="idx > 0 || (isDragging && dragScope === 'farm' && dropPlaceholderIndex === 0)" class="i-carbon-arrow-right wf-arrow mx-1 shrink-0 text-gray-300 dark:text-gray-600" />
+                  <div v-if="idx > 0 || (isDragging && dragScope === 'farm' && dropPlaceholderIndex === 0)" class="workflow-arrow i-carbon-arrow-right wf-arrow mx-1 shrink-0" />
 
                   <!-- Node Chip -->
                   <div
@@ -722,11 +748,9 @@ watch(() => currentAccountId.value, () => {
                     @pointerdown="(e) => handlePointerDownQueue(e, 'farm', idx)"
                   >
                     <div
-                      class="flex items-center gap-2 border rounded-full px-4 py-2 text-base font-bold shadow-sm transition-colors"
+                      class="workflow-node-chip flex items-center gap-2 rounded-full px-4 py-2 text-base font-bold shadow-sm transition-colors"
                       :class="[
-                        getTemplate(node.type)?.bgLight, getTemplate(node.type)?.bgDark,
-                        getTemplate(node.type)?.borderLight, getTemplate(node.type)?.borderDark,
-                        getTemplate(node.type)?.textLight, getTemplate(node.type)?.textDark,
+                        getTemplate(node.type)?.chipClass,
                         editingNodeId === node.id ? 'ring-2 ring-primary-500 shadow-md' : 'hover:shadow',
                       ]"
                     >
@@ -739,7 +763,7 @@ watch(() => currentAccountId.value, () => {
 
                     <!-- Delete button overlay map (visible on hover) -->
                     <button
-                      class="absolute z-10 h-5 w-5 flex items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow-sm transition-opacity -right-2 -top-2 hover:bg-red-600 group-hover:opacity-100"
+                      class="workflow-node-delete absolute z-10 h-5 w-5 flex items-center justify-center rounded-full opacity-0 shadow-sm transition-opacity -right-2 -top-2 group-hover:opacity-100"
                       @pointerdown.stop
                       @click="removeNode('farm', idx)"
                     >
@@ -748,7 +772,7 @@ watch(() => currentAccountId.value, () => {
                     <!-- Settings button if params -->
                     <button
                       v-if="getTemplate(node.type)?.hasParams"
-                      class="absolute z-10 h-5 w-5 flex items-center justify-center rounded-full bg-blue-500 text-white opacity-0 shadow-sm transition-opacity -bottom-2 -right-2 hover:bg-blue-600 group-hover:opacity-100"
+                      class="workflow-node-settings absolute z-10 h-5 w-5 flex items-center justify-center rounded-full opacity-0 shadow-sm transition-opacity -bottom-2 -right-2 group-hover:opacity-100"
                       @pointerdown.stop
                       @click="editingNodeId = editingNodeId === node.id ? null : node.id; editingScope = 'farm'"
                     >
@@ -761,17 +785,17 @@ watch(() => currentAccountId.value, () => {
               <!-- End placeholder -->
               <div
                 v-if="isDragging && dragScope === 'farm' && dropPlaceholderIndex === config.farm.nodes.length" key="ph-end"
-                class="wf-ph mx-2 h-[36px] w-[80px] shrink-0 border-2 border-primary-500/50 rounded-full border-dashed bg-primary-500/10 transition-all"
+                class="workflow-placeholder wf-ph mx-2 h-[36px] w-[80px] shrink-0 rounded-full border-dashed transition-all"
               />
             </TransitionGroup>
           </div>
 
           <!-- Inline Editor -->
-          <div v-if="editingScope === 'farm' && editingNodeId && activeNode" class="animate-in fade-in slide-in-from-top-2 relative border border-primary-500/20 rounded-lg bg-black/5 p-4 dark:bg-white/5">
-            <button class="absolute right-3 top-3 text-gray-400 hover:text-gray-600" @click="editingNodeId = null">
+          <div v-if="editingScope === 'farm' && editingNodeId && activeNode" class="workflow-editor animate-in fade-in slide-in-from-top-2 relative rounded-lg p-4">
+            <button class="workflow-editor-close absolute right-3 top-3" @click="editingNodeId = null">
               <div class="i-carbon-close text-lg" />
             </button>
-            <h3 class="mb-3 flex items-center gap-2 text-sm text-primary-600 font-bold dark:text-primary-400">
+            <h3 class="workflow-editor-title mb-3 flex items-center gap-2 text-sm font-bold">
               <div class="i-carbon-edit" />
               编辑节点: {{ getTemplate(activeNode.type)?.label }}
             </h3>
@@ -783,23 +807,23 @@ watch(() => currentAccountId.value, () => {
 
               <template v-if="activeNode.type === 'stage_fertilize'">
                 <div>
-                  <label class="mb-1 block text-xs text-gray-500 font-bold">阶段施肥模式</label>
-                  <select v-model="activeNode.params.mode" class="glass-panel max-w-[240px] w-full border border-white/20 rounded px-3 py-1.5 text-sm text-gray-700 outline-none dark:text-gray-200 focus:ring-2 focus:ring-primary-500/50">
-                    <option value="normal" class="bg-white dark:bg-gray-800">
+                  <label class="workflow-label mb-1 block text-xs font-bold">阶段施肥模式</label>
+                  <select v-model="activeNode.params.mode" class="workflow-select glass-panel max-w-[240px] w-full rounded px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500/50">
+                    <option value="normal">
                       仅普通化肥
                     </option>
-                    <option value="organic" class="bg-white dark:bg-gray-800">
+                    <option value="organic">
                       仅有机化肥
                     </option>
-                    <option value="both" class="bg-white dark:bg-gray-800">
+                    <option value="both">
                       双效(普通+有机)
                     </option>
                   </select>
                 </div>
                 <div>
-                  <label class="mb-2 block text-xs text-gray-500 font-bold">选择执行施肥的作物阶段</label>
+                  <label class="workflow-label mb-2 block text-xs font-bold">选择执行施肥的作物阶段</label>
                   <div class="flex flex-wrap gap-3">
-                    <label v-for="ph in [{ v: 'seed', l: '种子期' }, { v: 'sprout', l: '发芽期' }, { v: 'leaf', l: '小叶期' }, { v: 'big_leaf', l: '大叶期' }, { v: 'flower', l: '开花期' }]" :key="ph.v" class="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
+                    <label v-for="ph in [{ v: 'seed', l: '种子期' }, { v: 'sprout', l: '发芽期' }, { v: 'leaf', l: '小叶期' }, { v: 'big_leaf', l: '大叶期' }, { v: 'flower', l: '开花期' }]" :key="ph.v" class="workflow-checkbox-label flex items-center gap-1 text-sm">
                       <input v-model="activeNode.params.phases" type="checkbox" :value="ph.v" class="h-4 w-4 rounded accent-primary-500">
                       {{ ph.l }}
                     </label>
@@ -815,15 +839,15 @@ watch(() => currentAccountId.value, () => {
 
               <template v-if="activeNode.type === 'select_seed'">
                 <div class="max-w-[240px] w-full">
-                  <label class="mb-1 block text-xs text-gray-500 font-bold">选种策略</label>
-                  <select v-model="activeNode.params.strategy" class="glass-panel w-full border border-white/20 rounded px-3 py-1.5 text-sm text-gray-700 outline-none dark:text-gray-200 focus:ring-2 focus:ring-primary-500/50">
-                    <option value="preferred" class="bg-white dark:bg-gray-800">
+                  <label class="workflow-label mb-1 block text-xs font-bold">选种策略</label>
+                  <select v-model="activeNode.params.strategy" class="workflow-select glass-panel w-full rounded px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500/50">
+                    <option value="preferred">
                       设置项中优先选择
                     </option>
-                    <option value="max_profit" class="bg-white dark:bg-gray-800">
+                    <option value="max_profit">
                       理论时润最高
                     </option>
-                    <option value="max_exp" class="bg-white dark:bg-gray-800">
+                    <option value="max_exp">
                       理论时经最高
                     </option>
                   </select>
@@ -833,12 +857,13 @@ watch(() => currentAccountId.value, () => {
           </div>
 
           <!-- Bottom Toolbar -->
-          <div class="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div class="mt-2 hidden flex-col justify-between gap-4 md:flex md:flex-row md:items-center">
             <div class="flex flex-1 flex-wrap items-center gap-2.5">
-              <span class="whitespace-nowrap text-base text-gray-400 font-bold">添加节点:</span>
+              <span class="workflow-pool-label whitespace-nowrap text-base font-bold">添加节点:</span>
               <button
                 v-for="tpl in farmTemplates" :key="tpl.type"
-                class="flex cursor-grab items-center gap-2 border border-gray-300 rounded-lg bg-white/50 px-4 py-1.5 text-sm text-gray-600 font-bold shadow-sm transition-colors active:cursor-grabbing dark:border-gray-600 hover:border-primary-500 dark:bg-black/30 hover:bg-white dark:text-gray-300 dark:hover:bg-black"
+                class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
+                :class="tpl.chipClass"
                 @pointerdown="(e) => handlePointerDownPool(e, 'farm', tpl)"
               >
                 <span class="text-base">{{ tpl.icon }}</span>
@@ -858,16 +883,16 @@ watch(() => currentAccountId.value, () => {
       </div>
 
       <!-- ================= 好友流程 ================= -->
-      <div class="glass-panel overflow-hidden border border-white/20 rounded-xl shadow-sm dark:border-white/10 dark:bg-black/20">
+      <div class="workflow-lane-shell glass-panel overflow-hidden rounded-xl shadow-sm">
         <!-- Title Bar -->
-        <div class="flex flex-wrap items-center justify-between border-b border-gray-200/50 bg-black/5 p-4 dark:border-gray-700/50 dark:bg-white/5">
+        <div class="workflow-lane-header flex flex-wrap items-center justify-between p-4">
           <div class="flex items-center gap-3">
             <h2 class="glass-text-main flex items-center gap-2 text-base font-bold">
               <span>🤝</span> 好友巡查流程编排
             </h2>
             <span
               class="rounded px-2 py-0.5 text-xs font-bold transition-colors"
-              :class="config.friend.enabled ? 'bg-primary-500/20 text-primary-600 dark:text-primary-400' : 'bg-gray-200/50 text-gray-500 dark:bg-gray-700/50'"
+              :class="config.friend.enabled ? 'workflow-enabled-badge ui-meta-chip--brand' : 'workflow-enabled-badge ui-meta-chip--neutral'"
             >
               {{ config.friend.enabled ? '已启用' : '未启用' }}
             </span>
@@ -876,31 +901,31 @@ watch(() => currentAccountId.value, () => {
         </div>
 
         <div class="p-4 space-y-4">
-          <div class="text-xs text-gray-500 dark:text-gray-400">
+          <div class="workflow-note text-xs">
             启用后，拜访每位好友时按以下流程依次执行操作。未启用时使用默认顺序（除草->浇水->除虫->偷菜->放虫->放草）。
           </div>
 
-          <div class="grid grid-cols-2 gap-4 rounded-lg bg-black/5 p-3 md:w-1/2 dark:bg-white/5">
+          <div class="workflow-interval-card grid grid-cols-1 gap-4 rounded-lg p-3 sm:grid-cols-2 md:w-1/2">
             <div class="space-y-1">
-              <label class="text-xs text-gray-500 font-bold">最小间隔 (秒)</label>
+              <label class="workflow-label text-xs font-bold">最小间隔 (秒)</label>
               <input
                 v-model.number="config.friend.minInterval" type="number" min="1"
-                class="glass-panel w-full border border-white/20 rounded bg-transparent px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="workflow-input glass-panel w-full rounded bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
               >
             </div>
             <div class="space-y-1">
-              <label class="text-xs text-gray-500 font-bold">最大间隔 (秒)</label>
+              <label class="workflow-label text-xs font-bold">最大间隔 (秒)</label>
               <input
                 v-model.number="config.friend.maxInterval" type="number" min="1"
-                class="glass-panel w-full border border-white/20 rounded bg-transparent px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="workflow-input glass-panel w-full rounded bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
               >
             </div>
           </div>
 
           <!-- Status Bar -->
           <div
-            class="flex items-center justify-between border border-transparent rounded bg-black/5 px-3 py-2 text-xs transition-colors dark:bg-white/5"
-            :class="{ 'border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400': hasFriendChanges, 'border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400': !hasFriendChanges }"
+            class="workflow-status-banner flex flex-col items-start gap-2 rounded px-3 py-2 text-xs transition-colors sm:flex-row sm:items-center sm:justify-between"
+            :class="hasFriendChanges ? 'ui-meta-chip--warning' : 'ui-meta-chip--success'"
           >
             <div class="font-bold font-mono">
               {{ hasFriendChanges ? '好友流程有未保存改动' : '好友流程已就绪 (未手保存改动)' }}
@@ -910,13 +935,41 @@ watch(() => currentAccountId.value, () => {
             </div>
           </div>
 
+          <div class="workflow-mobile-toolbar ui-mobile-sticky-panel ui-mobile-action-panel md:hidden">
+            <div class="workflow-mobile-toolbar-group">
+              <div class="workflow-mobile-toolbar-label">
+                快速添加节点
+              </div>
+              <div class="ui-bulk-actions">
+                <button
+                  v-for="tpl in friendTemplates" :key="tpl.type"
+                  class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
+                  :class="tpl.chipClass"
+                  @pointerdown="(e) => handlePointerDownPool(e, 'friend', tpl)"
+                >
+                  <span class="text-base">{{ tpl.icon }}</span>
+                  <span>{{ tpl.label }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="ui-bulk-actions">
+              <BaseButton variant="outline" size="sm" @click="resetDefault('friend')">
+                重置默认流程
+              </BaseButton>
+              <BaseButton variant="primary" size="sm" :loading="saving" @click="saveConfigData('friend')">
+                保存好友流程
+              </BaseButton>
+            </div>
+          </div>
+
           <!-- THE TRACK -->
           <div
             ref="friendTrackRef"
-            class="custom-scrollbar relative flex select-none items-center overflow-x-auto overflow-y-hidden border-y border-gray-200 border-dashed p-3 transition-colors dark:border-gray-800 sm:py-6"
-            :class="{ 'bg-primary-500/5 border-primary-500/30': isDragging && dragScope === 'friend' }"
+            class="workflow-track custom-scrollbar relative flex select-none items-center overflow-x-auto overflow-y-hidden p-3 transition-colors sm:py-6"
+            :class="{ 'workflow-track-active': isDragging && dragScope === 'friend' }"
           >
-            <div v-if="config.friend.nodes.length === 0" class="pointer-events-none py-4 pl-2 text-sm text-gray-400 italic">
+            <div v-if="config.friend.nodes.length === 0" class="workflow-track-empty pointer-events-none py-4 pl-2 text-sm italic">
               拖拽底部节点到这里，或者直接点击下方节点...
             </div>
 
@@ -924,22 +977,20 @@ watch(() => currentAccountId.value, () => {
               <template v-for="(node, idx) in config.friend.nodes" :key="node.id">
                 <div
                   v-if="isDragging && dragScope === 'friend' && dropPlaceholderIndex === idx"
-                  class="wf-ph mx-2 h-[36px] w-[80px] shrink-0 border-2 border-primary-500/50 rounded-full border-dashed bg-primary-500/10 transition-all"
+                  class="workflow-placeholder wf-ph mx-2 h-[36px] w-[80px] shrink-0 rounded-full border-dashed transition-all"
                 />
 
                 <template v-if="!(isDragging && dragSource === 'queue' && dragScope === 'friend' && dragIndex === idx)">
-                  <div v-if="idx > 0 || (isDragging && dragScope === 'friend' && dropPlaceholderIndex === 0)" class="i-carbon-arrow-right wf-arrow mx-1 shrink-0 text-gray-300 dark:text-gray-600" />
+                  <div v-if="idx > 0 || (isDragging && dragScope === 'friend' && dropPlaceholderIndex === 0)" class="workflow-arrow i-carbon-arrow-right wf-arrow mx-1 shrink-0" />
 
                   <div
                     class="group wf-node-track-item relative shrink-0 cursor-grab transition-transform hover:scale-105 active:cursor-grabbing hover:-translate-y-1"
                     @pointerdown="(e) => handlePointerDownQueue(e, 'friend', idx)"
                   >
                     <div
-                      class="flex items-center gap-2 border rounded-full px-4 py-2 text-base font-bold shadow-sm transition-colors"
+                      class="workflow-node-chip flex items-center gap-2 rounded-full px-4 py-2 text-base font-bold shadow-sm transition-colors"
                       :class="[
-                        getTemplate(node.type)?.bgLight, getTemplate(node.type)?.bgDark,
-                        getTemplate(node.type)?.borderLight, getTemplate(node.type)?.borderDark,
-                        getTemplate(node.type)?.textLight, getTemplate(node.type)?.textDark,
+                        getTemplate(node.type)?.chipClass,
                         editingNodeId === node.id ? 'ring-2 ring-primary-500 shadow-md' : 'hover:shadow',
                       ]"
                     >
@@ -948,7 +999,7 @@ watch(() => currentAccountId.value, () => {
                     </div>
 
                     <button
-                      class="absolute z-10 h-5 w-5 flex items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow-sm transition-opacity -right-2 -top-2 hover:bg-red-600 group-hover:opacity-100"
+                      class="workflow-node-delete absolute z-10 h-5 w-5 flex items-center justify-center rounded-full opacity-0 shadow-sm transition-opacity -right-2 -top-2 group-hover:opacity-100"
                       @pointerdown.stop
                       @click="removeNode('friend', idx)"
                     >
@@ -956,7 +1007,7 @@ watch(() => currentAccountId.value, () => {
                     </button>
                     <button
                       v-if="getTemplate(node.type)?.hasParams"
-                      class="absolute z-10 h-5 w-5 flex items-center justify-center rounded-full bg-blue-500 text-white opacity-0 shadow-sm transition-opacity -bottom-2 -right-2 hover:bg-blue-600 group-hover:opacity-100"
+                      class="workflow-node-settings absolute z-10 h-5 w-5 flex items-center justify-center rounded-full opacity-0 shadow-sm transition-opacity -bottom-2 -right-2 group-hover:opacity-100"
                       @pointerdown.stop
                       @click="editingNodeId = editingNodeId === node.id ? null : node.id; editingScope = 'friend'"
                     >
@@ -968,17 +1019,17 @@ watch(() => currentAccountId.value, () => {
 
               <div
                 v-if="isDragging && dragScope === 'friend' && dropPlaceholderIndex === config.friend.nodes.length" key="ph-end"
-                class="wf-ph mx-2 h-[36px] w-[80px] shrink-0 border-2 border-primary-500/50 rounded-full border-dashed bg-primary-500/10 transition-all"
+                class="workflow-placeholder wf-ph mx-2 h-[36px] w-[80px] shrink-0 rounded-full border-dashed transition-all"
               />
             </TransitionGroup>
           </div>
 
           <!-- Inline Editor -->
-          <div v-if="editingScope === 'friend' && editingNodeId && activeNode" class="animate-in fade-in slide-in-from-top-2 relative border border-primary-500/20 rounded-lg bg-black/5 p-4 dark:bg-white/5">
-            <button class="absolute right-3 top-3 text-gray-400 hover:text-gray-600" @click="editingNodeId = null">
+          <div v-if="editingScope === 'friend' && editingNodeId && activeNode" class="workflow-editor animate-in fade-in slide-in-from-top-2 relative rounded-lg p-4">
+            <button class="workflow-editor-close absolute right-3 top-3" @click="editingNodeId = null">
               <div class="i-carbon-close text-lg" />
             </button>
-            <h3 class="mb-3 flex items-center gap-2 text-sm text-primary-600 font-bold dark:text-primary-400">
+            <h3 class="workflow-editor-title mb-3 flex items-center gap-2 text-sm font-bold">
               <div class="i-carbon-edit" />
               编辑节点: {{ getTemplate(activeNode.type)?.label }}
             </h3>
@@ -993,12 +1044,13 @@ watch(() => currentAccountId.value, () => {
           </div>
 
           <!-- Bottom Toolbar -->
-          <div class="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div class="mt-2 hidden flex-col justify-between gap-4 md:flex md:flex-row md:items-center">
             <div class="flex flex-1 flex-wrap items-center gap-2.5">
-              <span class="whitespace-nowrap text-base text-gray-400 font-bold">添加节点:</span>
+              <span class="workflow-pool-label whitespace-nowrap text-base font-bold">添加节点:</span>
               <button
                 v-for="tpl in friendTemplates" :key="tpl.type"
-                class="flex cursor-grab items-center gap-2 border border-gray-300 rounded-lg bg-white/50 px-4 py-1.5 text-sm text-gray-600 font-bold shadow-sm transition-colors active:cursor-grabbing dark:border-gray-600 hover:border-primary-500 dark:bg-black/30 hover:bg-white dark:text-gray-300 dark:hover:bg-black"
+                class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
+                :class="tpl.chipClass"
                 @pointerdown="(e) => handlePointerDownPool(e, 'friend', tpl)"
               >
                 <span class="text-base">{{ tpl.icon }}</span>
@@ -1021,22 +1073,213 @@ watch(() => currentAccountId.value, () => {
 </template>
 
 <style scoped>
+.workflow-page {
+  color: var(--ui-text-1);
+}
+
+.workflow-page
+  :is(
+    [class*='text-'][class*='gray-300'],
+    [class*='text-'][class*='gray-400'],
+    [class*='text-'][class*='gray-500'],
+    .glass-text-muted
+  ) {
+  color: var(--ui-text-2) !important;
+}
+
+.workflow-page
+  :is(
+    [class*='text-'][class*='gray-200'],
+    [class*='text-'][class*='gray-100'],
+    [class*='text-'][class*='slate-300'],
+    [class*='text-'][class*='slate-200']
+  ) {
+  color: var(--ui-text-1) !important;
+}
+
+.workflow-page
+  :is(
+    [class*='text-'][class*='white/95'],
+    [class*='text-'][class*='white/90'],
+    [class*='text-'][class*='white/85'],
+    [class*='text-'][class*='white/80']
+  ) {
+  color: color-mix(in srgb, var(--ui-text-1) 90%, var(--ui-text-on-brand) 10%) !important;
+}
+
+.workflow-page [class*='border-'][class*='white/20'],
+.workflow-page [class*='border-'][class*='white/10'],
+.workflow-page [class*='border-'][class*='gray-200/50'],
+.workflow-page [class*='dark:border-'][class*='gray-700/50'],
+.workflow-page [class*='border-'][class*='gray-200'],
+.workflow-page [class*='border-'][class*='gray-300'],
+.workflow-page [class*='dark:border-'][class*='gray-700'],
+.workflow-page [class*='dark:border-'][class*='gray-800'] {
+  border-color: var(--ui-border-subtle) !important;
+}
+
+.workflow-page [class*='bg-'][class*='black/5'],
+.workflow-page [class*='bg-'][class*='white/5'],
+.workflow-page [class*='dark:bg-'][class*='black/20'],
+.workflow-page [class*='dark:bg-'][class*='black/30'],
+.workflow-page [class*='bg-'][class*='white/50'],
+.workflow-page [class*='bg-'][class*='gray-200/50'],
+.workflow-page [class*='dark:bg-'][class*='gray-700/50'] {
+  background-color: var(--ui-bg-surface) !important;
+}
+
+.workflow-header {
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+
+.workflow-empty-state,
+.workflow-note,
+.workflow-label,
+.workflow-track-empty,
+.workflow-pool-label,
+.workflow-mobile-toolbar-label {
+  color: var(--ui-text-2);
+}
+
+.workflow-lane-shell,
+.workflow-interval-card,
+.workflow-track,
+.workflow-editor,
+.workflow-input,
+.workflow-select {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent);
+}
+
+.workflow-lane-header {
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 74%, transparent);
+}
+
+.workflow-enabled-badge {
+  border-width: 1px;
+  border-style: solid;
+}
+
+.workflow-status-banner {
+  border-width: 1px;
+  border-style: solid;
+}
+
+.workflow-track {
+  border-top: 1px dashed var(--ui-border-subtle);
+  border-bottom: 1px dashed var(--ui-border-subtle);
+}
+
+.workflow-track-active {
+  background: color-mix(in srgb, var(--ui-brand-500) 6%, var(--ui-bg-surface-raised));
+  border-color: color-mix(in srgb, var(--ui-brand-500) 30%, var(--ui-border-subtle));
+}
+
+.workflow-placeholder {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 50%, transparent);
+  background: color-mix(in srgb, var(--ui-brand-500) 10%, var(--ui-bg-surface-raised));
+}
+
+.workflow-arrow {
+  color: var(--ui-text-3);
+}
+
+.workflow-node-chip {
+  border-width: 1px;
+  border-style: solid;
+}
+
+.workflow-pool-chip {
+  border-width: 1px;
+  border-style: solid;
+}
+
+.workflow-node-delete {
+  background: var(--ui-status-danger);
+  color: var(--ui-text-on-brand);
+}
+
+.workflow-node-delete:hover {
+  background: color-mix(in srgb, var(--ui-status-danger) 88%, black 12%);
+}
+
+.workflow-node-settings {
+  background: var(--ui-status-info);
+  color: var(--ui-text-on-brand);
+}
+
+.workflow-node-settings:hover {
+  background: color-mix(in srgb, var(--ui-status-info) 88%, black 12%);
+}
+
+.workflow-editor {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 20%, var(--ui-border-subtle));
+}
+
+.workflow-editor-close {
+  color: var(--ui-text-2);
+}
+
+.workflow-editor-close:hover {
+  color: var(--ui-text-1);
+}
+
+.workflow-editor-title {
+  color: var(--ui-brand-700);
+}
+
+.workflow-checkbox-label {
+  color: var(--ui-text-2);
+}
+
+.workflow-input,
+.workflow-select {
+  color: var(--ui-text-1);
+}
+
+.workflow-mobile-toolbar {
+  z-index: 12;
+  display: grid;
+  gap: 0.85rem;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 1rem;
+  padding: 0.9rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 90%, transparent);
+}
+
+.workflow-mobile-toolbar-group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.workflow-mobile-toolbar-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workflow-pool-chip:hover {
+  filter: brightness(1.02);
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   height: 8px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--ui-bg-surface);
   border-radius: 4px;
 }
 .dark .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--ui-bg-surface);
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--ui-scrollbar-thumb);
   border-radius: 4px;
 }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--ui-scrollbar-thumb);
 }
 
 .wf-horizontal-move {

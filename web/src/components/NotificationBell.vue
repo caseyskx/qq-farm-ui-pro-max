@@ -23,19 +23,25 @@ function togglePanel() {
     lastReadTime.value = Date.now()
   }
 }
+
+function getLogTagClass(log: { tag?: string, isWarn?: boolean }) {
+  return log.tag === '错误' || log.isWarn
+    ? 'notification-bell-tag notification-bell-tag--danger'
+    : 'notification-bell-tag notification-bell-tag--info'
+}
 </script>
 
 <template>
   <div class="relative">
     <button
-      class="glass-panel glass-text-main h-10 w-10 flex items-center justify-center border rounded-full shadow-md transition-all duration-300 hover:rotate-12 hover:text-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary dark:focus:ring-offset-gray-900"
+      class="notification-bell-trigger glass-panel glass-text-main h-10 w-10 flex items-center justify-center border rounded-full shadow-md transition-all duration-300 hover:rotate-12 hover:text-primary focus:outline-none"
       title="系统通知"
       @click="togglePanel"
     >
       <div class="i-carbon-notification text-xl" />
       <span v-if="unreadCount > 0" class="absolute right-0 top-0 h-3 w-3 flex">
-        <span class="absolute h-full w-full inline-flex animate-ping rounded-full bg-red-400 opacity-75" />
-        <span class="relative h-3 w-3 inline-flex rounded-full bg-red-500" />
+        <span class="notification-bell-dot-ping absolute h-full w-full inline-flex animate-ping rounded-full opacity-75" />
+        <span class="notification-bell-dot-core relative h-3 w-3 inline-flex rounded-full" />
       </span>
     </button>
 
@@ -49,12 +55,12 @@ function togglePanel() {
       leave-to-class="opacity-0 translate-y-1 scale-95"
     >
       <!-- Ensure z-50 for overlapping everything -->
-      <div v-if="showPanel" class="glass-panel absolute right-0 top-12 z-50 mt-2 w-80 overflow-hidden border border-white/20 rounded-xl shadow-2xl dark:border-white/10">
-        <div class="flex items-center justify-between border-b border-gray-200/50 bg-black/5 px-4 py-3 dark:border-white/10 dark:bg-black/20">
+      <div v-if="showPanel" class="notification-bell-panel glass-panel absolute right-0 top-12 z-50 mt-2 w-80 overflow-hidden border rounded-xl shadow-2xl">
+        <div class="notification-bell-header flex items-center justify-between px-4 py-3">
           <h3 class="glass-text-main flex items-center gap-2 text-sm font-bold">
             <div class="i-carbon-notification text-base text-primary" /> 系统消息公告
           </h3>
-          <button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" @click="showPanel = false">
+          <button class="notification-bell-close glass-text-muted hover:glass-text-main" @click="showPanel = false">
             <div class="i-carbon-close" />
           </button>
         </div>
@@ -63,9 +69,9 @@ function togglePanel() {
             📭 暂无活动记录或系统通知
           </div>
           <template v-else>
-            <div v-for="(log, idx) in alertLogs" :key="idx" class="flex flex-col gap-1 border border-white/10 rounded-lg bg-black/5 p-3 text-xs shadow-sm transition-colors dark:border-white/5 dark:bg-black/20 hover:bg-black/10 lg:text-[13px] dark:hover:bg-black/30">
+            <div v-for="(log, idx) in alertLogs" :key="idx" class="notification-bell-item flex flex-col gap-1 rounded-lg p-3 text-xs shadow-sm transition-colors lg:text-[13px]">
               <div class="flex items-center justify-between">
-                <span class="flex items-center gap-1 font-bold" :class="log.tag === '错误' || log.isWarn ? 'text-red-500' : 'text-blue-500'">
+                <span class="flex items-center gap-1 font-bold" :class="getLogTagClass(log)">
                   <div :class="log.tag === '错误' || log.isWarn ? 'i-carbon-warning-alt' : 'i-carbon-information'" />
                   [{{ log.tag }}]
                 </span>
@@ -86,6 +92,55 @@ function togglePanel() {
 </template>
 
 <style scoped>
+.notification-bell-trigger,
+.notification-bell-panel,
+.notification-bell-item {
+  border-color: var(--ui-border-subtle);
+}
+
+.notification-bell-trigger:focus-visible,
+.notification-bell-close:focus-visible {
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.notification-bell-panel {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent);
+}
+
+.notification-bell-header {
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 66%, transparent);
+}
+
+.notification-bell-close {
+  border-radius: 999px;
+  padding: 0.25rem;
+}
+
+.notification-bell-item {
+  background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent);
+}
+
+.notification-bell-item:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+}
+
+.notification-bell-dot-ping {
+  background: color-mix(in srgb, var(--ui-status-danger) 72%, transparent);
+}
+
+.notification-bell-dot-core {
+  background: var(--ui-status-danger);
+}
+
+.notification-bell-tag--danger {
+  color: var(--ui-status-danger);
+}
+
+.notification-bell-tag--info {
+  color: var(--ui-status-info);
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
@@ -93,10 +148,10 @@ function togglePanel() {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
+  background-color: color-mix(in srgb, var(--ui-scrollbar-thumb) 70%, transparent);
   border-radius: 4px;
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.5);
+  background-color: color-mix(in srgb, var(--ui-scrollbar-thumb-hover) 82%, transparent);
 }
 </style>

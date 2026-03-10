@@ -1,13 +1,38 @@
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
+const process = require('node:process');
 const { getDataFile, ensureDataDir } = require('../config/runtime-paths');
 const { CARD_TYPES, isValidCardType, getDefaultDaysForType } = require('../config/card-types');
 const { logUserAction } = require('../utils/logger');
+const { createModuleLogger } = require('../services/logger');
 
 const { getPool, transaction } = require('../services/mysql-db');
+const { getSystemSetting, setSystemSetting, SYSTEM_SETTING_KEYS } = require('../services/system-settings');
 
 const TRIAL_IP_FILE = getDataFile('trial-ip-history.json');
+const TRIAL_IP_HISTORY_SETTING_KEY = SYSTEM_SETTING_KEYS.TRIAL_IP_HISTORY;
+const userStoreLogger = createModuleLogger('user-store');
+const verboseAuthLogsEnabled = String(process.env.FARM_VERBOSE_AUTH_LOGS || '') === '1';
+
+function logUserStoreError(message, error, meta = {}) {
+    userStoreLogger.error(message, {
+        ...meta,
+        error: error && error.message ? error.message : String(error || ''),
+    });
+}
+
+function logUserStoreInfo(message, meta = {}) {
+    userStoreLogger.info(message, meta);
+}
+
+function logUserStoreWarn(message, meta = {}) {
+    userStoreLogger.warn(message, meta);
+}
+
+function logAuthVerbose(message, meta = {}) {
+    if (!verboseAuthLogsEnabled) return;
+    userStoreLogger.info(message, meta);
+}
 
 const security = require('../services/security');
 
@@ -54,6 +79,8 @@ function generateTrialCardCode() {
 const trialCardIPMap = new Map();
 let trialCardDailyTotal = 0;
 let trialCardDailyDate = '';
+let _trialIpHistoryLoaded = false;
+let _trialIpHistoryLoadPromise = null;
 
 /**
  * 获取今天的日期字符串（用于日计数器重置）
@@ -79,46 +106,116 @@ function resetDailyCounterIfNeeded() {
                 changed = true;
             }
         }
-        if (changed) saveIPHistory();
+        if (changed) {
+            void saveIPHistory().catch((e) => {
+                logUserStoreError('保存体验卡 IP 记录失败', e);
+            });
+        }
     }
 }
 
-function loadIPHistory() {
+function buildTrialIpHistorySnapshot() {
+    return {
+        dailyTotal: trialCardDailyTotal,
+        dailyDate: trialCardDailyDate,
+        ipMap: Object.fromEntries(trialCardIPMap),
+    };
+}
+
+function applyTrialIpHistorySnapshot(data) {
+    const payload = (data && typeof data === 'object') ? data : {};
+    trialCardDailyTotal = Number(payload.dailyTotal) || 0;
+    trialCardDailyDate = String(payload.dailyDate || '');
+    trialCardIPMap.clear();
+
+    if (payload.ipMap && typeof payload.ipMap === 'object') {
+        const now = Date.now();
+        for (const [ip, info] of Object.entries(payload.ipMap)) {
+            if (!info || typeof info !== 'object') continue;
+            const lastCreatedAt = Number(info.lastCreatedAt) || 0;
+            if (!lastCreatedAt) continue;
+            // 只加载 24 小时内的记录
+            if (now - lastCreatedAt < 24 * 60 * 60 * 1000) {
+                trialCardIPMap.set(ip, { lastCreatedAt });
+            }
+        }
+    }
+
+    resetDailyCounterIfNeeded();
+}
+
+function loadIPHistoryFromFile() {
     ensureDataDir();
     try {
         if (fs.existsSync(TRIAL_IP_FILE)) {
             const data = JSON.parse(fs.readFileSync(TRIAL_IP_FILE, 'utf8'));
-            trialCardDailyTotal = data.dailyTotal || 0;
-            trialCardDailyDate = data.dailyDate || '';
-
-            if (data.ipMap) {
-                const now = Date.now();
-                for (const [ip, info] of Object.entries(data.ipMap)) {
-                    // 只加载 24 小时内的记录
-                    if (now - info.lastCreatedAt < 24 * 60 * 60 * 1000) {
-                        trialCardIPMap.set(ip, info);
-                    }
-                }
-            }
-            resetDailyCounterIfNeeded();
+            applyTrialIpHistorySnapshot(data);
+            return true;
         }
     } catch (e) {
-        console.error('加载体验卡 IP 记录失败:', e.message);
+        logUserStoreError('加载体验卡 IP 记录失败', e);
     }
+    return false;
 }
 
-function saveIPHistory() {
-    ensureDataDir();
+async function loadIPHistoryFromDB() {
+    const data = await getSystemSetting(TRIAL_IP_HISTORY_SETTING_KEY);
+    if (data && typeof data === 'object') {
+        applyTrialIpHistorySnapshot(data);
+        return true;
+    }
+    return false;
+}
+
+async function ensureTrialIpHistoryLoaded() {
+    if (_trialIpHistoryLoaded) {
+        return;
+    }
+    if (_trialIpHistoryLoadPromise) {
+        await _trialIpHistoryLoadPromise;
+        return;
+    }
+
+    _trialIpHistoryLoadPromise = (async () => {
+        let loaded = false;
+        try {
+            loaded = await loadIPHistoryFromDB();
+        } catch (e) {
+            logUserStoreError('从数据库加载体验卡 IP 记录失败', e);
+        }
+
+        if (!loaded) {
+            loaded = loadIPHistoryFromFile();
+            if (loaded) {
+                try {
+                    await saveIPHistory();
+                } catch (e) {
+                    logUserStoreError('迁移体验卡 IP 记录到数据库失败', e);
+                }
+            } else {
+                resetDailyCounterIfNeeded();
+                try {
+                    await saveIPHistory();
+                } catch (e) {
+                    logUserStoreError('初始化体验卡 IP 记录到数据库失败', e);
+                }
+            }
+        }
+
+        _trialIpHistoryLoaded = true;
+        _trialIpHistoryLoadPromise = null;
+    })();
+
+    await _trialIpHistoryLoadPromise;
+}
+
+async function saveIPHistory() {
+    const data = buildTrialIpHistorySnapshot();
     try {
-        const ipData = Object.fromEntries(trialCardIPMap);
-        const data = {
-            dailyTotal: trialCardDailyTotal,
-            dailyDate: trialCardDailyDate,
-            ipMap: ipData
-        };
-        fs.writeFileSync(TRIAL_IP_FILE, JSON.stringify(data, null, 2), 'utf8');
+        await setSystemSetting(TRIAL_IP_HISTORY_SETTING_KEY, data);
     } catch (e) {
-        console.error('保存体验卡 IP 记录失败:', e.message);
+        logUserStoreError('保存体验卡 IP 记录到数据库失败', e);
+        throw e;
     }
 }
 
@@ -128,6 +225,7 @@ function saveIPHistory() {
  * @returns {{ ok: boolean, code?: string, error?: string, retryAfterMs?: number }}
  */
 async function createTrialCard(clientIP) {
+    await ensureTrialIpHistoryLoaded();
     const store = require('./store');
     const config = store.getTrialCardConfig();
 
@@ -153,7 +251,7 @@ async function createTrialCard(clientIP) {
     }
 
     // 生成体验卡
-    const days = config.days || 1;
+    const days = normalizeCardDaysByType(config.days, CARD_TYPES.TRIAL);
     const trialCode = generateTrialCardCode();
     const card = await createCard({
         description: '体验卡（自动生成）',
@@ -170,7 +268,7 @@ async function createTrialCard(clientIP) {
     // 更新 IP 缓存和日计数
     trialCardIPMap.set(clientIP, { lastCreatedAt: now });
     trialCardDailyTotal++;
-    saveIPHistory();
+    await saveIPHistory();
 
     return { ok: true, code: card.code, days };
 }
@@ -201,7 +299,7 @@ async function renewTrialUser(username, callerRole) {
     }
 
     // 自动生成体验卡 → 续费
-    const days = config.days || 1;
+    const days = normalizeCardDaysByType(config.days, CARD_TYPES.TRIAL);
     const trialCode = generateTrialCardCode();
     const newCard = await createCard({
         description: '体验卡续费（自动）',
@@ -219,7 +317,7 @@ async function renewTrialUser(username, callerRole) {
         try {
             await deleteCard(newCard.code, 'system');
         } catch (cleanupError) {
-            console.error('体验卡续费失败后的回滚清理失败:', cleanupError.message);
+            logUserStoreError('体验卡续费失败后的回滚清理失败', cleanupError);
         }
     }
     return result;
@@ -270,10 +368,38 @@ function normalizeCardDaysByType(days, type) {
     }
 
     const parsed = Number.parseInt(days, 10);
+    if (type === CARD_TYPES.TRIAL && parsed === 0) {
+        return 0;
+    }
     if (Number.isFinite(parsed) && parsed > 0) {
         return parsed;
     }
     return getDefaultDaysForType(type);
+}
+
+function getStoredCardDays(card) {
+    if (!card || typeof card !== 'object') {
+        return null;
+    }
+
+    if (card.days !== undefined && card.days !== null) {
+        const parsed = Number(card.days);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+
+    return getDefaultDaysForType(card.type);
+}
+
+function isPermanentCardRecord(card) {
+    if (!card || typeof card !== 'object') {
+        return false;
+    }
+    if (card.type === CARD_TYPES.FOREVER) {
+        return true;
+    }
+    return card.type === CARD_TYPES.TRIAL && getStoredCardDays(card) === 0;
 }
 
 function generateCardBatchNo() {
@@ -523,7 +649,7 @@ function getTrialMaxAccounts() {
     try {
         const store = require('./store');
         return store.getTrialCardConfig().maxAccounts || 1;
-    } catch (e) {
+    } catch {
         return 1;
     }
 }
@@ -589,16 +715,19 @@ async function loadUsers() {
                         );
                     }
                 });
-                console.log(`[用户系统] 已修复 ${repairs.length} 条卡密 expires_at 历史记录`);
+                logUserStoreInfo('已修复卡密过期时间历史记录', {
+                    repairedCount: repairs.length,
+                });
             } catch (repairError) {
-                console.error('修复卡密 expires_at 历史记录失败:', repairError.message);
+                logUserStoreError('修复卡密过期时间历史记录失败', repairError);
             }
         }
-    } catch (e) { console.error('加载用户数据失败:', e.message); }
+    } catch (e) {
+        logUserStoreError('加载用户数据失败', e);
+    }
 }
 
 async function saveUsers() {
-    const pool = getPool();
     try {
         await transaction(async (conn) => {
             for (const u of users) {
@@ -609,7 +738,7 @@ async function saveUsers() {
             }
         });
     } catch (e) {
-        console.error('保存用户数据失败:', e.message);
+        logUserStoreError('保存用户数据失败', e);
     }
 }
 
@@ -637,11 +766,12 @@ async function loadCards() {
             updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : new Date(r.created_at).getTime(),
             expiresAt: r.expires_at ? new Date(r.expires_at).getTime() : null
         }));
-    } catch (e) { console.error('加载卡密数据失败:', e.message); }
+    } catch (e) {
+        logUserStoreError('加载卡密数据失败', e);
+    }
 }
 
 async function saveCards() {
-    const pool = getPool();
     try {
         await transaction(async (conn) => {
             for (const c of cards) {
@@ -685,7 +815,7 @@ async function saveCards() {
             }
         });
     } catch (e) {
-        console.error('保存卡密数据失败:', e.message);
+        logUserStoreError('保存卡密数据失败', e);
     }
 }
 
@@ -708,7 +838,11 @@ async function initDefaultAdmin() {
         const maskedPwd = defaultPassword.length > 2
             ? defaultPassword[0] + '*'.repeat(defaultPassword.length - 2) + defaultPassword.slice(-1)
             : '***';
-        console.log(`[用户系统] 已创建默认管理员账号：admin / ${maskedPwd}（来源：${CONFIG.adminPassword ? '.env ADMIN_PASSWORD' : '内置默认值'}）`);
+        logUserStoreWarn('已创建默认管理员账号', {
+            username: 'admin',
+            passwordPreview: maskedPwd,
+            source: CONFIG.adminPassword ? 'ADMIN_PASSWORD' : 'builtin_default',
+        });
     }
 }
 
@@ -723,10 +857,14 @@ async function validateUser(username, password) {
     if (verify.needsMigration) {
         user.password = security.hashPassword(password);
         await saveUsers();
-        console.log('[验证用户] 密码已自动迁移为 PBKDF2 格式:', username);
+        logAuthVerbose('密码已自动迁移为 PBKDF2 格式', { username });
     }
 
-    console.log('[验证用户]', username, '- Card 类型:', user.card?.type || '无卡密', ', 启用:', user.card?.enabled ?? 'N/A');
+    logAuthVerbose('用户登录校验通过', {
+        username,
+        cardType: user.card?.type || 'none',
+        cardEnabled: user.card?.enabled ?? 'unset',
+    });
 
     if (user.role === 'admin') {
         return {
@@ -792,8 +930,9 @@ async function registerUser(username, password, cardCode) {
 
     // 计算过期时间
     let expiresAt = null;
-    if (card.type !== CARD_TYPES.FOREVER) {
-        const days = card.days || getDefaultDaysForType(card.type);
+    const cardDays = getStoredCardDays(card);
+    if (!isPermanentCardRecord(card)) {
+        const days = cardDays;
         if (days <= 0) {
             return { ok: false, error: '卡密天数无效' };
         }
@@ -820,7 +959,7 @@ async function registerUser(username, password, cardCode) {
             description: card.description,
             type: card.type,
             typeChar: card.typeChar,
-            days: card.days || getDefaultDaysForType(card.type),
+            days: cardDays,
             expiresAt,
             enabled: true
         },
@@ -915,13 +1054,14 @@ async function renewUser(username, cardCode) {
     // 计算新的过期时间
     let newExpiresAt = null;
     const currentExpires = user.card.expiresAt || 0;
+    const cardDays = getStoredCardDays(card);
 
-    if (card.type === CARD_TYPES.FOREVER) {
+    if (isPermanentCardRecord(card)) {
         // 永久卡
         newExpiresAt = null;
     } else {
         // 计算续费天数
-        const days = card.days || getDefaultDaysForType(card.type);
+        const days = cardDays;
         if (days <= 0) {
             return { ok: false, error: '卡密天数无效' };
         }
@@ -934,7 +1074,7 @@ async function renewUser(username, cardCode) {
         }
     }
 
-    const renewDays = card.days || getDefaultDaysForType(card.type);
+    const renewDays = cardDays;
     const beforeSnapshot = buildCardSnapshot(card);
 
     await transaction(async (conn) => {
@@ -995,6 +1135,8 @@ async function getAllUsers() {
         username: u.username,
         role: u.role,
         status: u.status || 'active',
+        maxAccounts: u.maxAccounts || (u.card?.type === CARD_TYPES.TRIAL ? getTrialMaxAccounts() : 0),
+        cardCode: u.cardCode || null,
         card: u.card
             ? { ...u.card, enabled: (u.status || 'active') !== 'banned' }
             : u.card
@@ -1008,6 +1150,8 @@ async function getAllUsersWithPassword() {
         password: u.plainPassword || '',
         role: u.role,
         status: u.status || 'active',
+        maxAccounts: u.maxAccounts || (u.card?.type === CARD_TYPES.TRIAL ? getTrialMaxAccounts() : 0),
+        cardCode: u.cardCode || null,
         card: u.card
             ? { ...u.card, enabled: (u.status || 'active') !== 'banned' }
             : u.card
@@ -1018,9 +1162,18 @@ async function updateUser(username, updates) {
     await loadUsers();
     const user = users.find(u => u.username === username);
     if (!user) return null;
-
-    console.log('[更新用户] 用户名:', username, '更新内容:', updates);
-    console.log('[更新前] 用户状态:', JSON.stringify(user.card));
+    const buildBusinessError = (message) => {
+        const error = new Error(message);
+        error.statusCode = 400;
+        return error;
+    };
+    if (updates.nextUsername !== undefined && String(updates.nextUsername).trim() !== String(username)) {
+        const nextUsername = String(updates.nextUsername).trim();
+        if (users.some(item => item.username === nextUsername)) {
+            throw buildBusinessError('用户名已存在');
+        }
+        user.username = nextUsername;
+    }
 
     if (updates.expiresAt !== undefined) {
         if (!user.card) user.card = {};
@@ -1028,28 +1181,62 @@ async function updateUser(username, updates) {
     }
 
     if (updates.enabled !== undefined) {
+        if (user.role === 'admin' && updates.enabled === false) {
+            const adminCount = users.filter(item => item.role === 'admin').length;
+            if (adminCount <= 1) {
+                throw buildBusinessError('至少需要保留一个启用中的管理员账号');
+            }
+        }
         if (!user.card) user.card = {};
         user.status = updates.enabled ? 'active' : 'banned';
         user.card.enabled = updates.enabled;
     }
-
-    console.log('[更新后] 用户状态:', JSON.stringify(user.card));
+    if (updates.role !== undefined) {
+        const nextRole = updates.role === 'admin' ? 'admin' : 'user';
+        if (user.role === 'admin' && nextRole !== 'admin') {
+            const adminCount = users.filter(item => item.role === 'admin').length;
+            if (adminCount <= 1) {
+                throw buildBusinessError('至少需要保留一个管理员账号');
+            }
+        }
+        user.role = nextRole;
+    }
+    if (updates.password !== undefined && String(updates.password).trim()) {
+        user.password = hashPassword(String(updates.password));
+        if (user.plainPassword !== undefined) {
+            user.plainPassword = String(updates.password);
+        }
+    }
 
     const pool = getPool();
     if (pool) {
-        // cards 结构更新
-        await pool.query(
-            "UPDATE cards SET expires_at=? WHERE used_by=(SELECT id FROM users WHERE username = ?)",
-            [user.card.expiresAt ? new Date(user.card.expiresAt) : null, username]
-        );
-        await pool.query(
-            "UPDATE users SET status=? WHERE username=?",
-            [user.status || 'active', username]
-        );
+        if (updates.nextUsername !== undefined && String(updates.nextUsername).trim() !== String(username)) {
+            await pool.query(
+                "UPDATE users SET username=? WHERE username=?",
+                [user.username, username]
+            );
+            username = user.username;
+        }
+        if (user.card) {
+            await pool.query(
+                "UPDATE cards SET expires_at=? WHERE used_by=(SELECT id FROM users WHERE username = ?)",
+                [user.card.expiresAt ? new Date(user.card.expiresAt) : null, username]
+            );
+        }
+        if (updates.password !== undefined && String(updates.password).trim()) {
+            await pool.query(
+                "UPDATE users SET status=?, role=?, password_hash=? WHERE username=?",
+                [user.status || 'active', user.role || 'user', user.password, username]
+            );
+        } else {
+            await pool.query(
+                "UPDATE users SET status=?, role=? WHERE username=?",
+                [user.status || 'active', user.role || 'user', username]
+            );
+        }
     } else {
         await saveUsers();
     }
-    console.log('[保存完成] 用户状态已保存到数据库');
 
     return {
         username: user.username,
@@ -1099,7 +1286,7 @@ async function changePassword(username, oldPassword, newPassword) {
 
     const pool = getPool();
     if (pool) {
-        await pool.query("UPDATE users SET password_hash=? WHERE username=?", [user.password, username]).catch(e => console.error("Change Password DB Error:", e.message));
+        await pool.query("UPDATE users SET password_hash=? WHERE username=?", [user.password, username]).catch(e => logUserStoreError('修改用户密码写库失败', e, { username }));
     } else {
         await saveUsers();
     }
@@ -1132,7 +1319,7 @@ async function changeAdminPassword(username, oldPassword, newPassword) {
 
     const pool = getPool();
     if (pool) {
-        await pool.query("UPDATE users SET password_hash=? WHERE username=?", [user.password, username]).catch(e => console.error("Change Admin Password DB Error:", e.message));
+        await pool.query("UPDATE users SET password_hash=? WHERE username=?", [user.password, username]).catch(e => logUserStoreError('修改管理员密码写库失败', e, { username }));
     } else {
         await saveUsers();
     }
@@ -1184,7 +1371,7 @@ async function getCardDetail(code) {
     try {
         logs = await getCardLogs(code, 50);
     } catch (error) {
-        console.error('加载卡密操作日志失败:', error.message);
+        logUserStoreError('加载卡密操作日志失败', error, { code });
     }
 
     return { card: detail, logs };
@@ -1469,13 +1656,13 @@ async function batchDeleteCards(codes = [], operator = null) {
 
 // 初始化
 async function loadAllFromDB() {
+    await ensureTrialIpHistoryLoaded();
     await loadUsers();
     await loadCards();
     await initDefaultAdmin();
 }
 
 // initDefaultAdmin();
-loadIPHistory();
 
 /**
  * 按 username 查找用户完整信息（含卡密、角色、过期状态）
@@ -1526,4 +1713,9 @@ module.exports = {
     createTrialCard,
     renewTrialUser,
     getUserInfo,
+    __test__: {
+        normalizeCardDaysByType,
+        getStoredCardDays,
+        isPermanentCardRecord,
+    },
 };

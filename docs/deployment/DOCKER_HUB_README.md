@@ -16,16 +16,20 @@
 
 ### 一键部署（推荐）
 
-**ARM64 服务器（树莓派/鲲鹏/飞腾）:**
+**标准完整部署（推荐）:**
 ```bash
-curl -O https://raw.githubusercontent.com/smdk000/qq-farm-bot-ui/main/scripts/deploy-arm.sh
-chmod +x deploy-arm.sh
-./deploy-arm.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
 ```
 
-**x86_64 服务器（Intel/AMD）:**
+**按架构显式调用包装脚本:**
 ```bash
-curl -O https://raw.githubusercontent.com/smdk000/qq-farm-bot-ui/main/scripts/deploy-x86.sh
+# ARM64
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-arm.sh
+chmod +x deploy-arm.sh
+./deploy-arm.sh
+
+# x86_64
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-x86.sh
 chmod +x deploy-x86.sh
 ./deploy-x86.sh
 ```
@@ -51,9 +55,9 @@ services:
       - ./backup:/app/core/backup
 ```
 
-启动服务：
+使用当前标准部署编排启动：
 ```bash
-docker-compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
 ### 手动部署
@@ -243,17 +247,17 @@ docker inspect qq-farm-bot-ui | grep -A 10 Mounts
 - **v3.3.4** - 全局沉浸与平滑操作
 - **v3.3.3** - 丝滑防抖与安全限流
 
-[查看完整更新日志](https://github.com/smdk000/qq-farm-bot-ui/blob/main/CHANGELOG.DEVELOPMENT.md)
+[查看完整更新日志](https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/CHANGELOG.DEVELOPMENT.md)
 
 ---
 
 ## 📚 完整文档
 
-- **GitHub 仓库**: https://github.com/smdk000/qq-farm-bot-ui
-- **部署指南**: https://github.com/smdk000/qq-farm-bot-ui/blob/main/docs/DEPLOYMENT_GUIDE.md
-- **配置模板**: https://github.com/smdk000/qq-farm-bot-ui/blob/main/docs/CONFIG_TEMPLATES.md
-- **故障排查**: https://github.com/smdk000/qq-farm-bot-ui/blob/main/docs/TROUBLESHOOTING.md
-- **帮助中心**: https://github.com/smdk000/qq-farm-bot-ui/blob/main/docs/HELP_CENTER_MAINTENANCE_GUIDE.md
+- **GitHub 仓库**: https://github.com/smdk000/qq-farm-ui-pro-max
+- **部署指南**: https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/docs/guides/DEPLOYMENT_GUIDE.md
+- **配置模板**: https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/docs/guides/CONFIG_TEMPLATES.md
+- **故障排查**: https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/docs/guides/TROUBLESHOOTING.md
+- **文档索引**: https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/docs/guides/DOCUMENTATION_INDEX.md
 
 ---
 
@@ -261,14 +265,14 @@ docker inspect qq-farm-bot-ui | grep -A 10 Mounts
 
 ### 文档资源
 
-- [README.md](https://github.com/smdk000/qq-farm-bot-ui) - 项目说明
-- [DEPLOYMENT_GUIDE.md](https://github.com/smdk000/qq-farm-bot-ui/blob/main/docs/DEPLOYMENT_GUIDE.md) - 部署指南
-- [TROUBLESHOOTING.md](https://github.com/smdk000/qq-farm-bot-ui/blob/main/docs/TROUBLESHOOTING.md) - 故障排查
-- [CHANGELOG.DEVELOPMENT.md](https://github.com/smdk000/qq-farm-bot-ui/blob/main/CHANGELOG.DEVELOPMENT.md) - 更新日志
+- [README.md](https://github.com/smdk000/qq-farm-ui-pro-max) - 项目说明
+- [DEPLOYMENT_GUIDE.md](https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/docs/guides/DEPLOYMENT_GUIDE.md) - 部署指南
+- [TROUBLESHOOTING.md](https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/docs/guides/TROUBLESHOOTING.md) - 故障排查
+- [CHANGELOG.DEVELOPMENT.md](https://github.com/smdk000/qq-farm-ui-pro-max/blob/main/CHANGELOG.DEVELOPMENT.md) - 更新日志
 
 ### 技术支持
 
-- **GitHub Issues**: https://github.com/smdk000/qq-farm-bot-ui/issues
+- **GitHub Issues**: https://github.com/smdk000/qq-farm-ui-pro-max/issues
 - **QQ 群**: 227916149
 - **Docker Hub**: https://hub.docker.com/r/smdk000/qq-farm-bot-ui
 

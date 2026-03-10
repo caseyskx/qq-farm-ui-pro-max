@@ -2,6 +2,19 @@ const { createModuleLogger } = require('../services/logger');
 const masterLogger = createModuleLogger('master-dispatcher');
 const store = require('../models/store');
 
+function removeEventListener(target, event, handler) {
+    if (!target || typeof handler !== 'function') {
+        return;
+    }
+    if (typeof target.off === 'function') {
+        target.off(event, handler);
+        return;
+    }
+    if (typeof target.removeListener === 'function') {
+        target.removeListener(event, handler);
+    }
+}
+
 function syncAccountRuntimeSnapshot(accountId, status, extra = {}) {
     const id = String(accountId || '').trim();
     if (!id || typeof store.addOrUpdateAccount !== 'function') return;
@@ -9,6 +22,7 @@ function syncAccountRuntimeSnapshot(accountId, status, extra = {}) {
     const panelStatus = (status && typeof status === 'object') ? status : {};
     const liveStatus = (panelStatus.status && typeof panelStatus.status === 'object') ? panelStatus.status : {};
     const connected = !!(panelStatus.connection && panelStatus.connection.connected);
+    const now = Date.now();
 
     try {
         store.addOrUpdateAccount({
@@ -22,6 +36,8 @@ function syncAccountRuntimeSnapshot(accountId, status, extra = {}) {
             exp: Number(liveStatus.exp) || 0,
             coupon: Number(liveStatus.coupon) || 0,
             uptime: Number(panelStatus.uptime) || 0,
+            lastStatusAt: now,
+            ...(connected ? { lastOnlineAt: now } : {}),
         });
     } catch (error) {
         masterLogger.warn(`[Master] 写回账号运行时快照失败: ${id} -> ${error.message}`);
@@ -33,6 +49,9 @@ class MasterDispatcher {
         this.io = io;
         this.workers = new Map(); // socketId -> { nodeId, socket, assigned: [] }
         this.accountToWorker = new Map(); // accountId -> socketId (Sticky Sessions)
+        this.gcHandle = null;
+        this.connectionHandler = null;
+        this.socketBindings = new Map();
     }
 
     init() {
@@ -44,7 +63,7 @@ class MasterDispatcher {
         masterLogger.info('✅ MasterDispatcher(分布式控制面) 初始化成功, 等待 Worker 接入...');
 
         // 引入定期 GC 机制：每 15 分钟执行一次泄漏检查
-        setInterval(() => {
+        this.gcHandle = setInterval(() => {
             if (this.accountToWorker) {
                 let removed = 0;
                 for (const [accId, socketId] of this.accountToWorker.entries()) {
@@ -57,12 +76,14 @@ class MasterDispatcher {
                     masterLogger.warn(`[Master GC] 成功清理了 ${removed} 个遗留的幽灵 Session 绑定, 当前路由表大小: ${this.accountToWorker.size}`);
                 }
             }
-        }, 15 * 60 * 1000).unref();
+        }, 15 * 60 * 1000);
+        if (this.gcHandle && typeof this.gcHandle.unref === 'function') {
+            this.gcHandle.unref();
+        }
 
         // 复用原有的 admin 隧道增加 worker: 开头的命令监听
-        this.io.on('connection', (socket) => {
-
-            socket.on('worker:ready', async () => {
+        this.connectionHandler = (socket) => {
+            const workerReadyHandler = async () => {
                 const nodeId = socket.handshake.auth?.nodeId || `unknown-${socket.id}`;
                 masterLogger.info(`[Master] 探测到新的 Worker 接入就绪: ${nodeId}`);
 
@@ -74,9 +95,9 @@ class MasterDispatcher {
 
                 // 触发负载均衡重新分配
                 await this.rebalance();
-            });
+            };
 
-            socket.on('disconnect', async () => {
+            const disconnectHandler = async () => {
                 if (this.workers.has(socket.id)) {
                     const workerBox = this.workers.get(socket.id);
                     masterLogger.warn(`[Master] Worker 节点掉线: ${workerBox.nodeId}`);
@@ -98,10 +119,11 @@ class MasterDispatcher {
                     // 重新分配孤儿任务
                     await this.rebalance();
                 }
-            });
+                this.socketBindings.delete(socket.id);
+            };
 
             // 监听 Worker 传回的状态快照与日志
-            socket.on('worker:status:sync', (payload) => {
+            const workerStatusSyncHandler = (payload) => {
                 // 收到任意 Worker 传回来的业务执行状态，直接广播给所有挂载页面的 Admin
                 // 借用 admin.js 原始机制 (此时 admin.js 中应保留 status 的中转订阅路由)
                 const { accountId, status } = payload || {};
@@ -110,20 +132,62 @@ class MasterDispatcher {
                     this.io.to(`account:${accountId}`).emit('status:update', { accountId, status });
                     this.io.to('account:all').emit('status:update', { accountId, status });
                 }
-            });
+            };
 
-            socket.on('worker:log:new', (payload) => {
+            const workerLogHandler = (payload) => {
                 const id = String((payload && payload.accountId) || '').trim();
                 if (id) this.io.to(`account:${id}`).emit('log:new', payload);
                 this.io.to('account:all').emit('log:new', payload);
-            });
+            };
 
-            socket.on('worker:account-log:new', (payload) => {
+            const workerAccountLogHandler = (payload) => {
                 const id = String((payload && payload.accountId) || '').trim();
                 if (id) this.io.to(`account:${id}`).emit('account-log:new', payload);
                 this.io.to('account:all').emit('account-log:new', payload);
+            };
+
+            socket.on('worker:ready', workerReadyHandler);
+            socket.on('disconnect', disconnectHandler);
+            socket.on('worker:status:sync', workerStatusSyncHandler);
+            socket.on('worker:log:new', workerLogHandler);
+            socket.on('worker:account-log:new', workerAccountLogHandler);
+
+            this.socketBindings.set(socket.id, {
+                socket,
+                handlers: {
+                    'worker:ready': workerReadyHandler,
+                    disconnect: disconnectHandler,
+                    'worker:status:sync': workerStatusSyncHandler,
+                    'worker:log:new': workerLogHandler,
+                    'worker:account-log:new': workerAccountLogHandler,
+                },
             });
-        });
+        };
+
+        this.io.on('connection', this.connectionHandler);
+    }
+
+    dispose() {
+        if (this.gcHandle) {
+            clearInterval(this.gcHandle);
+            this.gcHandle = null;
+        }
+
+        if (this.io && this.connectionHandler) {
+            removeEventListener(this.io, 'connection', this.connectionHandler);
+            this.connectionHandler = null;
+        }
+
+        for (const binding of this.socketBindings.values()) {
+            const { socket, handlers } = binding;
+            for (const [event, handler] of Object.entries(handlers)) {
+                removeEventListener(socket, event, handler);
+            }
+        }
+
+        this.socketBindings.clear();
+        this.workers.clear();
+        this.accountToWorker.clear();
     }
 
     /**
@@ -223,4 +287,11 @@ function getDispatcher() {
     return _instance;
 }
 
-module.exports = { initDispatcher, getDispatcher };
+function disposeDispatcher() {
+    if (_instance && typeof _instance.dispose === 'function') {
+        _instance.dispose();
+    }
+    _instance = null;
+}
+
+module.exports = { initDispatcher, getDispatcher, disposeDispatcher };

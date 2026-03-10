@@ -276,7 +276,27 @@ function stopLoginLockCleanup() {
     }
 }
 
-startLoginLockCleanup();
+function ensureLoginLockCleanup() {
+    startLoginLockCleanup();
+}
+
+const originalCheckLock = loginLock.checkLock.bind(loginLock);
+loginLock.checkLock = function patchedCheckLock(...args) {
+    ensureLoginLockCleanup();
+    return originalCheckLock(...args);
+};
+
+const originalRecordFailure = loginLock.recordFailure.bind(loginLock);
+loginLock.recordFailure = function patchedRecordFailure(...args) {
+    ensureLoginLockCleanup();
+    return originalRecordFailure(...args);
+};
+
+const originalRecordSuccess = loginLock.recordSuccess.bind(loginLock);
+loginLock.recordSuccess = function patchedRecordSuccess(...args) {
+    ensureLoginLockCleanup();
+    return originalRecordSuccess(...args);
+};
 
 module.exports = {
     hashPassword,

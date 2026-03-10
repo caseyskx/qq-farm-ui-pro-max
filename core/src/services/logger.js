@@ -40,6 +40,14 @@ function sanitizeMeta(value, depth = 0) {
 }
 
 let fallbackLogDir = null;
+const FALLBACK_CONSOLE_LEVELS = ['silent', 'error', 'warn', 'info', 'debug'];
+const FALLBACK_CONSOLE_LEVEL_RANK = {
+    silent: -1,
+    error: 0,
+    warn: 1,
+    info: 2,
+    debug: 3,
+};
 
 function ensureFallbackLogDir() {
     if (fallbackLogDir) return fallbackLogDir;
@@ -67,17 +75,42 @@ function appendFallbackLog(level, moduleName, message, meta) {
     }
 }
 
+function getFallbackConsoleLevel() {
+    const configured = String(process.env.FARM_FALLBACK_CONSOLE_LEVEL || 'warn').toLowerCase();
+    return FALLBACK_CONSOLE_LEVELS.includes(configured) ? configured : 'warn';
+}
+
+function shouldEmitFallbackConsole(level) {
+    const currentRank = FALLBACK_CONSOLE_LEVEL_RANK[getFallbackConsoleLevel()];
+    const levelRank = FALLBACK_CONSOLE_LEVEL_RANK[String(level || 'info').toLowerCase()];
+    return Number.isFinite(levelRank) && levelRank <= currentRank;
+}
+
+function writeFallbackConsoleLine(level, line) {
+    if (!shouldEmitFallbackConsole(level)) {
+        return;
+    }
+
+    const stream = level === 'error' || level === 'warn'
+        ? process.stderr
+        : process.stdout;
+    stream.write(`${line}\n`);
+}
+
 function createConsoleFallback(moduleName) {
     const write = (level, message, meta) => {
         const ts = new Date().toISOString();
         const safeMsg = redactString(message);
         const safeMeta = sanitizeMeta(meta);
         appendFallbackLog(level, moduleName, safeMsg, safeMeta);
+        const line = safeMeta && Object.keys(safeMeta).length > 0
+            ? `[${ts}] [${level}] [${moduleName}] ${safeMsg} ${JSON.stringify(safeMeta)}`
+            : `[${ts}] [${level}] [${moduleName}] ${safeMsg}`;
         if (safeMeta && Object.keys(safeMeta).length > 0) {
-            console.warn(`[${ts}] [${level}] [${moduleName}] ${safeMsg} ${JSON.stringify(safeMeta)}`);
-        } else {
-            console.warn(`[${ts}] [${level}] [${moduleName}] ${safeMsg}`);
+            writeFallbackConsoleLine(level, line);
+            return;
         }
+        writeFallbackConsoleLine(level, line);
     };
     return {
         info: (message, meta) => write('info', message, meta),

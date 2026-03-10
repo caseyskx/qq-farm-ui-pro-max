@@ -357,9 +357,9 @@ Ctrl+Shift+F → 输入关键词
 
 ### 联系方式
 
-- **GitHub Issues**: https://github.com/Penty-d/qq-farm-bot-ui/issues
-- **项目地址**: https://github.com/Penty-d/qq-farm-bot-ui
-- **讨论区**: https://github.com/Penty-d/qq-farm-bot-ui/discussions
+- **GitHub Issues**: https://github.com/smdk000/qq-farm-ui-pro-max/issues
+- **项目地址**: https://github.com/smdk000/qq-farm-ui-pro-max
+- **讨论区**: https://github.com/smdk000/qq-farm-ui-pro-max/discussions
 
 ---
 

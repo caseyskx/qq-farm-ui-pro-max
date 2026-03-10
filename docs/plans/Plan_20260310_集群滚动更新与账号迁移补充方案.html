@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>集群滚动更新与账号迁移补充方案 - 2026-03-10</title>
+  <style>
+    :root {
+      --bg: #08111a;
+      --panel: #0f1d2c;
+      --panel-2: #15283c;
+      --text: #eaf2fb;
+      --muted: #9fb2c6;
+      --line: #2d455c;
+      --brand: #7ce0c3;
+      --brand-2: #bdf8ea;
+      --ok: #69d18b;
+      --warn: #ffc978;
+      --danger: #ff8f8f;
+      --code: #0b1620;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(124, 224, 195, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(189, 248, 234, 0.08), transparent 22%),
+        linear-gradient(180deg, #08111a 0%, #09141d 100%);
+      font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+    .hero, .card {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(15, 29, 44, 0.98), rgba(21, 40, 60, 0.96));
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.24);
+    }
+    .hero { padding: 24px 26px; }
+    .card { margin-top: 16px; padding: 18px 20px; }
+    h1, h2, h3 { margin: 0 0 12px; line-height: 1.32; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 20px; margin-top: 24px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--code);
+      color: var(--brand-2);
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .metric {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(11, 22, 32, 0.78);
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .metric .value {
+      margin-top: 7px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .brand { color: var(--brand); font-weight: 700; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .danger { color: var(--danger); font-weight: 700; }
+    code {
+      background: var(--code);
+      border: 1px solid rgba(124, 224, 195, 0.18);
+      color: #e2fff7;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: rgba(11, 22, 32, 0.92);
+      color: var(--brand-2);
+      font-weight: 700;
+    }
+    ul, ol { margin: 8px 0 0 20px; color: var(--muted); }
+    li { margin: 6px 0; }
+    .callout {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: rgba(11, 22, 32, 0.92);
+      border-left: 4px solid var(--brand);
+      color: var(--muted);
+    }
+    .footer {
+      margin-top: 28px;
+      color: #8fa6ba;
+      font-size: 12px;
+    }
+    @media (max-width: 1000px) {
+      body { padding: 16px; }
+      .hero, .card { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>集群滚动更新与账号迁移补充方案</h1>
+      <p>这个补充方案专门回答一个问题：现有分布式能力，能不能在更新时把账号先切到子系统继续运行，主系统更新完再切回。结论是：<span class="warn">可以把它优化进更新计划</span>，但当前阶段应该定义成<span class="brand">滚动更新 + 排空切换</span>，而不是直接定义成<span class="danger">运行中会话无缝热迁移</span>。</p>
+      <div class="meta">
+        <span class="chip">结论：可纳入计划</span>
+        <span class="chip">当前能力：近似不停机</span>
+        <span class="chip">暂不承诺：绝对零掉线</span>
+        <span class="chip">新增阶段：P1.5 / P2</span>
+      </div>
+      <div class="grid">
+        <div class="metric">
+          <div class="label">现状定位</div>
+          <div class="value">分布式调度，不是热迁移</div>
+        </div>
+        <div class="metric">
+          <div class="label">可先落地</div>
+          <div class="value">排空 + 滚动更新</div>
+        </div>
+        <div class="metric">
+          <div class="label">依赖前提</div>
+          <div class="value">至少双节点执行面</div>
+        </div>
+        <div class="metric">
+          <div class="label">目标效果</div>
+          <div class="value">大幅缩短中断窗口</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>一、直接结论</h2>
+      <p><span class="brand">可以优化进更新计划。</span>但要把需求拆成两个层级：</p>
+      <ol>
+        <li><span class="ok">第一层：</span>利用现有集群能力做 <code>Worker 排空</code>、<code>账号重分配</code>、<code>节点逐台更新</code>，把升级过程变成滚动更新。</li>
+        <li><span class="warn">第二层：</span>如果你要求“账号完全无感、不掉线、不重连”，那属于真正的<span class="brand">热迁移</span>，当前代码还不具备。</li>
+      </ol>
+      <div class="callout">
+        这两个层级不能混在一起讲。<span class="brand">现有代码已经能支撑滚动更新思路</span>，但还没有实现“把运行中账号的全部会话态和任务态，从一个进程无缝搬到另一个进程”的机制。
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>二、为什么说现有分布式能力能帮上忙</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>代码位置</th>
+            <th>已具备的能力</th>
+            <th>对更新的价值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>core/src/cluster/master-dispatcher.js</code></td>
+            <td>Master 维护 <code>accountToWorker</code> 路由表，可对运行账号重新分配并下发到各 Worker</td>
+            <td>可以把某个节点上的账号重新调度到其他 Worker，适合做滚动更新前的账号迁移</td>
+          </tr>
+          <tr>
+            <td><code>core/src/cluster/worker-client.js</code></td>
+            <td>Worker 能接收 <code>master:assign:accounts</code>，并按差分执行新增、移除、重启</td>
+            <td>具备“接管一批账号”和“释放一批账号”的基础执行能力</td>
+          </tr>
+          <tr>
+            <td><code>core/src/runtime/worker-manager.js</code></td>
+            <td>账号运行时在独立 Worker 进程/线程内启动、停止、重启</td>
+            <td>说明账号执行面已经被进程化，天然适合做节点级别的分批切换</td>
+          </tr>
+          <tr>
+            <td><code>core/client.js</code></td>
+            <td>支持 <code>FARM_WORKER=1</code> 的 Worker 角色模式，Worker 会连接 Master 领取任务</td>
+            <td>说明架构上支持控制面与执行面拆开，不必所有东西都绑在一台上更新</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>三、为什么它现在还不等于“零掉线热迁移”</h2>
+      <p>当前实现更像<span class="brand">分布式调度</span>，不是传统意义上的<span class="brand">连接级热迁移</span>。要做到你说的“主系统更新时账号不断线，回切也不断线”，至少还缺下面这些关键能力：</p>
+      <ul>
+        <li><span class="danger">运行态导出/导入：</span>当前账号的 socket 连接、登录态、任务队列、定时器状态都在本地 Worker 进程内，没有完整快照迁移协议。</li>
+        <li><span class="danger">安全切点：</span>没有“等当前动作结束再迁移”的标准 safe point，也没有 draining 状态机。</li>
+        <li><span class="danger">租约切换：</span>缺少账号级别的分布式租约和抢占保护，无法确保切换时绝不会双跑或抢跑。</li>
+        <li><span class="danger">双栈切换编排：</span>现有部署脚本还是单套安装栈思路，没有蓝绿或金丝雀更新编排。</li>
+      </ul>
+      <div class="callout">
+        所以正确表述应该是：<span class="brand">目前能做近似不停机更新</span>，但不能直接承诺<span class="danger">所有账号在升级中绝对无感、完全零断线</span>。
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>四、目前最现实的优化方向</h2>
+      <p>建议把你说的“新建一个子系统接管账号”落成更工程化的方案：<span class="brand">备用 Worker 池 / 子集群接管</span>。第一阶段不做热迁移，只做滚动更新。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>方案</th>
+            <th>是否现实</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>只更新 Master / Web / API，Worker 继续跑</td>
+            <td><span class="ok">可以优先实现</span></td>
+            <td>Worker 与 Master 断链后当前账号仍可能继续执行，但前提是执行面和控制面已拆开部署</td>
+          </tr>
+          <tr>
+            <td>把待更新节点先排空，再把账号切给其他 Worker</td>
+            <td><span class="ok">适合纳入近期计划</span></td>
+            <td>这是最合理的第一目标，能把影响压到很小</td>
+          </tr>
+          <tr>
+            <td>升级中完全零掉线、会话不重建</td>
+            <td><span class="danger">当前不现实</span></td>
+            <td>需要新增运行态迁移、租约切换、任务恢复等底层能力</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>五、建议加进更新计划的新阶段</h2>
+      <h3>P1.5：集群滚动更新</h3>
+      <ul>
+        <li>新增节点状态：<code>active</code>、<code>draining</code>、<code>offline</code>、<code>updating</code></li>
+        <li>Master 不再给 <code>draining</code> 节点分配新账号</li>
+        <li>管理员可指定某个 Worker 进入排空模式</li>
+        <li>排空完成后，由宿主机代理更新该 Worker 所在实例</li>
+        <li>单节点成功后再切下一台，实现滚动更新</li>
+      </ul>
+
+      <h3>P2：子集群接管更新</h3>
+      <ul>
+        <li>支持预热一套备用 Worker 池</li>
+        <li>更新前先把主集群账号按批次转移到备用池</li>
+        <li>更新完成后再分批切回</li>
+        <li>期间增加版本检查、节点健康检查、账号数对账</li>
+      </ul>
+
+      <h3>P3：真正热迁移</h3>
+      <ul>
+        <li>账号运行态快照与恢复</li>
+        <li>任务游标与定时器恢复</li>
+        <li>账号租约转移和防双跑锁</li>
+        <li>切换中连接不中断或快速接续</li>
+      </ul>
+      <div class="callout">
+        <span class="brand">建议的产品口径：</span>
+        第一阶段对外宣称“支持滚动更新、尽量不停机、显著降低账号中断窗口”，不要一开始就宣称“完全零掉线热升级”。
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>六、要满足这个方案的前提条件</h2>
+      <ol>
+        <li>部署层必须至少有两套执行节点，单机单容器不成立。</li>
+        <li>控制面和执行面最好拆开，Master/Web/API 与 Worker 不要绑死在同一重启单元。</li>
+        <li>更新代理必须支持“按节点更新”，而不是只会全局覆盖安装。</li>
+        <li>要新增节点健康状态、版本状态和账号分配监控。</li>
+        <li>要定义回滚路径，更新失败能把该节点切回旧版本并重新纳管。</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>七、最终建议</h2>
+      <p>你的方向是对的，但实现口径要收严：<span class="brand">不要把“分布式”直接理解成“已经具备热迁移和负载均衡更新”。</span>现有代码已经能支撑“先切走账号再更新节点”的思路，这个很值得加进计划，而且应该加。</p>
+      <p>我建议把更新计划正式调整成两条线：</p>
+      <ol>
+        <li><span class="ok">主线：</span>先落地统一安装器、更新任务、宿主机代理、管理员更新提醒。</li>
+        <li><span class="ok">增强线：</span>新增集群排空与滚动更新能力，先实现“低中断更新”，后续再评估真正热迁移。</li>
+      </ol>
+    </section>
+
+    <div class="footer">
+      补充依据：当前集群路由、Worker 差分接管、账号执行进程模型与宿主机更新代理方案。该文档用于修正更新规划口径，不包含业务代码实现。
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,252 @@
+function registerSystemPublicRoutes({
+    app,
+    getPool,
+    getAccountsSnapshot,
+    inspectSystemSettingsHealth,
+    inspectWebDistState,
+    version,
+    processRef,
+    store,
+    resolveRequestUser,
+    getUserUiConfig,
+    mergeUiConfig,
+    getUserPreferences,
+    getAccId,
+    getProvider,
+    getSchedulerRegistrySnapshot,
+    handleApiError,
+}) {
+    function buildPublicWebAssetsSnapshot() {
+        if (typeof inspectWebDistState !== 'function') {
+            return null;
+        }
+        const state = inspectWebDistState();
+        return {
+            activeDir: state.activeDirRelative,
+            activeSource: state.activeSource,
+            selectionReason: state.selectionReason,
+            selectionReasonLabel: state.selectionReasonLabel,
+            buildTargetDir: state.buildTargetDirRelative,
+            buildTargetSource: state.buildTargetSource,
+            defaultDir: state.defaultDirRelative,
+            defaultHasAssets: state.defaultHasAssets,
+            defaultWritable: state.defaultWritable,
+            fallbackDir: state.fallbackDirRelative,
+            fallbackHasAssets: state.fallbackHasAssets,
+            fallbackWritable: state.fallbackWritable,
+        };
+    }
+
+    app.get('/api/system-logs', async (req, res) => {
+        try {
+            const pool = getPool();
+
+            const page = Math.max(1, Number.parseInt(req.query.page) || 1);
+            const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit) || 50));
+            const offset = (page - 1) * limit;
+
+            const { level, accountId, keyword } = req.query;
+
+            let querySql = "SELECT * FROM system_logs WHERE 1=1";
+            let countSql = "SELECT COUNT(*) as total FROM system_logs WHERE 1=1";
+            const params = [];
+
+            if (req.currentUser && req.currentUser.role !== 'admin') {
+                const allAccounts = await getAccountsSnapshot();
+                const userAccountIds = allAccounts.accounts
+                    .filter(a => a.username === req.currentUser.username)
+                    .map(a => String(a.id));
+                if (userAccountIds.length === 0) {
+                    return res.json({ ok: true, data: { total: 0, page, limit, items: [] } });
+                }
+                const placeholders = userAccountIds.map(() => '?').join(',');
+                querySql += ` AND account_id IN (${placeholders})`;
+                countSql += ` AND account_id IN (${placeholders})`;
+                params.push(...userAccountIds);
+            }
+
+            if (level) {
+                querySql += " AND level = ?";
+                countSql += " AND level = ?";
+                params.push(level);
+            }
+            if (accountId) {
+                querySql += " AND account_id = ?";
+                countSql += " AND account_id = ?";
+                params.push(accountId);
+            }
+            if (keyword) {
+                querySql += " AND text LIKE ?";
+                countSql += " AND text LIKE ?";
+                params.push(`%${keyword}%`);
+            }
+
+            querySql += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+            const queryParams = [...params, limit, offset];
+
+            const [countRows] = await pool.query(countSql, params);
+            const [rows] = await pool.query(querySql, queryParams);
+
+            res.json({
+                ok: true,
+                data: {
+                    total: countRows[0].total,
+                    page,
+                    limit,
+                    items: rows
+                }
+            });
+        } catch (err) {
+            res.status(500).json({ ok: false, error: err.message });
+        }
+    });
+
+    app.get('/api/system-settings/health', async (req, res) => {
+        try {
+            if (req.currentUser?.role !== 'admin') {
+                return res.status(403).json({ ok: false, error: '仅管理员可查看 system_settings 自检结果' });
+            }
+            const data = await inspectSystemSettingsHealth();
+            res.json({
+                ok: true,
+                data: {
+                    ...data,
+                    webAssets: buildPublicWebAssetsSnapshot(),
+                },
+            });
+        } catch (err) {
+            res.status(500).json({ ok: false, error: err.message });
+        }
+    });
+
+    app.get('/api/stats/trend', async (req, res) => {
+        try {
+            if (req.currentUser && req.currentUser.role !== 'admin') {
+                return res.status(403).json({ ok: false, error: '全局统计趋势仅限管理员查看' });
+            }
+            const pool = getPool();
+            const [rows] = await pool.query(
+                `SELECT DATE_FORMAT(record_date, '%m-%d') as short_date, total_exp, total_gold, total_steal
+                 FROM stats_daily
+                 ORDER BY record_date DESC LIMIT 7`
+            );
+
+            rows.reverse();
+
+            const dates = [];
+            const exp = [];
+            const gold = [];
+            const steal = [];
+
+            if (rows.length === 0) {
+                const d = new Date();
+                dates.push(`${d.getMonth() + 1}-${d.getDate()}`);
+                exp.push(0);
+                gold.push(0);
+                steal.push(0);
+            } else {
+                for (const row of rows) {
+                    dates.push(row.short_date);
+                    exp.push(row.total_exp || 0);
+                    gold.push(row.total_gold || 0);
+                    steal.push(row.total_steal || 0);
+                }
+            }
+
+            res.json({
+                ok: true,
+                data: { dates, series: { exp, gold, steal } }
+            });
+        } catch (err) {
+            res.status(500).json({ ok: false, error: err.message });
+        }
+    });
+
+    app.get('/api/ping', async (req, res) => {
+        res.json({
+            ok: true,
+            data: {
+                ok: true,
+                uptime: processRef.uptime(),
+                version,
+                webAssets: buildPublicWebAssetsSnapshot(),
+            },
+        });
+    });
+
+    app.get('/api/auth/validate', async (req, res) => {
+        res.json({
+            ok: true,
+            data: {
+                valid: true,
+                user: {
+                    username: req.currentUser?.username,
+                    role: req.currentUser?.role,
+                    card: req.currentUser?.card,
+                },
+            },
+        });
+    });
+
+    app.get('/api/ui-config', async (req, res) => {
+        const globalUi = store.getUI();
+        const currentUser = await resolveRequestUser(req).catch(() => null);
+        const userPreferences = currentUser
+            ? await getUserPreferences(currentUser.username).catch(() => null)
+            : null;
+        if (currentUser && currentUser.role !== 'admin') {
+            const userUi = await getUserUiConfig(currentUser.username, globalUi);
+            return res.json({
+                ok: true,
+                data: {
+                    ...mergeUiConfig(globalUi, userUi),
+                    currentAccountId: userPreferences?.currentAccountId || '',
+                },
+            });
+        }
+        if (currentUser) {
+            return res.json({
+                ok: true,
+                data: {
+                    ...globalUi,
+                    currentAccountId: userPreferences?.currentAccountId || '',
+                },
+            });
+        }
+        res.json({ ok: true, data: globalUi });
+    });
+
+    app.get('/api/scheduler', async (req, res) => {
+        try {
+            const id = await getAccId(req);
+            const provider = getProvider();
+            if (provider && typeof provider.getSchedulerStatus === 'function') {
+                const data = await provider.getSchedulerStatus(id);
+                return res.json({ ok: true, data });
+            }
+            return res.json({ ok: true, data: { runtime: getSchedulerRegistrySnapshot(), worker: null, workerError: '当前运行环境不支持调度器状态查询' } });
+        } catch (e) {
+            return handleApiError(res, e);
+        }
+    });
+}
+
+function registerNotificationsRoute({
+    app,
+    parseUpdateLog,
+}) {
+    app.get('/api/notifications', async (req, res) => {
+        try {
+            const limit = Number.parseInt(req.query.limit) || 10;
+            const entries = parseUpdateLog();
+            res.json({ ok: true, data: entries.slice(0, limit) });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+}
+
+module.exports = {
+    registerSystemPublicRoutes,
+    registerNotificationsRoute,
+};

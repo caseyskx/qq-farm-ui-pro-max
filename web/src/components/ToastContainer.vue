@@ -7,27 +7,25 @@ const { toasts } = storeToRefs(toastStore)
 
 function getIcon(type: string) {
   switch (type) {
-    case 'success': return 'i-carbon-checkmark-filled text-primary-500'
-    case 'error': return 'i-carbon-error-filled text-red-500'
-    case 'warning': return 'i-carbon-warning-filled text-yellow-500'
-    case 'info': return 'i-carbon-information-filled text-blue-500'
-    default: return 'i-carbon-information-filled text-blue-500'
+    case 'success': return 'i-carbon-checkmark-filled toast-icon toast-icon-success'
+    case 'error': return 'i-carbon-error-filled toast-icon toast-icon-error'
+    case 'warning': return 'i-carbon-warning-filled toast-icon toast-icon-warning'
+    case 'info': return 'i-carbon-information-filled toast-icon toast-icon-info'
+    default: return 'i-carbon-information-filled toast-icon toast-icon-info'
   }
 }
 
 function getBgColor(_type: string) {
-  // Tailwind colors with some transparency?
-  // Actually, standard white/dark background with colored border/icon is usually cleaner.
-  return 'glass-panel border-l-4 border-y border-y-white/20 dark:border-y-white/10 border-r border-r-white/20 dark:border-r-white/10 backdrop-blur-md'
+  return 'glass-panel toast-surface border-l-4 backdrop-blur-md'
 }
 
 function getBorderColor(type: string) {
   switch (type) {
-    case 'success': return 'border-primary-500'
-    case 'error': return 'border-red-500'
-    case 'warning': return 'border-yellow-500'
-    case 'info': return 'border-blue-500'
-    default: return 'border-gray-500'
+    case 'success': return 'toast-success'
+    case 'error': return 'toast-error'
+    case 'warning': return 'toast-warning'
+    case 'info': return 'toast-info'
+    default: return 'toast-info'
   }
 }
 </script>
@@ -45,10 +43,7 @@ function getBorderColor(type: string) {
         <div class="glass-text-main flex-1 break-words text-sm">
           {{ toast.message }}
         </div>
-        <button
-          class="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-          @click="toastStore.remove(toast.id)"
-        >
+        <button class="toast-close shrink-0" @click="toastStore.remove(toast.id)">
           <div class="i-carbon-close text-lg" />
         </button>
       </div>
@@ -70,5 +65,45 @@ function getBorderColor(type: string) {
 .toast-leave-to {
   opacity: 0;
   transform: translateX(30px);
+}
+
+.toast-success {
+  border-left-color: var(--ui-status-success) !important;
+}
+.toast-error {
+  border-left-color: var(--ui-status-danger) !important;
+}
+.toast-warning {
+  border-left-color: var(--ui-status-warning) !important;
+}
+.toast-info {
+  border-left-color: var(--ui-status-info) !important;
+}
+
+.toast-surface {
+  border-top: 1px solid color-mix(in srgb, var(--ui-border-subtle) 88%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--ui-border-subtle) 88%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-border-subtle) 88%, transparent);
+}
+
+.toast-icon-success {
+  color: var(--ui-status-success);
+}
+.toast-icon-error {
+  color: var(--ui-status-danger);
+}
+.toast-icon-warning {
+  color: var(--ui-status-warning);
+}
+.toast-icon-info {
+  color: var(--ui-status-info);
+}
+
+.toast-close {
+  color: var(--ui-text-3);
+}
+
+.toast-close:hover {
+  color: var(--ui-text-1);
 }
 </style>

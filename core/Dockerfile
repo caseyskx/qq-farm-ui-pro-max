@@ -21,6 +21,7 @@ COPY web ./web
 
 # Build web
 RUN pnpm build:web
+RUN node -e "const fs=require('node:fs'); const path=require('node:path'); const { resolveWebDistDir } = require('./core/src/utils/web-dist'); const sourceDir = resolveWebDistDir(); const canonicalDir = path.join(process.cwd(), 'web', 'dist'); if (sourceDir !== canonicalDir && fs.existsSync(path.join(sourceDir, 'index.html'))) { fs.rmSync(canonicalDir, { recursive: true, force: true }); fs.cpSync(sourceDir, canonicalDir, { recursive: true }); }"
 
 # ==========================================
 FROM node:20-alpine AS prod-deps

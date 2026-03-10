@@ -1,4 +1,14 @@
 const userStore = require('../models/user-store');
+const { createModuleLogger } = require('../services/logger');
+
+const cardsControllerLogger = createModuleLogger('cards-controller');
+
+function logCardsControllerError(message, error, meta = {}) {
+    cardsControllerLogger.error(message, {
+        ...meta,
+        error: error && error.message ? error.message : String(error || ''),
+    });
+}
 
 /**
  * 卡密管理控制器
@@ -13,7 +23,7 @@ async function getAllCards(req, res) {
         const data = await userStore.getCardCatalog();
         res.json({ ok: true, ...data });
     } catch (error) {
-        console.error('获取卡密列表失败:', error.message);
+        logCardsControllerError('获取卡密列表失败', error);
         res.status(500).json({ ok: false, error: '获取卡密列表失败' });
     }
 }
@@ -31,7 +41,7 @@ async function getCardDetail(req, res) {
 
         res.json({ ok: true, ...detail });
     } catch (error) {
-        console.error('获取卡密详情失败:', error.message);
+        logCardsControllerError('获取卡密详情失败', error, { code: req.params?.code });
         res.status(500).json({ ok: false, error: '获取卡密详情失败' });
     }
 }
@@ -74,7 +84,7 @@ async function createCard(req, res) {
 
         res.json({ ok: true, cards });
     } catch (error) {
-        console.error('生成卡密失败:', error.message);
+        logCardsControllerError('生成卡密失败', error, { operator: req.currentUser?.username || 'admin' });
         res.status(500).json({ ok: false, error: '生成卡密失败' });
     }
 }
@@ -97,7 +107,7 @@ async function updateCard(req, res) {
 
         res.json({ ok: true, card: result.card });
     } catch (error) {
-        console.error('更新卡密失败:', error.message);
+        logCardsControllerError('更新卡密失败', error, { code: req.params?.code, operator: req.currentUser?.username || 'admin' });
         res.status(500).json({ ok: false, error: '更新卡密失败' });
     }
 }
@@ -116,7 +126,7 @@ async function deleteCard(req, res) {
 
         res.json({ ok: true });
     } catch (error) {
-        console.error('删除卡密失败:', error.message);
+        logCardsControllerError('删除卡密失败', error, { code: req.params?.code, operator: req.currentUser?.username || 'admin' });
         res.status(500).json({ ok: false, error: '删除卡密失败' });
     }
 }
@@ -135,7 +145,7 @@ async function batchUpdateCards(req, res) {
         const result = await userStore.batchUpdateCards(codes, updates, req.currentUser?.username || 'admin');
         res.json({ ok: true, ...result });
     } catch (error) {
-        console.error('批量更新卡密失败:', error.message);
+        logCardsControllerError('批量更新卡密失败', error, { operator: req.currentUser?.username || 'admin' });
         res.status(500).json({ ok: false, error: '批量更新卡密失败' });
     }
 }
@@ -155,7 +165,7 @@ async function batchDeleteCards(req, res) {
 
         res.json({ ok: true, ...result });
     } catch (error) {
-        console.error('批量删除卡密失败:', error.message);
+        logCardsControllerError('批量删除卡密失败', error, { operator: req.currentUser?.username || 'admin' });
         res.status(500).json({ ok: false, error: '批量删除卡密失败' });
     }
 }

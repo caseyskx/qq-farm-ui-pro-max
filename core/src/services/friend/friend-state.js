@@ -1,12 +1,20 @@
 
 const { createScheduler } = require('../scheduler');
 
+let friendScheduler = null;
+
+function getFriendScheduler() {
+    if (!friendScheduler) {
+        friendScheduler = createScheduler('friend');
+    }
+    return friendScheduler;
+}
+
 const state = {
     isCheckingFriends: false,
     friendLoopRunning: false,
     externalSchedulerMode: false,
     lastResetDate: '',
-    friendScheduler: createScheduler('friend'),
     activeStakeouts: new Map(),
     MAX_STAKEOUT_AHEAD_SEC: 4 * 3600,
     operationLimits: new Map(),
@@ -18,5 +26,11 @@ const state = {
     helpAutoDisabledByLimit: false,
     filterStats: { friendBlacklist: 0, friendWhitelist: 0, plantBlacklist: 0, plantWhitelist: 0, banned: 0 }
 };
+
+Object.defineProperty(state, 'friendScheduler', {
+    enumerable: true,
+    configurable: false,
+    get: getFriendScheduler,
+});
 
 module.exports = state;

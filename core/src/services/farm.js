@@ -14,8 +14,16 @@ const { getRuntimeAccountModePolicy } = require('./account-mode-policy');
 const { getBagDetail } = require('./warehouse');
 const { ANALYTICS_SORT_BY_MAP, getInventorySourcePlan, getWorkflowSelectSeedOverride, normalizeInventoryPlantingMode, pickBudgetOptimizedPlan, pickSeedByStrategy } = require('./planting-strategy');
 const { createScheduler } = require('./scheduler');
+const { createModuleLogger } = require('./logger');
 const { recordOperation } = require('./stats');
 const { getDefaultLimiter } = require('./rate-limiter');
+const farmPhaseLogger = createModuleLogger('farm-phase');
+const verbosePhaseDebugEnabled = String(process.env.FARM_VERBOSE_PHASE_DEBUG || '') === '1';
+
+function logFarmPhaseDebug(message, meta = {}) {
+    if (!verbosePhaseDebugEnabled) return;
+    farmPhaseLogger.info(message, meta);
+}
 
 // ============ 内部状态 ============
 let isCheckingFarm = false;
@@ -24,7 +32,14 @@ let lastGhostingEndedAt = 0; // Ghosting 打盹上次结束时间（独立于 su
 
 let farmLoopRunning = false;
 let externalSchedulerMode = false;
-const farmScheduler = createScheduler('farm');
+let farmScheduler = null;
+
+function getFarmScheduler() {
+    if (!farmScheduler) {
+        farmScheduler = createScheduler('farm');
+    }
+    return farmScheduler;
+}
 
 // Promise 级别的高频并发合并缓存 (针对防偷抢收的极速侦测请求起削峰作用)
 let landsFetchPromise = null;
@@ -339,7 +354,7 @@ async function fertilize(landIds, fertilizerId = NORMAL_FERTILIZER_ID) {
     let successCount = 0;
     for (const landId of landIds) {
         // [防封] 施肥速度平滑，每次请求消费一个令牌
-        try { await getDefaultLimiter().bucket.waitForToken(1); } catch (e) { }
+        try { await getDefaultLimiter().bucket.waitForToken(1); } catch { }
 
         try {
             const body = types.FertilizeRequest.encode(types.FertilizeRequest.create({
@@ -372,7 +387,7 @@ async function fertilizeOrganicLoop(landIds) {
 
     while (successCount < MAX_ORGANIC_ROUNDS) {
         // [防封] 有机化肥也平滑，每次消耗 1 个令牌
-        try { await getDefaultLimiter().bucket.waitForToken(1); } catch (e) { }
+        try { await getDefaultLimiter().bucket.waitForToken(1); } catch { }
 
         const landId = ids[idx];
         try {
@@ -679,11 +694,11 @@ function syncFastHarvestTasks(soonToMature) {
         if (landId > 0) desired.set(landId, item);
     }
 
-    for (const taskName of farmScheduler.getTaskNames()) {
+    for (const taskName of getFarmScheduler().getTaskNames()) {
         if (!taskName.startsWith(FAST_HARVEST_TASK_PREFIX)) continue;
         const landId = Number.parseInt(taskName.slice(FAST_HARVEST_TASK_PREFIX.length), 10);
         if (!desired.has(landId)) {
-            farmScheduler.clear(taskName);
+            getFarmScheduler().clear(taskName);
         }
     }
 
@@ -691,10 +706,10 @@ function syncFastHarvestTasks(soonToMature) {
 
     for (const item of desired.values()) {
         const taskId = getFastHarvestTaskId(item.landId);
-        if (farmScheduler.has(taskId)) continue;
+        if (getFarmScheduler().has(taskId)) continue;
 
         const waitMs = Math.max(0, ((item.matureTime - getServerTimeSec()) * 1000) - FAST_HARVEST_ADVANCE_MS);
-        farmScheduler.setTimeoutTask(taskId, waitMs, async () => {
+        getFarmScheduler().setTimeoutTask(taskId, waitMs, async () => {
             await executeFastHarvest(item);
         });
         log('秒收', `已为地块#${item.landId} 预设秒收任务 (约 ${Math.max(0, item.matureTime - getServerTimeSec())}s 后)`, {
@@ -796,7 +811,7 @@ async function antiStealHarvest(landId) {
                 opType: 'anti_steal'
             });
             networkEvents.emit('farmStateChanged', {});
-        } catch (e) {
+        } catch {
             logWarn('防偷', `土地#${landId} 防偷施肥失败(可能无化肥)，降级为普通等待模式`, {
                 module: 'farm', event: 'anti_steal_fallback', result: 'no_fertilizer', landId
             });
@@ -1649,14 +1664,28 @@ function getCurrentPhase(phases, debug, landLabel) {
     const nowSec = getServerTimeSec();
 
     if (debug) {
-        console.warn(`    ${landLabel} 服务器时间=${nowSec} (${new Date(nowSec * 1000).toLocaleTimeString()})`);
+        logFarmPhaseDebug('作物阶段调试: 服务器时间', {
+            landLabel,
+            nowSec,
+            localTime: new Date(nowSec * 1000).toLocaleTimeString(),
+        });
         for (let i = 0; i < phases.length; i++) {
             const p = phases[i];
             const bt = toTimeSec(p.begin_time);
             const phaseName = PHASE_NAMES[p.phase] || `阶段${p.phase}`;
             const diff = bt > 0 ? (bt - nowSec) : 0;
             const diffStr = diff > 0 ? `(未来 ${diff}s)` : diff < 0 ? `(已过 ${-diff}s)` : '';
-            console.warn(`    ${landLabel}   [${i}] ${phaseName}(${p.phase}) begin=${bt} ${diffStr} dry=${toTimeSec(p.dry_time)} weed=${toTimeSec(p.weeds_time)} insect=${toTimeSec(p.insect_time)}`);
+            logFarmPhaseDebug('作物阶段调试: 阶段详情', {
+                landLabel,
+                index: i,
+                phase: p.phase,
+                phaseName,
+                beginTime: bt,
+                beginDiff: diffStr,
+                dryTime: toTimeSec(p.dry_time),
+                weedTime: toTimeSec(p.weeds_time),
+                insectTime: toTimeSec(p.insect_time),
+            });
         }
     }
 
@@ -1664,14 +1693,22 @@ function getCurrentPhase(phases, debug, landLabel) {
         const beginTime = toTimeSec(phases[i].begin_time);
         if (beginTime > 0 && beginTime <= nowSec) {
             if (debug) {
-                console.warn(`    ${landLabel}   → 当前阶段: ${PHASE_NAMES[phases[i].phase] || phases[i].phase}`);
+                logFarmPhaseDebug('作物阶段调试: 当前阶段命中', {
+                    landLabel,
+                    phase: phases[i].phase,
+                    phaseName: PHASE_NAMES[phases[i].phase] || phases[i].phase,
+                });
             }
             return phases[i];
         }
     }
 
     if (debug) {
-        console.warn(`    ${landLabel}   → 所有阶段都在未来，使用第一个: ${PHASE_NAMES[phases[0].phase] || phases[0].phase}`);
+        logFarmPhaseDebug('作物阶段调试: 使用未来首阶段', {
+            landLabel,
+            phase: phases[0].phase,
+            phaseName: PHASE_NAMES[phases[0].phase] || phases[0].phase,
+        });
     }
     return phases[0];
 }
@@ -1840,8 +1877,6 @@ function analyzeLands(lands) {
 
         const plantName = plant.name || '未知作物';
         const currentPhase = lifecycle.currentPhase;
-        const phaseVal = lifecycle.phaseVal;
-
         if (lifecycle.status === 'mature') {
             const maturePhase = Array.isArray(plant.phases)
                 ? plant.phases.find((p) => p && toNum(p.phase) === PlantPhase.MATURE)
@@ -1852,8 +1887,6 @@ function analyzeLands(lands) {
             const harvestDelay = fullCfg.harvestDelay || { min: 180, max: 300 };
 
             let isDelayed = false;
-            let remainingDelaySec = 0;
-
             if (effectiveMode !== 'main' && harvestDelay.max > 0) {
                 const delayRange = Math.max(1, harvestDelay.max - harvestDelay.min);
                 // 使用土地 ID 生成稳定的延迟
@@ -1863,7 +1896,6 @@ function analyzeLands(lands) {
                 const effectiveMatureTime = matureBegin + delaySec;
                 if (nowSec < effectiveMatureTime) {
                     isDelayed = true;
-                    remainingDelaySec = effectiveMatureTime - nowSec;
                 }
             }
 
@@ -1942,9 +1974,9 @@ function analyzeLands(lands) {
                 const targetWaitSec = Math.max(0, matureInSec - 60);
                 const timerId = `anti_steal_land_${id}`;
                 // 使用 farmScheduler 预埋
-                if (!farmScheduler.has(timerId)) {
+                if (!getFarmScheduler().has(timerId)) {
                     log('防偷', `土地#${id} 将在 ${targetWaitSec} 秒后 (剩余60秒时) 触发防偷抢收`);
-                    farmScheduler.setTimeoutTask(timerId, targetWaitSec * 1000, async () => {
+                    getFarmScheduler().setTimeoutTask(timerId, targetWaitSec * 1000, async () => {
                         await antiStealHarvest(id);
                     });
                 }
@@ -2115,8 +2147,8 @@ async function runFarmOperation(opType) {
 
     // 执行种植
     if (opType === 'all' || opType === 'plant') {
-        let allDeadLands = [...status.dead];
-        let allEmptyLands = [...status.empty];
+        const allDeadLands = [...status.dead];
+        const allEmptyLands = [...status.empty];
 
         // 收获后重新检测土地状态，避免两季作物被误铲
         if (harvestedLandIds.length > 0) {
@@ -2227,7 +2259,7 @@ function scheduleNextFarmCheck(delayMs = CONFIG.farmCheckInterval) {
     const jitter = Math.floor((Math.random() * 0.06 + 0.02) * finalDelay);
     finalDelay += jitter;
 
-    farmScheduler.setTimeoutTask('farm_check_loop', Math.max(0, finalDelay), async () => {
+    getFarmScheduler().setTimeoutTask('farm_check_loop', Math.max(0, finalDelay), async () => {
         if (!farmLoopRunning) return;
         await checkFarm();
         if (!farmLoopRunning) return;
@@ -2259,7 +2291,7 @@ function onLandsChangedPush(lands) {
     log('农场', `收到推送: ${lands.length}块土地变化，检查中...`, {
         module: 'farm', event: 'lands_notify', result: 'trigger_check', count: lands.length
     });
-    farmScheduler.setTimeoutTask('farm_push_check', 100, async () => {
+    getFarmScheduler().setTimeoutTask('farm_push_check', 100, async () => {
         if (!isCheckingFarm) await checkFarm();
     });
 }
@@ -2267,7 +2299,9 @@ function onLandsChangedPush(lands) {
 function stopFarmCheckLoop() {
     farmLoopRunning = false;
     externalSchedulerMode = false;
-    farmScheduler.clearAll();
+    if (farmScheduler) {
+        farmScheduler.clearAll();
+    }
     networkEvents.removeListener('landsChanged', onLandsChangedPush);
 }
 

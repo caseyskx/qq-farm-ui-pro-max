@@ -24,6 +24,20 @@ fi
 
 echo "✅ pnpm 版本：$(pnpm -v)"
 
+resolve_web_dist_dir() {
+    node -e "process.stdout.write(require('./core/src/utils/web-dist').resolveWebDistDir())"
+}
+
+print_web_dist_status() {
+    node - <<'NODE'
+const { inspectWebDistState } = require('./core/src/utils/web-dist');
+const state = inspectWebDistState();
+console.log(`✅ 前端静态目录：${state.activeDir}`);
+console.log(`   选路原因：${state.selectionReasonLabel}`);
+console.log(`   当前构建目标：${state.buildTargetDirRelative}`);
+NODE
+}
+
 # 检查依赖
 if [ ! -d "node_modules" ]; then
     echo ""
@@ -32,10 +46,18 @@ if [ ! -d "node_modules" ]; then
 fi
 
 # 检查前端构建
-if [ ! -d "web/dist" ]; then
+WEB_DIST_DIR="$(resolve_web_dist_dir)"
+export WEB_DIST_DIR
+print_web_dist_status
+
+if [ ! -f "$WEB_DIST_DIR/index.html" ]; then
     echo ""
     echo "🔨 正在构建前端..."
     pnpm build:web
+    WEB_DIST_DIR="$(resolve_web_dist_dir)"
+    export WEB_DIST_DIR
+    echo "✅ 前端静态目录已更新"
+    print_web_dist_status
 fi
 
 # 设置管理员密码

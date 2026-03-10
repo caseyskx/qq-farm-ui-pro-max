@@ -5,7 +5,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const process = require('node:process');
 const { ensureAssetCacheDir, getResourcePath } = require('./runtime-paths');
+const { createModuleLogger } = require('../services/logger');
 const { cleanupGeneratedItemIconCache } = require('../services/ui-assets');
 
 // ============ 等级经验表 ============
@@ -25,13 +27,47 @@ const seedAssetImageMap = new Map(); // asset_name (Crop_xxx) -> image url
 const itemImageMap = new Map(); // item_id -> image url
 const itemIconKeyImageMap = new Map(); // normalized icon/asset key -> image url
 
-const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|svg)$/i;
+const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif|svg)$/i;
+const verboseLoadLogsEnabled = String(process.env.FARM_VERBOSE_GAME_CONFIG_LOADS || '') === '1';
+let configsLoaded = false;
+let gameConfigLogger = null;
+
+function getGameConfigLogger() {
+    if (gameConfigLogger) {
+        return gameConfigLogger;
+    }
+
+    try {
+        gameConfigLogger = createModuleLogger('game-config');
+    } catch {
+        gameConfigLogger = {
+            info() { },
+            warn() { },
+            error() { },
+            debug() { },
+        };
+    }
+
+    return gameConfigLogger;
+}
+
+function logConfigLoadSuccess(message) {
+    if (!verboseLoadLogsEnabled) return;
+    getGameConfigLogger().info(message);
+}
+
+function logConfigWarning(message, error, meta = {}) {
+    getGameConfigLogger().warn(message, {
+        ...meta,
+        error: error && error.message ? error.message : undefined,
+    });
+}
 
 function normalizeIconLookupKey(value) {
     return String(value || '')
         .replace(/\/spriteFrame$/i, '')
         .replace(IMAGE_EXT_RE, '')
-        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/[^a-z0-9]+/gi, '_')
         .replace(/^_+|_+$/g, '')
         .toLowerCase();
 }
@@ -102,7 +138,7 @@ function loadItemIconMappings(configDir) {
         }
     });
 
-    console.warn(`[配置] 已加载物品图标映射 (${itemImageMap.size} 项ID，${itemIconKeyImageMap.size} 项键值)`);
+    logConfigLoadSuccess(`[配置] 已加载物品图标映射 (${itemImageMap.size} 项ID，${itemIconKeyImageMap.size} 项键值)`);
 }
 
 function cleanupGeneratedIconCache() {
@@ -112,10 +148,10 @@ function cleanupGeneratedIconCache() {
             validItemIds: Array.from(itemInfoMap.keys()),
         });
         if (result.deleted.length > 0) {
-            console.warn(`[配置] 已清理过期物品图标缓存 (${result.deleted.length} 项)`);
+            logConfigLoadSuccess(`[配置] 已清理过期物品图标缓存 (${result.deleted.length} 项)`);
         }
     } catch (e) {
-        console.warn('[配置] 清理物品图标缓存失败:', e.message);
+        logConfigWarning('[配置] 清理物品图标缓存失败', e);
     }
 }
 
@@ -191,6 +227,7 @@ function getGeneratedItemImageUrl(itemId, item) {
  * 加载配置文件
  */
 function loadConfigs() {
+    configsLoaded = false;
     const configDir = getResourcePath('gameConfig');
     
     // 加载等级经验配置
@@ -203,10 +240,10 @@ function loadConfigs() {
             for (const item of roleLevelConfig) {
                 levelExpTable[item.level] = item.exp;
             }
-            console.warn(`[配置] 已加载等级经验表 (${roleLevelConfig.length} 级)`);
+            logConfigLoadSuccess(`[配置] 已加载等级经验表 (${roleLevelConfig.length} 级)`);
         }
     } catch (e) {
-        console.warn('[配置] 加载 RoleLevel.json 失败:', e.message);
+        logConfigWarning('[配置] 加载 RoleLevel.json 失败', e);
     }
     
     // 加载植物配置
@@ -226,10 +263,10 @@ function loadConfigs() {
                     fruitToPlant.set(plant.fruit.id, plant);
                 }
             }
-            console.warn(`[配置] 已加载植物配置 (${plantConfig.length} 种)`);
+            logConfigLoadSuccess(`[配置] 已加载植物配置 (${plantConfig.length} 种)`);
         }
     } catch (e) {
-        console.warn('[配置] 加载 Plant.json 失败:', e.message);
+        logConfigWarning('[配置] 加载 Plant.json 失败', e);
     }
 
     // 加载物品配置（含种子/果实价格）
@@ -247,10 +284,10 @@ function loadConfigs() {
                     seedItemMap.set(id, item);
                 }
             }
-            console.warn(`[配置] 已加载物品配置 (${itemInfoConfig.length} 项)`);
+            logConfigLoadSuccess(`[配置] 已加载物品配置 (${itemInfoConfig.length} 项)`);
         }
     } catch (e) {
-        console.warn('[配置] 加载 ItemInfo.json 失败:', e.message);
+        logConfigWarning('[配置] 加载 ItemInfo.json 失败', e);
     }
 
     // 加载种子图片映射（seed_images_named）
@@ -282,19 +319,27 @@ function loadConfigs() {
                     }
                 }
             }
-            console.warn(`[配置] 已加载种子图片映射 (${seedImageMap.size} 项)`);
+            logConfigLoadSuccess(`[配置] 已加载种子图片映射 (${seedImageMap.size} 项)`);
         }
     } catch (e) {
-        console.warn('[配置] 加载 seed_images_named 失败:', e.message);
+        logConfigWarning('[配置] 加载 seed_images_named 失败', e);
     }
 
     try {
         loadItemIconMappings(configDir);
     } catch (e) {
-        console.warn('[配置] 加载 item_icons 失败:', e.message);
+        logConfigWarning('[配置] 加载 item_icons 失败', e);
     }
 
     cleanupGeneratedIconCache();
+    configsLoaded = true;
+}
+
+function ensureConfigsLoaded() {
+    if (configsLoaded) {
+        return;
+    }
+    loadConfigs();
 }
 
 // ============ 等级经验相关 ============
@@ -303,6 +348,7 @@ function loadConfigs() {
  * 获取等级经验表
  */
 function getLevelExpTable() {
+    ensureConfigsLoaded();
     return levelExpTable;
 }
 
@@ -313,6 +359,7 @@ function getLevelExpTable() {
  * @returns {{ current: number, needed: number }} 当前等级经验进度
  */
 function getLevelExpProgress(level, totalExp) {
+    ensureConfigsLoaded();
     if (!levelExpTable || level <= 0) return { current: 0, needed: 0 };
     
     const currentLevelStart = levelExpTable[level] || 0;
@@ -331,6 +378,7 @@ function getLevelExpProgress(level, totalExp) {
  * @param {number} plantId - 植物ID
  */
 function getPlantById(plantId) {
+    ensureConfigsLoaded();
     return plantMap.get(plantId);
 }
 
@@ -339,6 +387,7 @@ function getPlantById(plantId) {
  * @param {number} seedId - 种子ID
  */
 function getPlantBySeedId(seedId) {
+    ensureConfigsLoaded();
     return seedToPlant.get(seedId);
 }
 
@@ -347,6 +396,7 @@ function getPlantBySeedId(seedId) {
  * @param {number} plantId - 植物ID
  */
 function getPlantName(plantId) {
+    ensureConfigsLoaded();
     const plant = plantMap.get(plantId);
     return plant ? plant.name : `植物${plantId}`;
 }
@@ -356,6 +406,7 @@ function getPlantName(plantId) {
  * @param {number} seedId - 种子ID
  */
 function getPlantNameBySeedId(seedId) {
+    ensureConfigsLoaded();
     const plant = seedToPlant.get(seedId);
     return plant ? plant.name : `种子${seedId}`;
 }
@@ -365,6 +416,7 @@ function getPlantNameBySeedId(seedId) {
  * @param {number} plantId - 植物ID
  */
 function getPlantGrowTime(plantId) {
+    ensureConfigsLoaded();
     const plant = plantMap.get(plantId);
     if (!plant || !plant.grow_phases) return 0;
     
@@ -397,6 +449,7 @@ function formatGrowTime(seconds) {
  * @param {number} plantId - 植物ID
  */
 function getPlantExp(plantId) {
+    ensureConfigsLoaded();
     const plant = plantMap.get(plantId);
     return plant ? plant.exp : 0;
 }
@@ -406,6 +459,7 @@ function getPlantExp(plantId) {
  * @param {number} fruitId - 果实ID
  */
 function getFruitName(fruitId) {
+    ensureConfigsLoaded();
     const plant = fruitToPlant.get(fruitId);
     return plant ? plant.name : `果实${fruitId}`;
 }
@@ -415,6 +469,7 @@ function getFruitName(fruitId) {
  * @param {number} fruitId - 果实ID
  */
 function getPlantByFruitId(fruitId) {
+    ensureConfigsLoaded();
     return fruitToPlant.get(fruitId);
 }
 
@@ -422,6 +477,7 @@ function getPlantByFruitId(fruitId) {
  * 获取所有种子信息（用于备选）
  */
 function getAllSeeds() {
+    ensureConfigsLoaded();
     return Array.from(seedToPlant.values()).map(p => ({
         seedId: p.seed_id,
         name: p.name,
@@ -432,10 +488,12 @@ function getAllSeeds() {
 }
 
 function getSeedImageBySeedId(seedId) {
+    ensureConfigsLoaded();
     return seedImageMap.get(Number(seedId) || 0) || '';
 }
 
 function getItemImageById(itemId) {
+    ensureConfigsLoaded();
     const id = Number(itemId) || 0;
     if (id <= 0) return '';
 
@@ -457,18 +515,20 @@ function getItemImageById(itemId) {
 
     const getLocalItemImg = (targetId) => {
         const direct = itemImageMap.get(targetId);
-        if (direct) return direct;
         const item = itemInfoMap.get(targetId);
-        if (!item) return '';
-        for (const iconKey of getIconLookupKeys(item.icon_res)) {
-            const mapped = itemIconKeyImageMap.get(iconKey);
-            if (mapped) return mapped;
+        const directIsSvgPlaceholder = /\.svg$/i.test(String(direct || ''));
+        if (direct && !directIsSvgPlaceholder) return direct;
+        if (item) {
+            for (const iconKey of getIconLookupKeys(item.icon_res)) {
+                const mapped = itemIconKeyImageMap.get(iconKey);
+                if (mapped) return mapped;
+            }
+            for (const assetKey of getIconLookupKeys(item.asset_name)) {
+                const mapped = itemIconKeyImageMap.get(assetKey);
+                if (mapped) return mapped;
+            }
         }
-        for (const assetKey of getIconLookupKeys(item.asset_name)) {
-            const mapped = itemIconKeyImageMap.get(assetKey);
-            if (mapped) return mapped;
-        }
-        return '';
+        return direct || '';
     };
 
     // 1. 尝试直接获取
@@ -489,25 +549,26 @@ function getItemImageById(itemId) {
 }
 
 function getItemById(itemId) {
+    ensureConfigsLoaded();
     return itemInfoMap.get(Number(itemId) || 0);
 }
 
 function getSeedPrice(seedId) {
+    ensureConfigsLoaded();
     const item = seedItemMap.get(Number(seedId) || 0);
     return item ? (Number(item.price) || 0) : 0;
 }
 
 function getFruitPrice(fruitId) {
+    ensureConfigsLoaded();
     const item = itemInfoMap.get(Number(fruitId) || 0);
     return item ? (Number(item.price) || 0) : 0;
 }
 
 function getAllPlants() {
+    ensureConfigsLoaded();
     return Array.from(plantMap.values());
 }
-
-// 启动时加载配置
-loadConfigs();
 
 module.exports = {
     loadConfigs,

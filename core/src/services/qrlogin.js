@@ -1,12 +1,13 @@
-const { Buffer } = require('node:buffer');
 /**
  * QR Code Login Module
  */
 const axios = require('axios');
 const QRCode = require('qrcode');
 const store = require('../models/store');
+const { createModuleLogger } = require('./logger');
 
 const ChromeUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const qrLogger = createModuleLogger('qrlogin');
 
 class QRLoginSession {
     static async requestQRCode() {
@@ -135,11 +136,15 @@ class MiniProgramLoginSession {
         try {
             return await this.requestOfficialLoginCode();
         } catch (officialError) {
-            console.warn('[QQ扫码] 官方登录码获取失败，尝试第三方回退:', officialError.message);
+            qrLogger.warn('官方登录码获取失败，尝试第三方回退', {
+                error: officialError && officialError.message ? officialError.message : String(officialError),
+            });
             try {
                 return await this.requestAineisheLoginCode(uin);
             } catch (fallbackError) {
-                console.error('MP Request Login Code Error:', fallbackError.message);
+                qrLogger.error('第三方登录码回退失败', {
+                    error: fallbackError && fallbackError.message ? fallbackError.message : String(fallbackError),
+                });
                 throw fallbackError;
             }
         }
@@ -192,11 +197,15 @@ class MiniProgramLoginSession {
         try {
             return await this.queryOfficialStatus(code);
         } catch (officialError) {
-            console.warn('[QQ扫码] 官方状态轮询失败，尝试第三方回退:', officialError.message);
+            qrLogger.warn('官方状态轮询失败，尝试第三方回退', {
+                error: officialError && officialError.message ? officialError.message : String(officialError),
+            });
             try {
                 return await this.queryAineisheStatus(code, uin);
             } catch (fallbackError) {
-                console.error('MP Query Status Error:', fallbackError.message);
+                qrLogger.error('第三方状态轮询回退失败', {
+                    error: fallbackError && fallbackError.message ? fallbackError.message : String(fallbackError),
+                });
                 throw fallbackError;
             }
         }
@@ -235,7 +244,9 @@ class MiniProgramLoginSession {
             const authCode = await this.exchangeOfficialAuthCode(ticket, appid);
             return authCode || ticket || '';
         } catch (error) {
-            console.error('MP Get Auth Code Error:', error.message);
+            qrLogger.error('获取授权码失败，回退使用 ticket', {
+                error: error && error.message ? error.message : String(error),
+            });
             return ticket || '';
         }
     }

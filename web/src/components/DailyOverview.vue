@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
 
 const props = defineProps<{
   dailyGifts: any
@@ -21,6 +22,18 @@ function getGiftIcon(key: string) {
 
 const hasDailyData = computed(() => !!props.dailyGifts)
 const gifts = computed(() => props.dailyGifts?.gifts || [])
+const dailySummaryChips = computed(() => {
+  const list = gifts.value
+  const done = list.filter((gift: any) => !!gift?.doneToday).length
+  const enabled = list.filter((gift: any) => !gift?.doneToday && !!gift?.enabled).length
+  const idle = Math.max(0, list.length - done - enabled)
+  return [
+    { key: 'total', label: `共 ${list.length} 项`, tone: 'ui-meta-chip--info' },
+    { key: 'done', label: `已完成 ${done}`, tone: 'ui-meta-chip--success' },
+    { key: 'enabled', label: `待执行 ${enabled}`, tone: 'ui-meta-chip--warning' },
+    { key: 'idle', label: `未开启 ${idle}`, tone: 'ui-meta-chip--neutral' },
+  ]
+})
 
 function formatTime(timestamp: number) {
   if (!timestamp)
@@ -72,40 +85,59 @@ function formatGiftProgress(gift: any) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
+  <div class="daily-overview flex flex-col gap-4">
     <!-- Daily Gifts Grid -->
-    <div class="glass-panel border border-white/20 rounded-lg p-4 shadow-sm dark:border-white/10">
-      <h3 class="glass-text-main mb-3 flex items-center gap-2 font-medium">
-        <div class="i-carbon-gift text-pink-500" />
-        <span>每日礼包 & 任务</span>
-      </h3>
+    <div class="daily-overview-panel glass-panel rounded-lg p-4 shadow-sm">
+      <div class="daily-overview-toolbar ui-mobile-sticky-panel">
+        <h3 class="glass-text-main flex items-center gap-2 font-medium">
+          <div class="daily-overview-title-icon i-carbon-gift" />
+          <span>每日礼包 & 任务</span>
+        </h3>
+        <p class="daily-overview-toolbar__desc">
+          每日任务领奖、免费礼包和月卡奖励都会在这里汇总展示当前状态。
+        </p>
+        <div v-if="gifts.length" class="daily-overview-toolbar__chips ui-bulk-actions">
+          <span
+            v-for="item in dailySummaryChips"
+            :key="item.key"
+            class="daily-summary-chip"
+            :class="item.tone"
+          >
+            {{ item.label }}
+          </span>
+        </div>
+      </div>
 
-      <div
+      <BaseEmptyState
         v-if="!hasDailyData"
-        class="glass-text-muted border border-white/20 rounded-lg bg-black/5 p-6 text-center text-sm backdrop-blur-sm dark:border-white/10 dark:bg-black/20"
-      >
-        请登录账号后查看
-      </div>
-      <div
+        compact
+        class="daily-overview-empty glass-text-muted rounded-lg p-6 text-center text-sm"
+        icon="i-carbon-user-avatar"
+        title="等待账号连接"
+        description="登录账号后即可查看每日礼包、任务和领取进度。"
+      />
+      <BaseEmptyState
         v-else-if="!gifts.length"
-        class="glass-text-muted border border-white/20 rounded-lg bg-black/5 p-6 text-center text-sm backdrop-blur-sm dark:border-white/10 dark:bg-black/20"
-      >
-        暂无每日礼包与任务数据
-      </div>
-      <div v-else class="grid grid-cols-2 gap-3 2xl:grid-cols-3 sm:grid-cols-3 2xl:gap-4">
+        compact
+        class="daily-overview-empty glass-text-muted rounded-lg p-6 text-center text-sm"
+        icon="i-carbon-gift"
+        title="暂无每日数据"
+        description="当前账号暂未同步到礼包或任务信息，可以稍后再刷新查看。"
+      />
+      <div v-else class="daily-overview-grid">
         <div
           v-for="gift in gifts"
           :key="gift.key"
-          class="flex flex-col justify-between border border-gray-200/50 rounded-lg p-3 dark:border-white/10 2xl:p-4"
+          class="daily-overview-gift flex flex-col justify-between rounded-lg p-3 2xl:p-4"
         >
           <div class="mb-2 flex items-center gap-2">
             <div
-              class="h-7 w-7 flex flex-shrink-0 items-center justify-center rounded-md 2xl:h-8 2xl:w-8"
-              :class="gift.doneToday ? 'bg-primary-100 dark:bg-primary-900/30' : (gift.enabled ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-gray-100 dark:bg-gray-700')"
+              class="daily-overview-gift-icon h-7 w-7 flex flex-shrink-0 items-center justify-center rounded-md 2xl:h-8 2xl:w-8"
+              :class="gift.doneToday ? 'is-done' : (gift.enabled ? 'is-enabled' : 'is-idle')"
             >
               <div
-                class="text-base 2xl:text-lg"
-                :class="[getGiftIcon(gift.key), gift.doneToday ? 'text-primary-500' : (gift.enabled ? 'text-blue-500' : 'text-gray-400')]"
+                class="daily-overview-gift-glyph text-base 2xl:text-lg"
+                :class="[getGiftIcon(gift.key), gift.doneToday ? 'is-done' : (gift.enabled ? 'is-enabled' : 'is-idle')]"
               />
             </div>
             <span class="glass-text-main text-sm font-medium leading-tight 2xl:text-base">
@@ -115,19 +147,19 @@ function formatGiftProgress(gift: any) {
 
           <div class="flex items-end justify-between">
             <span
-              class="text-xs 2xl:text-sm"
-              :class="gift.doneToday ? 'text-primary-500' : (gift.enabled ? 'text-blue-500' : 'text-gray-400')"
+              class="daily-overview-gift-status text-xs 2xl:text-sm"
+              :class="gift.doneToday ? 'is-done' : (gift.enabled ? 'is-enabled' : 'is-idle')"
             >
               {{ getGiftStatusText(gift) }}
             </span>
 
             <div class="flex flex-col items-end">
-              <span v-if="formatGiftProgress(gift)" class="text-xs text-gray-500 font-bold 2xl:text-sm">
+              <span v-if="formatGiftProgress(gift)" class="daily-overview-progress text-xs font-bold 2xl:text-sm">
                 {{ formatGiftProgress(gift) }}
               </span>
               <span
                 v-if="formatGiftSubText(gift)"
-                class="mt-0.5 text-[10px] text-gray-400 2xl:text-xs"
+                class="daily-overview-subtext mt-0.5 text-[10px] 2xl:text-xs"
               >
                 {{ formatGiftSubText(gift) }}
               </span>
@@ -138,3 +170,124 @@ function formatGiftProgress(gift: any) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.daily-overview {
+  color: var(--ui-text-1);
+}
+
+.daily-overview-panel,
+.daily-overview-empty,
+.daily-overview-gift {
+  border: 1px solid var(--ui-border-subtle);
+}
+
+.daily-overview-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.daily-overview-toolbar__desc {
+  color: var(--ui-text-2);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.daily-overview-toolbar__chips {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.daily-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.8rem;
+  padding: 0.25rem 0.7rem;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.daily-overview-title-icon {
+  color: color-mix(in srgb, var(--ui-brand-500) 58%, var(--ui-status-danger) 42%);
+}
+
+.daily-overview-empty,
+.daily-overview-gift {
+  background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent);
+}
+
+.daily-overview-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .daily-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1536px) {
+  .daily-overview-grid {
+    gap: 1rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.daily-overview-gift-icon {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+}
+
+.daily-overview-gift-icon.is-done {
+  background: var(--ui-brand-soft-15);
+}
+
+.daily-overview-gift-icon.is-enabled {
+  background: color-mix(in srgb, var(--ui-status-info) 14%, var(--ui-bg-surface-raised));
+}
+
+.daily-overview-gift-glyph.is-done,
+.daily-overview-gift-status.is-done {
+  color: var(--ui-brand-600);
+}
+
+.daily-overview-gift-glyph.is-enabled,
+.daily-overview-gift-status.is-enabled {
+  color: var(--ui-status-info);
+}
+
+.daily-overview-gift-glyph.is-idle {
+  color: var(--ui-text-3);
+}
+
+.daily-overview-gift-status.is-idle,
+.daily-overview-progress {
+  color: var(--ui-text-2);
+}
+
+.daily-overview-subtext {
+  color: var(--ui-text-3);
+}
+
+@media (max-width: 767px) {
+  .daily-overview-toolbar {
+    z-index: 11;
+    padding-bottom: 0.15rem;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent) 0%,
+      color-mix(in srgb, var(--ui-bg-surface) 70%, transparent) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+}
+</style>

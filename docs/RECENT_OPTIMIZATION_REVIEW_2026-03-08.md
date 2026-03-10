@@ -736,6 +736,12 @@
 - 处理：已用现有资源完成映射补齐（`feature-03~07` 对应 `screenshot-03~07`），README 本地链接巡检已清零。
 - 当前状态：文档类死链与截图缺失均已清零。
 
+#### 13.3.3 开发复盘文档再次出现 NUL 字节（已处理）
+
+- 现象：在将 README 巡检扩展为关键文档巡检后，`docs/RECENT_OPTIMIZATION_REVIEW_2026-03-08.md` 被检测到包含 NUL 字节。
+- 影响：会导致 `check-doc-links` 直接失败，属于文件完整性问题，不影响业务逻辑，但会阻断文档质量检查。
+- 处理：已执行无损清理，当前 `check-doc-links` 与 `check-announcements` 均恢复为 `0 error(s), 0 warning(s)`。
+
 ### 13.4 本轮建议
 
 - 后续可将 `README_IMAGES.md` 增补“`feature-*` 与 `screenshot-*` 映射表”，减少二次维护歧义。
@@ -746,22 +752,34 @@
 - 根目录命令已补齐：`pnpm check:readme-links`。
 - CI 已接入非阻断检查：
   - `.github/workflows/ci.yml`
-  - step: `Check README Links (non-blocking)`
+  - step: `Check Doc Links (non-blocking)`
 - 当前检查范围：
   - README 内本地 Markdown 链接
   - README 内本地图片引用
   - README 文件 NUL 字节
+- 已进一步扩展为关键文档巡检：`scripts/utils/check-doc-links.js`
+- 根目录命令已补齐：`pnpm check:doc-links`
+- 当前覆盖文件：
+  - `README.md`
+  - `docs/DEPLOYMENT_SOP.md`
+  - `docs/DEPLOYMENT_PLAN.md`
+  - `docs/RECENT_OPTIMIZATION_REVIEW_2026-03-08.md`
+  - `docs/dev-notes/ANNOUNCEMENT_HISTORY_CONSOLIDATION_2026-03-09.md`
+  - `assets/screenshots/README_IMAGES.md`
+  - `.github/pull_request_template.md`
 
 ### 13.5 当前建议
 
-- `check:readme-links` 已加入 PR 模板中的文档变更可选检查项；后续如扩展，可再把 `docs/**/*.md` 的链接巡检范围从 README 单文件扩大到多文档。
+- 当前已形成“公告检查 + 关键文档巡检 + PR 提醒”闭环；后续如扩展，可再把巡检范围从“关键文档白名单”扩大到 `docs/**/*.md` 全量扫描。
 
 ### 13.6 本轮验证
 
 - `node scripts/utils/check-announcements.js` => `0 error(s), 0 warning(s)`
 - `node scripts/utils/check-readme-links.js` => `0 error(s), 0 warning(s)`
+- `node scripts/utils/check-doc-links.js` => `0 error(s), 0 warning(s)`
 - Raw 链接可用性抽查：`deploy-arm.sh` / `deploy-x86.sh` 均返回 HTTP `200`
 - README 本地链接巡检：`0` 缺失（文档死链与截图缺失均已修复）
+- 关键文档巡检过程中发现的 NUL 字节问题已清理完成
 
 ## 14. 近期功能优化复查补记（2026-03-10 继续复查）
 
@@ -2194,3 +2212,278 @@
 
 - `pnpm audit:frontend-ownership`
 - `git diff --check -- package.json scripts/utils/audit-frontend-ownership.sh docs/REGRESSION_TEST_CHECKLIST.md docs/RECENT_OPTIMIZATION_REVIEW_2026-03-08.md CHANGELOG.DEVELOPMENT.md`
+
+### 14.36 文档检查链路补完（2026-03-10）
+
+#### 14.36.1 已落地
+
+- 根 `package.json` 已补齐：
+  - `check:announcements`
+  - `check:readme-links`
+  - `check:doc-links`
+- `scripts/utils/check-doc-links.js` 巡检范围已扩展到：
+  - `README.md`
+  - `deploy/README.md`
+  - `deploy/README.cn.md`
+  - `docs/USER_MANUAL.md`
+  - `docs/DEPLOYMENT_SOP.md`
+  - `docs/DEPLOYMENT_PLAN.md`
+  - 其他关键说明文档与 PR 模板
+- `.github/pull_request_template.md` 已加入公告/文档检查项。
+- `README.md` 已统一到当前口径：
+  - 发布前检查同时展示 `check:announcements` 与 `check:doc-links`
+  - GHCR 仓库名统一为 `ghcr.io/smdk000/qq-farm-ui-pro-max`
+  - 构建示例与版本说明统一为 `4.5.17` / `v4.5.17`
+- `docs/DEPLOYMENT_SOP.md`、`docs/DEPLOYMENT_PLAN.md` 已改为当前真实部署链路：
+  - 部署编排文件：`deploy/docker-compose.yml`
+  - 全新部署：`fresh-install.sh`
+  - 已部署更新：`update-app.sh`
+  - 旧部署修复：`repair-deploy.sh` / `repair-mysql.sh`
+- `docs/USER_MANUAL.md` 中用户可见的旧部署命令也已同步：
+  - 架构脚本路径改为 `scripts/deploy/...`
+  - Compose 示例改为 `deploy/docker-compose.yml`
+  - Docker 默认密码说明改为“以 `.env` 中 `ADMIN_PASSWORD` 为准”
+
+#### 14.36.2 本轮发现并处理的问题
+
+- 根 `package.json` 一度缺少 `check:announcements` / `check:doc-links` / `check:readme-links` 命令入口。
+- 影响：CI / Release 工作流虽然已调用这些命令，但根脚本不存在时会直接失败。
+- 处理：已补齐根命令入口，并与 README、部署文档、PR 模板同步。
+
+#### 14.36.3 本轮验证
+
+- `node scripts/utils/check-announcements.js`
+- `node scripts/utils/check-readme-links.js`
+- `node scripts/utils/check-doc-links.js`
+- `rg -n "docker-compose\\.prod\\.yml|ghcr\\.io/smdk000/qq-farm-bot-ui|Check README Links|check:readme-links" README.md docs/DEPLOYMENT_SOP.md docs/DEPLOYMENT_PLAN.md .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/docker-build-push.yml .github/pull_request_template.md`
+
+### 14.37 活文档旧部署模式防回退（2026-03-10）
+
+#### 14.37.1 已落地
+
+- `scripts/utils/check-doc-links.js` 已升级为“链接检查 + 旧部署模式检查”：
+  - 旧 raw 部署脚本路径：`main/scripts/deploy-arm.sh`、`main/scripts/deploy-x86.sh`
+  - 旧 GHCR 仓库名：`ghcr.io/smdk000/qq-farm-bot-ui`
+  - 旧 Compose 文件名：`docker-compose.prod.yml`
+  - 机器私有示例路径：`qq-farm-bot-ui-main_副本`
+- 巡检白名单已补入仍可能被协作者参考的活文档：
+  - `docs/architecture/TECH_STACK.md`
+  - `docs/maintenance/SOP_DEVELOPMENT_RELEASE_DEPLOY.md`
+  - `docs/maintenance/DIRECTORY_README_TEMPLATE.md`
+- 已同步修正文档中的旧部署写法，统一到当前标准链路：
+  - `scripts/deploy/fresh-install.sh`
+  - `scripts/deploy/update-app.sh`
+  - `scripts/deploy/deploy-arm.sh`
+  - `scripts/deploy/deploy-x86.sh`
+  - `deploy/docker-compose.yml`
+  - `ghcr.io/smdk000/qq-farm-ui-pro-max`
+
+#### 14.37.2 本轮发现并处理的问题
+
+- `docs/maintenance/SOP_DEVELOPMENT_RELEASE_DEPLOY.md` 仍保留旧 raw URL 和机器私有示例路径。
+- `docs/architecture/TECH_STACK.md` 仍保留旧 GHCR 名称、旧 Compose 名称和过时的部署脚本示例。
+- `docs/maintenance/DIRECTORY_README_TEMPLATE.md` 仍把生产部署编排写成 `docker-compose.prod.yml`。
+
+#### 14.37.3 本轮验证
+
+- `node scripts/utils/check-doc-links.js`
+- `rg -n "raw\\.githubusercontent\\.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy-(arm|x86)\\.sh|ghcr\\.io/smdk000/qq-farm-bot-ui|docker-compose\\.prod\\.yml|qq-farm-bot-ui-main_副本" docs/architecture/TECH_STACK.md docs/maintenance/SOP_DEVELOPMENT_RELEASE_DEPLOY.md docs/maintenance/DIRECTORY_README_TEMPLATE.md`
+
+### 14.38 docs/deployment 操作文档继续收口（2026-03-10）
+
+#### 14.38.1 已落地
+
+- `scripts/utils/check-doc-links.js` 白名单已补入 4 份仍具操作价值的部署文档：
+  - `docs/deployment/DOCKER-DEPLOYMENT.md`
+  - `docs/deployment/DOCKER-QUICK-REFERENCE.md`
+  - `docs/deployment/DOCKER_HUB_README.md`
+  - `docs/deployment/GHCR_README.md`
+- 已修正文档中的旧部署写法：
+  - `docker-compose -f docker-compose.prod.yml ...` -> `docker compose -f deploy/docker-compose.yml ...`
+  - 旧 raw 包装脚本路径 -> `main/scripts/deploy/deploy-*.sh`
+  - 旧 GHCR 镜像名 -> `ghcr.io/smdk000/qq-farm-ui-pro-max`
+
+#### 14.38.2 本轮发现并处理的问题
+
+- `docs/deployment/DOCKER-DEPLOYMENT.md` 与 `DOCKER-QUICK-REFERENCE.md` 仍保留旧 Compose 命令。
+- `docs/deployment/DOCKER_HUB_README.md` 仍保留旧仓库名与旧包装脚本下载路径。
+- `docs/deployment/GHCR_README.md` 仍保留旧 GHCR 镜像名与旧仓库链接。
+
+#### 14.38.3 本轮验证
+
+- `node scripts/utils/check-doc-links.js`
+- `rg -n "docker-compose\\.prod\\.yml|raw\\.githubusercontent\\.com/smdk000/qq-farm-bot-ui/main/scripts/deploy-(arm|x86)\\.sh|ghcr\\.io/smdk000/qq-farm-bot-ui" docs/deployment/DOCKER-DEPLOYMENT.md docs/deployment/DOCKER-QUICK-REFERENCE.md docs/deployment/DOCKER_HUB_README.md docs/deployment/GHCR_README.md`
+
+### 14.39 docs/deployment 归层与 guides 旧口径收口（2026-03-10）
+
+#### 14.39.1 已落地
+
+- `docs/deployment/README.md` 将作为部署文档入口页，区分：
+  - 当前活跃操作文档
+  - 历史归档文档
+- 计划将明显历史性的报告、成功记录、版本专用指南统一迁入 `docs/deployment/archive/`。
+- 活文档引用已预先调整：
+  - `docs/deployment/DOCKER-QUICK-REFERENCE.md` 中的历史更新说明改指向 `archive/DOCKER-UPDATE-SUMMARY.md`
+- 仍在使用的活文档旧仓库口径已收口：
+  - `docs/deployment/DEPLOYMENT.md`
+  - `docs/guides/TESTING_GUIDE.md`
+  - `docs/guides/DOCUMENTATION_INDEX.md`
+
+#### 14.39.2 本轮发现并处理的问题
+
+- `docs/deployment/DEPLOYMENT.md` 仍使用 `Penty-d/qq-farm-bot-ui` 作为 clone 与支持链接。
+- `docs/guides/TESTING_GUIDE.md` 与 `docs/guides/DOCUMENTATION_INDEX.md` 底部仍保留旧仓库 Issues / 项目地址 / Discussions 链接。
+
+#### 14.39.3 本轮验证
+
+- `rg -n "Penty-d/qq-farm-bot-ui|github\\.com/smdk000/qq-farm-bot-ui" docs/deployment/DEPLOYMENT.md docs/guides/TESTING_GUIDE.md docs/guides/DOCUMENTATION_INDEX.md`
+
+#### 14.39.4 实际归层结果
+
+- `docs/deployment/` 根目录现已收敛为活跃操作文档：
+  - `DEPLOYMENT.md`
+  - `DEPLOYMENT_CHECKLIST.md`
+  - `DOCKER-DEPLOYMENT.md`
+  - `DOCKER-QUICK-REFERENCE.md`
+  - `DOCKER_HUB_README.md`
+  - `GHCR_README.md`
+  - `README.md`
+- 以下历史文件已迁入 `docs/deployment/archive/`：
+  - `ALL_TASKS_COMPLETE.md`
+  - `CLEANUP_REPORT.md`
+  - `COMPLETE_OPTIMIZATION_SUMMARY.md`
+  - `DEPLOYMENT-SUCCESS-10.31.2.242.md`
+  - `DEPLOYMENT_GUIDE_v3.6.0.md`
+  - `DOCKER-BUILD-SUCCESS.md`
+  - `DOCKER-COMPLETION-REPORT.md`
+  - `DOCKER-UPDATE-SUMMARY.md`
+  - `DOCKER_RELEASE_COMPLETE.md`
+  - `DOCKER_SHARING_SOLUTION.md`
+  - `DOCKER_SYNC_COMPLETE.md`
+  - `Docker 多平台部署完整计划.md`
+  - `Docker 多平台部署指南.html`
+  - `FRESH_INSTALL_REHEARSAL_20260309.md`
+  - `HISTORICAL_NOTICE_20260307.md`
+
+#### 14.39.5 追加验证
+
+- `node scripts/utils/check-doc-links.js`
+- `find docs/deployment -maxdepth 2 -type f | sort`
+
+### 14.36 前端源码所有权污染已清理（2026-03-10）
+
+#### 14.36.1 已落地：`web/src` 命中项已原地重建为当前用户拥有
+
+- 处理方式：
+  - 先将当时命中的 `64` 个 `root` 源码文件快照到 `archive/runtime-snapshots/20260310-144723-web-src-ownership-normalize`
+  - 再以相同内容原地替换这些文件，让所有权回到当前用户并恢复正常文件权限
+- 处理范围：
+  - `web/src/App.vue`
+  - `web/src/components/**`
+  - `web/src/components/ui/**`
+  - `web/src/layouts/DefaultLayout.vue`
+  - `web/src/theme/**`
+  - `web/src/utils/management-schema.ts`
+  - `web/src/views/**`
+
+#### 14.36.2 当前结论
+
+- `pnpm audit:frontend-ownership` 当前已恢复为通过。
+- 本轮没有发现新的代码回归；这次变更只处理文件所有权与权限，不修改源码内容。
+- 当前前端关键路径里的 `root` 命中项已经清零，后续如果再次出现，可直接用审计命令和这次快照路径对照排查。
+
+#### 14.36.3 本轮验证
+
+- `pnpm audit:frontend-ownership`
+- `pnpm test:web:regression`
+- `stat -f '%Su %Sg %Sp %N' web/src/App.vue web/src/views/Accounts.vue web/src/components/ConfirmModal.vue web/src/components/ui/BaseButton.vue`
+
+#### 14.36.4 追加收口
+
+- `package.json` 的 `pnpm audit:workspace-permissions` 已从内联命令改回稳定脚本 `scripts/utils/check-workspace-permissions.sh`
+- 后续调整环境健康检查项时，不需要再维护大段 shell 转义字符串
+- 现场复跑时，环境总入口额外抓到 [web/src/stores/copy-feedback.ts](../web/src/stores/copy-feedback.ts) 仍为 `root` 所有者；已归档快照到 `archive/runtime-snapshots/20260310-155939-copy-feedback-ownership-rebuild` 后原地重建，当前总入口与前端回归链均恢复通过
+
+#### 14.36.5 追加收口：CI 已补非阻断环境权限审计
+
+- `.github/workflows/ci.yml` 新增 `Audit Workspace Permissions (advisory)`
+- CI 现在会在前端阻断链旁路执行 `pnpm audit:workspace-permissions`
+- 该步骤保持 `continue-on-error: true`，用于尽早暴露环境污染，不影响当前主回归链阻断策略
+
+#### 14.36.6 追加收口：`build:runtime` 输出路径已对齐到 `web/dist-runtime`
+
+- 复查中发现 `pnpm -C web run build:runtime` 虽然日志显示构建成功，但相对路径 `WEB_DIST_DIR=dist-runtime` 被按仓库根解析，实际落到了根目录 `dist-runtime/`，导致 `web/dist-runtime` 仍是空壳 fallback。
+- 已在 `core/src/utils/web-dist.js` 为 `resolveConfiguredWebDistDir()` 补充可选基准目录参数，并在 `web/vite.config.ts` 中显式以 `web/` 目录作为 `WEB_DIST_DIR` 的相对路径基准。
+- 对应回归已补在 `core/__tests__/web-dist.test.js`，覆盖“相对路径按指定基准目录解析”的场景。
+- 现场处置：
+  - 旧的 `web/dist` 权限污染树已归档到 `archive/runtime-snapshots/20260310-170145-web-dist-ownership-rebuild`
+  - 仓库根误生成的 `dist-runtime/` 已归档到 `archive/runtime-snapshots/20260310-170706-root-dist-runtime-cleanup`
+- 当前状态：
+  - `web/dist` 与 `web/dist-runtime` 都有有效产物
+  - `inspectWebDistState()` 已恢复为 `activeDir=web/dist`、`fallbackDir=web/dist-runtime`
+  - 根目录不再保留误生成的 `dist-runtime/`
+
+#### 14.36.7 追加验证
+
+- `node --test core/__tests__/web-dist.test.js`
+- `pnpm -C web run build:runtime`
+- `pnpm test:web:regression`
+- `pnpm audit:workspace-permissions`
+
+#### 14.36.8 追加收口：环境巡检脚本已补阻断级脚本回归
+
+- `core/__tests__/workspace-permissions-script.test.js` 已新增两条分支覆盖：
+  - `ownership audit` 脚本缺失时返回非零并打印明确错误
+  - `package.json` / `web/package.json` 出现 world-writable 权限时能被准确报出
+- 根脚本已新增 `pnpm test:workspace-audit-scripts`，统一执行：
+  - `core/__tests__/workspace-permissions-script.test.js`
+  - `core/__tests__/web-dist.test.js`
+- `.github/workflows/ci.yml` 已新增阻断步骤 `Verify Environment Audit Helpers`
+- 结论：
+  - 环境巡检不再只靠现场命令验证，脚本自身的退出码和关键信息输出也已被固定回归覆盖
+  - 后续若再改 `check-workspace-permissions.sh` 或 `web-dist` 选路逻辑，会更早在 CI 中暴露
+
+#### 14.36.9 追加验证
+
+- `pnpm test:workspace-audit-scripts`
+
+#### 14.36.10 追加收口：验证阶段再次命中 `web/dist` 所有权污染，已用 fallback 无损回灌
+
+- 在执行 `pnpm audit:workspace-permissions` 复核新脚本入口时，现场再次命中 `web/dist` 整棵产物树为 `root` 所有者；`web/dist-runtime` 仍保持完整且为当前用户拥有。
+- 本次未直接删除活动产物，而是：
+  - 先把当时的 `web/dist` 归档到 `archive/runtime-snapshots/20260310-171709-web-dist-rehydrate-from-fallback`
+  - 再以 `web/dist-runtime` 为来源重建新的 `web/dist`
+- 修复后复核结果：
+  - `web/dist` 与 `web/dist-runtime` 都为当前用户拥有
+  - `inspectWebDistState()` 继续保持 `activeDir=web/dist`
+  - `pnpm audit:workspace-permissions` 再次恢复通过
+
+#### 14.36.11 追加验证
+
+- `stat -f '%Su %Sg %Sp %N' web/dist web/dist/assets web/dist/index.html web/dist/background-presets web/dist/nc_local_version`
+- `pnpm audit:workspace-permissions`
+
+#### 14.36.12 追加收口：`repair:web-dist` 已升级为“健康跳过 + 回灌后自检”
+
+- `core/src/utils/web-dist.js` 已新增 `rehydrateDefaultWebDistFromFallback()`，把“用健康 fallback 重建标准 `web/dist`”收口成共享工具函数。
+- `core/__tests__/web-dist.test.js` 已补“fallback 回灌标准 dist 并归档旧目录”的回归。
+- 新增固定入口 `pnpm repair:web-dist`，脚本位于 `scripts/utils/repair-web-dist-from-fallback.sh`：
+  - 默认会先判断 `web/dist` 与 `web/dist-runtime` 是否都已健康
+  - 若当前目录和所有权都正常，则直接跳过，不再无意义地产生快照
+  - 若执行了回灌，结尾会强制再跑一次 `audit-frontend-ownership.sh web/dist web/dist-runtime`，只有产物目录干净才算成功
+  - 如需强制覆盖标准目录，可使用 `FORCE_WEB_DIST_REPAIR=1 pnpm repair:web-dist`
+- `README.md` 已同步新增该维护入口说明。
+
+#### 14.36.13 追加现场修复
+
+- 在验证新修复入口期间，额外命中两个历史 UI 源码文件为 `root` 所有者：
+  - `web/src/components/ui/BaseHistoryHighlightCard.vue`
+  - `web/src/components/ui/BaseHistoryMetricGrid.vue`
+- 已先归档快照到 `archive/runtime-snapshots/20260310-174332-web-src-history-ui-ownership-rebuild`，再原地重建并恢复为当前用户拥有的 `644` 权限。
+
+#### 14.36.14 追加验证
+
+- `bash -n scripts/utils/repair-web-dist-from-fallback.sh`
+- `pnpm repair:web-dist`
+- `pnpm audit:workspace-permissions`
+- `pnpm test:workspace-audit-scripts`

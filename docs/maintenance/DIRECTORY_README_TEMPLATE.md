@@ -110,7 +110,7 @@
 ### `docker/`
 
 - `docker-compose.yml`：开发环境
-- `docker-compose.prod.yml`：生产环境
+- `deploy/docker-compose.yml`：标准部署编排
 - `start.sh`：启动脚本
 
 ---

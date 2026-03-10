@@ -18,7 +18,31 @@ const model = defineModel<string>()
       :rows="rows || 3"
       :placeholder="placeholder"
       :disabled="disabled"
-      class="glass-text-main w-full border border-gray-200/50 rounded-lg bg-black/5 px-3 py-2 shadow-sm outline-none backdrop-blur-sm transition-all duration-200 dark:border-white/10 focus:border-primary-500 dark:bg-black/20 disabled:bg-black/10 focus:bg-white/60 disabled:text-gray-400 focus:ring-2 focus:ring-primary-500/20 dark:focus:border-primary-500 dark:disabled:bg-black/40 dark:focus:bg-black/40"
+      class="base-textarea glass-text-main w-full border rounded-lg px-3 py-2 shadow-sm outline-none backdrop-blur-sm transition-all duration-200"
     />
   </div>
 </template>
+
+<style scoped>
+.base-textarea {
+  min-height: calc(var(--ui-control-height) * 1.7);
+  border-color: var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent);
+  border-radius: var(--ui-control-radius);
+}
+
+.base-textarea:focus {
+  border-color: var(--ui-brand-500);
+  background: var(--ui-bg-surface-raised);
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.base-textarea:disabled {
+  background: color-mix(in srgb, var(--ui-bg-surface) 38%, transparent);
+  color: var(--ui-text-3);
+}
+
+.base-textarea::placeholder {
+  color: var(--ui-text-2);
+}
+</style>

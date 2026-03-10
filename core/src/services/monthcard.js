@@ -140,6 +140,8 @@ async function performDailyMonthCardGift(force = false) {
 }
 
 module.exports = {
+    getMonthCardInfos,
+    claimMonthCardReward,
     performDailyMonthCardGift,
     getMonthCardDailyState: () => ({
         key: DAILY_KEY,

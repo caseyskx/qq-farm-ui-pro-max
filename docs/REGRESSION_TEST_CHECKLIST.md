@@ -115,13 +115,19 @@
 ### 4.4 固定执行入口
 
 - 本地推荐入口：`pnpm test:frontend`
+- 环境脚本回归入口：`pnpm test:workspace-audit-scripts`
 - 根目录兼容入口：`pnpm test:web:regression`
 - Web 子包入口：`pnpm -C web test:regression`
 - Web 运行时产物入口：`pnpm -C web build:runtime`
 - CI 入口：`.github/workflows/ci.yml` 中的 `Verify Frontend Regression`（执行 `pnpm test:frontend`）
+- CI 环境脚本回归：`.github/workflows/ci.yml` 中的 `Verify Environment Audit Helpers`
 - 附加审计：`pnpm -C web run lint:check`
+- 环境维护审计：`pnpm audit:frontend-ownership`
+- 环境健康总入口：`pnpm audit:workspace-permissions`
+- 标准产物修复入口：`pnpm repair:web-dist`
+- CI 环境审计：`.github/workflows/ci.yml` 中的 `Audit Workspace Permissions (advisory)`
 
-**说明**：固定脚本当前以 `vue-tsc --force + web 单测 + build:runtime` 作为阻断链，显式写入 `dist-runtime`，避免历史 `web/dist` 权限污染把结构性回归链误杀；`lint:check` 保留为附加审计，用于持续清理历史页面的 lint 债务，但不再阻断这条结构性回归链。`test:frontend` 只是更直观的根级别别名，实际仍走同一条回归链。
+**说明**：固定脚本当前以 `vue-tsc --force + web 单测 + build:runtime` 作为阻断链，显式写入 `web/dist-runtime`，避免历史 `web/dist` 权限污染把结构性回归链误杀；`lint:check` 保留为附加审计，用于持续清理历史页面的 lint 债务，但不再阻断这条结构性回归链。`test:frontend` 只是更直观的根级别别名，实际仍走同一条回归链。`audit:frontend-ownership` 用来检查前端关键路径是否再次出现 `root` 所有者文件；`audit:workspace-permissions` 则在此基础上继续检查 `web`、`scripts` 和 `package.json` 的 world-writable 残留，作为环境健康总入口。若仓库根目录再次出现单独的 `dist-runtime/`，应视为运行时产物输出路径回归，不能当成有效 fallback。
 
 ---
 

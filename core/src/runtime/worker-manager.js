@@ -5,21 +5,32 @@ const { CONFIG } = require('../config/config');
 const { MiniProgramLoginSession } = require('../services/qrlogin');
 
 let systemLogBatch = [];
-setInterval(() => {
-    if (systemLogBatch.length > 0) {
-        const pool = getPool();
-        const currentBatch = systemLogBatch;
-        systemLogBatch = [];
-        try {
-            const values = currentBatch.map(b => [b.accountId, b.level || 'info', b.tag || '默认', b.msg || '', JSON.stringify(b.meta || {})]);
-            const placeholders = currentBatch.map(() => '(?, ?, ?, ?, ?)').join(',');
-            pool.query(`INSERT INTO system_logs (account_id, level, category, text, meta_data) VALUES ${placeholders}`, values.flat())
-                .catch(err => {/* 忽略批量写入异常以防日志死循环 */ });
-        } catch (e) { }
+let systemLogFlushHandle = null;
+
+function flushSystemLogBatch() {
+    if (systemLogBatch.length === 0) return;
+    const pool = getPool();
+    const currentBatch = systemLogBatch;
+    systemLogBatch = [];
+    try {
+        const values = currentBatch.map(b => [b.accountId, b.level || 'info', b.tag || '默认', b.msg || '', JSON.stringify(b.meta || {})]);
+        const placeholders = currentBatch.map(() => '(?, ?, ?, ?, ?)').join(',');
+        pool.query(`INSERT INTO system_logs (account_id, level, category, text, meta_data) VALUES ${placeholders}`, values.flat())
+            .catch(() => {/* 忽略批量写入异常以防日志死循环 */ });
+    } catch { }
+}
+
+function ensureSystemLogFlushLoop() {
+    if (systemLogFlushHandle) return systemLogFlushHandle;
+    systemLogFlushHandle = setInterval(flushSystemLogBatch, 5000);
+    if (typeof systemLogFlushHandle.unref === 'function') {
+        systemLogFlushHandle.unref();
     }
-}, 5000).unref();
+    return systemLogFlushHandle;
+}
 
 function createWorkerManager(options) {
+    ensureSystemLogFlushLoop();
     const {
         fork,
         WorkerThread,
@@ -171,7 +182,7 @@ function createWorkerManager(options) {
                     addAccountLog('auth_refresh', `账号 ${launchAccount.name} 启动前自动刷新 QQ 授权成功`, launchAccount.id, launchAccount.name);
                 }
             } catch (error) {
-                log('系统', `账号 ${launchAccount.name} QQ 启动换码失败，回退使用现有 Code`, {
+                log('系统', `账号 ${launchAccount.name} QQ 启动换码失败，回退使用现有登录码`, {
                     accountId: String(launchAccount.id),
                     accountName: launchAccount.name,
                     reason: error && error.message ? error.message : String(error || ''),
@@ -193,7 +204,7 @@ function createWorkerManager(options) {
                     addAccountLog('auth_refresh', `账号 ${launchAccount.name} 启动前自动刷新微信授权成功`, launchAccount.id, launchAccount.name);
                 }
             } catch (error) {
-                log('系统', `账号 ${launchAccount.name} 微信启动续签失败，回退使用现有 Code`, {
+                log('系统', `账号 ${launchAccount.name} 微信启动续签失败，回退使用现有登录码`, {
                     accountId: String(launchAccount.id),
                     accountName: launchAccount.name,
                     reason: error && error.message ? error.message : String(error || ''),
@@ -207,7 +218,7 @@ function createWorkerManager(options) {
         try {
             child = createWorkerProcess(launchAccount);
         } catch (err) {
-            const reason = err && err.message ? err.message : String(err || 'unknown error');
+            const reason = err && err.message ? err.message : String(err || '未知错误');
             log('错误', `账号 ${launchAccount.name} 启动失败: ${reason}`, { accountId: String(launchAccount.id), accountName: launchAccount.name });
             addAccountLog('start_failed', `账号 ${launchAccount.name} 启动失败`, launchAccount.id, launchAccount.name, { reason });
             return false;
@@ -268,7 +279,7 @@ function createWorkerManager(options) {
         child.on('exit', (code, signal) => {
             const current = workers[launchAccount.id];
             const displayName = (current && current.name) || launchAccount.name;
-            log('系统', `账号 ${displayName} 进程退出 (code=${code}, signal=${signal || 'none'})`, {
+            log('系统', `账号 ${displayName} 进程退出 (code=${code}, signal=${signal || '无'})`, {
                 accountId: String(launchAccount.id),
                 accountName: displayName,
                 runtimeMode: useThreadRuntime ? 'thread' : 'fork',
@@ -281,7 +292,7 @@ function createWorkerManager(options) {
                 for (const [reqId, req] of current.requests.entries()) {
                     managerScheduler.clear(`api_timeout_${launchAccount.id}_${reqId}`);
                     try {
-                        req.reject(new Error('Worker exited'));
+                        req.reject(new Error('工作进程已退出'));
                     } catch { }
                 }
                 current.requests.clear();
@@ -396,7 +407,7 @@ function createWorkerManager(options) {
                         });
                         // 仅在首次同步或名称变更时记录日志
                         if (oldNick !== newNick) {
-                            log('系统', `已同步账号昵称: ${oldNick || 'None'} -> ${newNick}`, { accountId, accountName: worker.name });
+                            log('系统', `已同步账号昵称: ${oldNick || '空'} -> ${newNick}`, { accountId, accountName: worker.name });
                         }
                     }
                 }
@@ -405,6 +416,7 @@ function createWorkerManager(options) {
             const connected = !!(panelStatus.connection && panelStatus.connection.connected);
             const liveStatus = (panelStatus.status && typeof panelStatus.status === 'object') ? panelStatus.status : {};
             try {
+                const now = Date.now();
                 addOrUpdateAccount({
                     id: accountId,
                     running: !worker.stopping,
@@ -416,6 +428,8 @@ function createWorkerManager(options) {
                     exp: Number(liveStatus.exp) || 0,
                     coupon: Number(liveStatus.coupon) || 0,
                     uptime: Number(panelStatus.uptime) || 0,
+                    lastStatusAt: now,
+                    ...(connected ? { lastOnlineAt: now } : {}),
                 });
             } catch { }
             if (connected) {
@@ -620,8 +634,15 @@ function createWorkerManager(options) {
             managerScheduler.clear(`api_timeout_${accountId}_${id}`);
             const req = worker.requests.get(id);
             if (req) {
-                if (error) req.reject(new Error(error));
-                else req.resolve(result);
+                if (error) {
+                    if (typeof error === 'object' && error !== null) {
+                        const err = new Error(String(error.message || '子进程接口错误'));
+                        if (error.code) err.code = String(error.code);
+                        req.reject(err);
+                    } else {
+                        req.reject(new Error(String(error)));
+                    }
+                } else req.resolve(result);
                 worker.requests.delete(id);
             }
         }
@@ -639,7 +660,7 @@ function createWorkerManager(options) {
             managerScheduler.setTimeoutTask(`api_timeout_${accountId}_${id}`, 10000, () => {
                 if (worker.requests.has(id)) {
                     worker.requests.delete(id);
-                    reject(new Error('API Timeout'));
+                    reject(new Error('接口调用超时'));
                 }
             });
 

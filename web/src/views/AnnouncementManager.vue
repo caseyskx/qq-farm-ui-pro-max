@@ -5,6 +5,7 @@ import ConfirmModal from '@/components/ConfirmModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSwitch from '@/components/ui/BaseSwitch.vue'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 // 权限控制
 const isAdmin = computed(() => {
@@ -123,11 +124,11 @@ async function saveAnnouncement() {
       await loadAnnouncements()
     }
     else {
-      showAlert(`保存失败: ${res.data.error}`, 'danger')
+      showAlert(`保存失败: ${localizeRuntimeText(res.data.error || '未知错误')}`, 'danger')
     }
   }
   catch (e: any) {
-    showAlert(`保存失败: ${e.message}`, 'danger')
+    showAlert(`保存失败: ${localizeRuntimeText(e.message || '未知错误')}`, 'danger')
   }
   finally {
     loading.value = false
@@ -144,11 +145,11 @@ function deleteAnnouncement(id: number) {
         await loadAnnouncements()
       }
       else {
-        showAlert(`删除失败: ${res.data.error}`, 'danger')
+        showAlert(`删除失败: ${localizeRuntimeText(res.data.error || '未知错误')}`, 'danger')
       }
     }
     catch (e: any) {
-      showAlert(`删除失败: ${e.message}`, 'danger')
+      showAlert(`删除失败: ${localizeRuntimeText(e.message || '未知错误')}`, 'danger')
     }
     finally {
       loading.value = false
@@ -166,11 +167,11 @@ function syncFromLog() {
         await loadAnnouncements()
       }
       else {
-        showAlert(`同步失败: ${res.data.error}`, 'danger')
+        showAlert(`同步失败: ${localizeRuntimeText(res.data.error || '未知错误')}`, 'danger')
       }
     }
     catch (e: any) {
-      showAlert(`同步操作失败: ${e.message}`, 'danger')
+      showAlert(`同步操作失败: ${localizeRuntimeText(e.message || '未知错误')}`, 'danger')
     }
     finally {
       syncing.value = false
@@ -184,38 +185,40 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="relative min-h-screen p-6 pb-28">
-    <div class="mb-6 flex flex-col justify-between gap-4 border-b border-gray-100/50 pb-4 md:flex-row md:items-center dark:border-gray-700/50">
-      <div>
-        <h1 class="glass-text-main flex items-center gap-2 text-2xl font-bold">
-          <span class="text-blue-500 font-normal"><div class="i-carbon-notification" /></span>
+  <div class="announcement-manager-page ui-page-shell ui-page-stack ui-page-density-relaxed relative min-h-full w-full pb-28">
+    <div class="announcement-manager-header ui-page-header pb-4">
+      <div class="ui-page-header__main">
+        <h1 class="ui-page-title glass-text-main flex items-center gap-2">
+          <span class="announcement-header-icon font-normal"><div class="i-carbon-notification" /></span>
           系统公告管理
         </h1>
-        <p class="glass-text-muted mt-1 text-sm">
+        <p class="ui-page-desc">
           管理系统展示的多个历史版本公告，并允许与物理 Update.log 日志联动。
         </p>
       </div>
-      <div v-if="isAdmin && !currentEdit" class="flex gap-3">
-        <BaseButton variant="outline" :loading="syncing" @click="syncFromLog">
-          <div class="i-carbon-repo-source-code mr-1.5" />
-          同步 Update.log
-        </BaseButton>
-        <BaseButton variant="primary" @click="openCreateForm">
-          <div class="i-carbon-add mr-1.5" />
-          编写新公告
-        </BaseButton>
+      <div v-if="isAdmin && !currentEdit" class="announcement-manager-actions ui-mobile-sticky-panel">
+        <div class="ui-page-actions ui-bulk-actions">
+          <BaseButton variant="outline" :loading="syncing" @click="syncFromLog">
+            <div class="i-carbon-repo-source-code mr-1.5" />
+            同步 Update.log
+          </BaseButton>
+          <BaseButton variant="primary" @click="openCreateForm">
+            <div class="i-carbon-add mr-1.5" />
+            编写新公告
+          </BaseButton>
+        </div>
       </div>
     </div>
 
-    <div v-if="!isAdmin" class="flex flex-1 flex-col items-center justify-center py-20 text-gray-400">
+    <div v-if="!isAdmin" class="announcement-empty-state flex flex-1 flex-col items-center justify-center py-20">
       <div class="i-carbon-locked mb-4 text-4xl" />
       <p>仅超级管理员可访问该页面</p>
     </div>
 
     <!-- 编辑表单区块 -->
-    <div v-else-if="currentEdit" class="mx-auto max-w-4xl space-y-6">
+    <div v-else-if="currentEdit" class="w-full space-y-6">
       <div class="card glass-panel flex flex-col rounded-lg shadow">
-        <div class="border-b border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="announcement-panel-divider px-4 py-3">
           <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
             <div class="i-carbon-edit" />
             {{ currentEdit.id ? '编辑历史公告' : '编写全新发布' }}
@@ -251,36 +254,36 @@ onMounted(() => {
             <label class="glass-text-main mb-1.5 block text-sm font-medium">公告内容详情 <span class="glass-text-muted text-xs font-normal">（支持直接排版与换行）</span></label>
             <textarea
               v-model="currentEdit.content"
-              class="glass-input w-full border border-gray-300/60 rounded-md bg-white/80 px-4 py-3 text-sm dark:border-gray-600/60 focus:border-blue-500 dark:bg-gray-800/80 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              class="announcement-editor w-full px-4 py-3 text-sm"
               rows="8"
               placeholder="记录您为程序修复和带来的改进细节..."
             />
           </div>
 
           <!-- Preview Area -->
-          <div v-if="currentEdit.title || currentEdit.content" class="mt-4 border border-blue-200/50 rounded-xl bg-blue-50/30 p-5 shadow-sm dark:border-blue-900/30 dark:bg-blue-900/10">
+          <div v-if="currentEdit.title || currentEdit.content" class="announcement-preview-shell mt-4 rounded-xl p-5 shadow-sm">
             <div class="mb-3 flex items-center gap-2">
-              <div class="i-carbon-view text-blue-500" />
-              <p class="text-xs text-blue-600 font-bold tracking-wider uppercase dark:text-blue-400">
+              <div class="announcement-header-icon i-carbon-view" />
+              <p class="announcement-preview-heading text-xs font-bold tracking-wider uppercase">
                 前端视距回显
               </p>
             </div>
-            <div class="border border-gray-100 rounded-lg bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-              <p class="text-center text-lg text-gray-800 font-bold dark:text-gray-100">
+            <div class="announcement-preview-card rounded-lg p-4 shadow-sm">
+              <p class="announcement-preview-title text-center text-lg font-bold">
                 {{ currentEdit.title || '（未输入主标题）' }}
               </p>
               <div class="mt-3 flex items-center justify-center gap-2 text-xs">
-                <span v-if="currentEdit.version" class="rounded-full bg-blue-50 px-2 py-0.5 text-blue-500">{{ currentEdit.version }}</span>
-                <span v-if="currentEdit.publish_date" class="text-gray-400">{{ currentEdit.publish_date }}</span>
+                <span v-if="currentEdit.version" class="announcement-preview-badge rounded-full px-2 py-0.5">{{ currentEdit.version }}</span>
+                <span v-if="currentEdit.publish_date" class="announcement-preview-date">{{ currentEdit.publish_date }}</span>
               </div>
-              <div class="mt-4 whitespace-pre-wrap text-sm text-gray-600 leading-relaxed dark:text-gray-300">
+              <div class="announcement-preview-content mt-4 whitespace-pre-wrap text-sm leading-relaxed">
                 {{ currentEdit.content || '（暂无详情文本输入，仅骨架）' }}
               </div>
             </div>
           </div>
         </div>
 
-        <div class="mt-auto flex flex-wrap justify-end gap-3 border-t border-gray-200/50 bg-black/5 px-6 py-4 dark:border-gray-700/50 dark:bg-white/5">
+        <div class="announcement-panel-footer announcement-editor-actions ui-mobile-action-panel mt-auto flex flex-wrap justify-end gap-3 px-6 py-4">
           <BaseButton
             variant="secondary"
             :loading="loading"
@@ -302,43 +305,78 @@ onMounted(() => {
     </div>
 
     <!-- 列表展示区块 -->
-    <div v-else class="mx-auto max-w-4xl">
+    <div v-else class="w-full">
       <div v-if="loading" class="flex items-center justify-center p-12">
-        <div class="i-carbon-circle-dash h-8 w-8 animate-spin text-gray-400" />
+        <div class="announcement-empty-state i-carbon-circle-dash h-8 w-8 animate-spin" />
       </div>
-      <div v-else-if="announcements.length === 0" class="card glass-panel flex flex-col items-center justify-center py-20 text-gray-500">
-        <div class="i-carbon-catalog mb-3 text-4xl text-gray-300/50 dark:text-gray-600" />
+      <div v-else-if="announcements.length === 0" class="announcement-empty-state card glass-panel flex flex-col items-center justify-center py-20">
+        <div class="announcement-empty-icon i-carbon-catalog mb-3 text-4xl" />
         <p>目前没有已发布的记录或可查看的历史版本，试着从日志同步一下？</p>
       </div>
-      <div v-else class="space-y-3">
-        <div
+      <div v-else class="announcement-list ui-mobile-record-list">
+        <article
           v-for="item in announcements"
           :key="item.id"
-          class="card glass-panel flex flex-col justify-between gap-4 p-5 transition-shadow md:flex-row md:items-center hover:shadow-md"
+          class="announcement-record card glass-panel ui-mobile-record-card transition-shadow hover:shadow-md"
           :class="item.enabled ? '' : 'opacity-60 grayscale-[30%]'"
         >
-          <div class="flex flex-1 flex-col items-start gap-1">
-            <div class="flex items-center gap-3">
-              <span class="text-lg text-gray-800 font-bold dark:text-gray-200">{{ item.title || '（无题）' }}</span>
-              <span v-if="item.version" class="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">{{ item.version }}</span>
-              <span v-if="!item.enabled" class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-gray-800">已禁用 / 草稿</span>
+          <div class="announcement-record-main">
+            <div class="ui-mobile-record-head">
+              <div class="ui-mobile-record-body">
+                <div class="ui-mobile-record-badges">
+                  <span v-if="item.version" class="announcement-preview-badge rounded px-2 py-0.5 text-xs">{{ item.version }}</span>
+                  <span class="announcement-item-status rounded px-2 py-0.5 text-xs">
+                    {{ item.enabled ? '已启用' : '已禁用 / 草稿' }}
+                  </span>
+                </div>
+                <h3 class="announcement-item-title ui-mobile-record-title">
+                  {{ item.title || '（无题）' }}
+                </h3>
+                <p class="announcement-item-date ui-mobile-record-subtitle font-mono">
+                  {{ item.publish_date || item.createdAt || '未知追踪时间' }}
+                </p>
+              </div>
             </div>
-            <p class="mt-1 text-xs text-gray-400 tracking-wide font-mono">
-              {{ item.publish_date || item.createdAt || '未知追踪时间' }}
-            </p>
-            <p class="line-clamp-2 mt-2 break-words pr-4 text-sm text-gray-500 leading-relaxed">
-              {{ item.content }}
-            </p>
+
+            <div class="ui-mobile-record-grid announcement-record-grid">
+              <div class="ui-mobile-record-field">
+                <div class="ui-mobile-record-label">
+                  展示状态
+                </div>
+                <div class="ui-mobile-record-value">
+                  {{ item.enabled ? '客户端可见' : '草稿 / 暂停展示' }}
+                </div>
+              </div>
+
+              <div class="ui-mobile-record-field">
+                <div class="ui-mobile-record-label">
+                  最近更新时间
+                </div>
+                <div class="ui-mobile-record-value ui-mobile-record-value--muted">
+                  {{ item.updatedAt || '未记录' }}
+                </div>
+              </div>
+
+              <div class="ui-mobile-record-field ui-mobile-record-field--full">
+                <div class="ui-mobile-record-label">
+                  内容预览
+                </div>
+                <div class="announcement-item-content ui-mobile-record-value ui-mobile-record-value--muted line-clamp-3 break-words">
+                  {{ item.content || '暂无内容' }}
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="flex gap-2">
+
+          <div class="announcement-record-actions ui-mobile-record-actions ui-bulk-actions">
             <BaseButton variant="outline" class="text-sm !px-3 !py-1" @click="openEditForm(item)">
               <div class="i-carbon-edit mr-1" /> 编辑
             </BaseButton>
-            <BaseButton variant="outline" class="border-red-200 text-sm text-red-500 dark:border-red-900/40 hover:bg-red-50 !px-3 !py-1 dark:hover:bg-red-900/20" @click="deleteAnnouncement(item.id!)">
+            <BaseButton variant="outline" class="announcement-delete-button text-sm !px-3 !py-1" @click="deleteAnnouncement(item.id!)">
               <div class="i-carbon-trash-can" />
             </BaseButton>
           </div>
-        </div>
+        </article>
       </div>
     </div>
 
@@ -355,3 +393,158 @@ onMounted(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.announcement-manager-page {
+  color: var(--ui-text-1);
+}
+
+.announcement-manager-header,
+.announcement-panel-divider,
+.announcement-panel-footer {
+  border-color: var(--ui-border-subtle);
+}
+
+.announcement-manager-header {
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+
+.announcement-manager-actions {
+  z-index: 12;
+}
+
+.announcement-panel-divider {
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+
+.announcement-panel-footer {
+  border-top: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent);
+}
+
+.announcement-header-icon,
+.announcement-preview-heading {
+  color: var(--ui-status-info);
+}
+
+.announcement-empty-state,
+.announcement-item-date,
+.announcement-item-content {
+  color: var(--ui-text-2);
+}
+
+.announcement-empty-icon {
+  color: color-mix(in srgb, var(--ui-text-2) 48%, transparent);
+}
+
+.announcement-editor {
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 90%, transparent);
+  color: var(--ui-text-1);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.announcement-editor::placeholder {
+  color: var(--ui-text-2);
+}
+
+.announcement-editor:focus-visible {
+  outline: none;
+  border-color: var(--ui-border-strong);
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.announcement-preview-shell {
+  border: 1px solid color-mix(in srgb, var(--ui-status-info) 22%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-info-soft) 72%, var(--ui-bg-surface-raised));
+}
+
+.announcement-preview-card {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 92%, transparent);
+}
+
+.announcement-preview-title,
+.announcement-item-title {
+  color: var(--ui-text-1);
+}
+
+.announcement-item-title {
+  margin-top: 0;
+}
+
+.announcement-preview-badge {
+  background: color-mix(in srgb, var(--ui-status-info) 12%, transparent);
+  color: var(--ui-status-info);
+}
+
+.announcement-preview-date {
+  color: var(--ui-text-2);
+}
+
+.announcement-preview-content {
+  color: var(--ui-text-2);
+}
+
+.announcement-item-status {
+  background: color-mix(in srgb, var(--ui-bg-surface) 88%, transparent);
+  color: var(--ui-text-2);
+}
+
+.announcement-list {
+  gap: 1rem;
+}
+
+.announcement-record {
+  gap: 1rem;
+}
+
+.announcement-record-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.announcement-record-grid {
+  margin-top: 0.25rem;
+}
+
+.announcement-record-actions {
+  align-items: center;
+}
+
+.announcement-delete-button {
+  border-color: color-mix(in srgb, var(--ui-status-danger) 22%, var(--ui-border-subtle));
+  color: var(--ui-status-danger);
+}
+
+.announcement-delete-button:hover {
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent);
+}
+
+@media (max-width: 767px) {
+  .announcement-editor-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 14;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+}
+
+@media (min-width: 768px) {
+  .announcement-record {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .announcement-record-actions {
+    justify-content: flex-end;
+  }
+}
+</style>

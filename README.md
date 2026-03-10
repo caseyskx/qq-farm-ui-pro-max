@@ -2,7 +2,7 @@
 
 > 🔴 **醒目提醒：现在扫码登录失效，等其他大佬修复，本仓库暂停更新功能，仅修复bug了。**基于 Node.js 的 QQ 农场自动化工具，支持多账号管理、Web 控制面板、实时日志与数据分析。
 
-![版本](https://img.shields.io/badge/版本-v4.5.13-blue)
+![版本](https://img.shields.io/badge/版本-v4.5.18-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-20+-green)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)
 ![Redis](https://img.shields.io/badge/Redis-6.0-red)
@@ -84,7 +84,7 @@
 - **多平台构建**: Docker Buildx (linux/amd64, linux/arm64)
 - **镜像仓库**: 
   - Docker Hub: smdk000/qq-farm-bot-ui
-  - GitHub Container Registry: ghcr.io/smdk000/qq-farm-bot-ui
+  - GitHub Container Registry: ghcr.io/smdk000/qq-farm-ui-pro-max
 
 **包管理**
 - **包管理器**: pnpm 10.30.2
@@ -253,12 +253,21 @@ ADMIN_PASSWORD='你的强密码' pnpm dev:core
 - 海外 / 官方源服务器：[deploy/README.md](deploy/README.md)
 - 国内网络服务器：[deploy/README.cn.md](deploy/README.cn.md)
 
+发布前文档/公告自检（推荐）：
+
+```bash
+pnpm check:announcements
+pnpm check:doc-links
+```
+
+> `check:announcements` 用于校验 `Update.log` / `CHANGELOG` 的标题、bullet 与文件完整性；`check:doc-links` 用于校验 README、部署文档与关键说明文件中的本地链接、图片引用和 NUL 字节问题。
+
 ## 🚀 场景 1：全新服务器完整部署
 
 标准部署栈固定为 4 个服务：`主程序 + MySQL + Redis + ipad860`。后续版本主要更新主程序；MySQL、Redis、ipad860 默认复用已部署版本。
 如果你的服务器在中国大陆网络环境，优先查看 [deploy/README.cn.md](deploy/README.cn.md)。
 
-自 `v4.5.17` 起，部署目录固定带上两类修复脚本：
+自 `v4.5.18` 起，部署目录固定带上两类修复脚本：
 
 - `repair-mysql.sh`：修复旧 MySQL 结构、补齐缺失表/列并回填历史数据
 - `repair-deploy.sh`：修复旧部署目录缺脚本、缺 `docker-compose.yml`、缺 `init-db`、缺 `/opt/qq-farm-bot-current` 链接的问题
@@ -271,6 +280,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/m
 
 脚本会自动完成这些事情：
 
+- （可用时）执行公告预检：`check-announcements.js`（缺少 Node 或脚本时自动跳过，不阻断部署）
 - 检查并安装 Docker / Docker Compose
 - 检查端口占用并提示修改 `WEB_PORT`，非交互模式下会自动顺延到下一个可用端口
 - 在 `/opt/YYYY_MM_DD/qq-farm-bot` 创建部署目录，并自动维护 `/opt/qq-farm-bot-current` 当前版本链接
@@ -289,7 +299,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/m
 如需固定镜像版本或覆盖仓库，可在 `.env` 中设置：
 
 ```bash
-APP_IMAGE=smdk000/qq-farm-bot-ui:4.5.17
+APP_IMAGE=smdk000/qq-farm-bot-ui:4.5.18
 MYSQL_IMAGE=mysql:8.0
 REDIS_IMAGE=redis:7-alpine
 IPAD860_IMAGE=smdk000/ipad860:latest
@@ -335,7 +345,7 @@ cd /opt/qq-farm-bot-current
 bash update-app.sh
 
 # 如需切到指定版本
-bash update-app.sh --image smdk000/qq-farm-bot-ui:4.5.17
+bash update-app.sh --image smdk000/qq-farm-bot-ui:4.5.18
 
 # 只想单独修复旧 MySQL 结构
 bash repair-mysql.sh --backup
@@ -345,6 +355,7 @@ bash repair-mysql.sh --backup
 
 - `deploy/init-db/01-init.sql` 只会在 MySQL 空数据卷首次启动时执行。
 - `repair-mysql.sh` 会对旧数据库执行幂等修复，补齐缺失表/列、回填 `cards.days / used_at / expires_at`，可重复执行。
+- `update-app.sh` 会在更新前尝试执行公告预检（检测到脚本与 Node 时执行）。
 - `update-app.sh` 会先执行 `repair-mysql.sh`，再更新主程序镜像。
 - `update-app.sh` 会同步部署目录里的 `docker-compose.yml`、`.env.example`、README 和修复脚本。
 - `update-app.sh` 会重新维护 `/opt/qq-farm-bot-current` 链接，避免旧服 current 链接丢失。
@@ -362,7 +373,7 @@ cd /opt/qq-farm-bot-current 2>/dev/null || cd /opt
 curl -fsSLo repair-deploy.sh https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/repair-deploy.sh
 chmod +x repair-deploy.sh
 ./repair-deploy.sh --backup
-./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.17
+./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.18
 ```
 
 ## 📊 验证部署成功
@@ -408,7 +419,7 @@ echo $GH_PAT | docker login ghcr.io -u smdk000 --password-stdin
 **使用脚本构建（推荐）**:
 ```bash
 chmod +x scripts/docker/docker-build-multiarch.sh
-./scripts/docker/docker-build-multiarch.sh 4.5.6
+./scripts/docker/docker-build-multiarch.sh 4.5.18
 ```
 
 **手动构建**:
@@ -416,7 +427,7 @@ chmod +x scripts/docker/docker-build-multiarch.sh
 # 构建并推送到 Docker Hub
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t smdk000/qq-farm-bot-ui:4.5.6 \
+  -t smdk000/qq-farm-bot-ui:4.5.18 \
   -t smdk000/qq-farm-bot-ui:latest \
   -f core/Dockerfile . \
   --push
@@ -424,8 +435,8 @@ docker buildx build \
 # 构建并推送到 GitHub Container Registry
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/smdk000/qq-farm-bot-ui:4.5.6 \
-  -t ghcr.io/smdk000/qq-farm-bot-ui:latest \
+  -t ghcr.io/smdk000/qq-farm-ui-pro-max:4.5.18 \
+  -t ghcr.io/smdk000/qq-farm-ui-pro-max:latest \
   -f core/Dockerfile . \
   --push
 ```
@@ -434,13 +445,13 @@ docker buildx build \
 
 ```bash
 # 查看镜像信息
-docker manifest inspect smdk000/qq-farm-bot-ui:4.5.6
+docker manifest inspect smdk000/qq-farm-bot-ui:4.5.18
 
 # Docker Hub 查看
 # https://hub.docker.com/r/smdk000/qq-farm-bot-ui/tags
 
 # GitHub Packages 查看
-# https://github.com/users/smdk000/packages/container/package/qq-farm-bot-ui
+# https://github.com/users/smdk000/packages/container/package/qq-farm-ui-pro-max
 ```
 
 ---
@@ -594,13 +605,13 @@ Docker 会自动选择适合您系统架构的镜像版本。
 
 ## 📚 完整文档
 
-- **GitHub 仓库**: https://github.com/smdk000/qq-farm-bot-ui
+- **GitHub 仓库**: https://github.com/smdk000/qq-farm-ui-pro-max
 - **Docker Hub**: https://hub.docker.com/r/smdk000/qq-farm-bot-ui
 - **GitHub Packages**: https://github.com/users/smdk000/packages/container/package/qq-farm-bot-ui
 - **部署指南**: [deploy/README.md](deploy/README.md)
 - **国内网络部署**: [deploy/README.cn.md](deploy/README.cn.md)
-- **故障排查**: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-- **配置模板**: [docs/CONFIG_TEMPLATES.md](docs/CONFIG_TEMPLATES.md)
+- **故障排查**: [docs/guides/TROUBLESHOOTING.md](docs/guides/TROUBLESHOOTING.md)
+- **配置模板**: [docs/guides/CONFIG_TEMPLATES.md](docs/guides/CONFIG_TEMPLATES.md)
 
 ---
 
@@ -608,13 +619,13 @@ Docker 会自动选择适合您系统架构的镜像版本。
 
 ### 文档资源
 
-- [README.md](https://github.com/smdk000/qq-farm-bot-ui) - 项目说明
-- [DEPLOYMENT_FIX_REPORT.md](DEPLOYMENT_FIX_REPORT.md) - 部署问题修复报告
-- [DOCKER_BUILD_COMPLETE.md](DOCKER_BUILD_COMPLETE.md) - Docker 构建完成总结
+- [README.md](https://github.com/smdk000/qq-farm-ui-pro-max) - 项目说明
+- [DEPLOYMENT_FIX_REPORT.md](docs/archive/reports/DEPLOYMENT_FIX_REPORT.md) - 部署问题修复报告
+- [DOCKER_BUILD_COMPLETE.md](docs/archive/reports/DOCKER_BUILD_COMPLETE.md) - Docker 构建完成总结
 
 ### 技术支持
 
-- **GitHub Issues**: https://github.com/smdk000/qq-farm-bot-ui/issues
+- **GitHub Issues**: https://github.com/smdk000/qq-farm-ui-pro-max/issues
 - **QQ 群**: 227916149
 - **Docker Hub**: https://hub.docker.com/r/smdk000/qq-farm-bot-ui
 
@@ -666,9 +677,9 @@ Docker 会自动选择适合您系统架构的镜像版本。
 
 ---
 
-**维护者**: smdk000  
-**最后更新**: 2026-03-09  
-**版本**: v4.5.13
+**维护者**: smdk000
+**最后更新**: 2026-03-10
+**版本**: v4.5.18
 
 ## 多用户模式
 
@@ -794,7 +805,13 @@ pnpm build:web
 pnpm package:release
 ```
 
-产物输出在 `core/dist/` 目录。
+- 前端静态资源默认输出到 `web/dist/`
+- 若 `web/dist/` 不可写，构建会自动回退到 `web/dist-runtime/`
+- 若要安全归档旧 `dist`、清理调试产物并重建标准目录，可执行 `pnpm maintain:web-dist`
+- 若 `web/dist-runtime/` 已健康、但 `web/dist/` 被历史权限污染，可执行 `pnpm repair:web-dist`
+  - 默认会先自检，只有目录或所有权异常时才真正回灌
+  - 若确认需要强制覆盖标准目录，可执行 `FORCE_WEB_DIST_REPAIR=1 pnpm repair:web-dist`
+- 二进制产物输出在 `core/dist/` 目录
 
 ---
 
@@ -830,7 +847,8 @@ qq-farm-bot-ui/
 │   │   ├── components/    # Vue 组件
 │   │   ├── stores/        # Pinia 状态管理
 │   │   └── views/         # 页面视图
-│   └── dist/              # 构建产物
+│   ├── dist/              # 默认前端构建产物
+│   └── dist-runtime/      # 默认目录不可写时的回退构建产物
 ├── assets/screenshots/    # 截图资源
 ├── docs/                  # 详细文档
 ├── docker/                    # Docker 配置

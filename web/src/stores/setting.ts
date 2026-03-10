@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/api'
+import { localizeRuntimeText } from '@/utils/runtime-text'
+import { createDefaultTradeConfig, normalizeTradeConfig } from '@/utils/trade-config'
 
 export interface AutomationConfig {
   farm?: boolean
@@ -23,6 +25,19 @@ export interface AutomationConfig {
   open_server_gift?: boolean
 }
 
+export type AccountMode = 'main' | 'alt' | 'safe'
+
+export interface HarvestDelayConfig {
+  min?: number
+  max?: number
+}
+
+export interface ModeScopeConfig {
+  zoneScope?: string
+  requiresGameFriend?: boolean
+  fallbackBehavior?: string
+}
+
 export interface IntervalsConfig {
   farm?: number
   friend?: number
@@ -36,6 +51,22 @@ export interface IntervalsConfig {
   stealMax?: number
 }
 
+export interface InventoryPlantingReserveRule {
+  seedId: number
+  keepCount: number
+}
+
+export interface InventoryPlantingConfig {
+  mode?: 'disabled' | 'prefer_inventory' | 'inventory_only'
+  globalKeepCount?: number
+  reserveRules?: InventoryPlantingReserveRule[]
+}
+
+export interface StakeoutStealConfig {
+  enabled?: boolean
+  delaySec?: number
+}
+
 export interface FriendQuietHoursConfig {
   enabled?: boolean
   start?: string
@@ -47,6 +78,15 @@ export interface TradeSellRareKeepConfig {
   judgeBy?: 'plant_level' | 'unit_price' | 'either'
   minPlantLevel?: number
   minUnitPrice?: number
+}
+
+function resolveLocalizedError(...values: any[]) {
+  for (const value of values) {
+    const text = String(value || '').trim()
+    if (text)
+      return localizeRuntimeText(text)
+  }
+  return '操作失败'
 }
 
 export interface TradeSellConfig {
@@ -189,10 +229,17 @@ export interface ClusterConfig {
 }
 
 export interface SettingsState {
+  accountMode: AccountMode
+  harvestDelay: HarvestDelayConfig
+  riskPromptEnabled: boolean
+  modeScope: ModeScopeConfig
   plantingStrategy: string
+  plantingFallbackStrategy: string
   preferredSeedId: number
+  inventoryPlanting: InventoryPlantingConfig
   intervals: IntervalsConfig
   friendQuietHours: FriendQuietHoursConfig
+  stakeoutSteal: StakeoutStealConfig
   tradeConfig: TradeConfig
   automation: AutomationConfig
   reportConfig: ReportConfig
@@ -218,25 +265,26 @@ export const useSettingStore = defineStore('setting', () => {
   })
 
   const settings = ref<SettingsState>({
+    accountMode: 'main',
+    harvestDelay: { min: 0, max: 0 },
+    riskPromptEnabled: true,
+    modeScope: {
+      zoneScope: 'same_zone_only',
+      requiresGameFriend: true,
+      fallbackBehavior: 'standalone',
+    },
     plantingStrategy: 'preferred',
+    plantingFallbackStrategy: 'level',
     preferredSeedId: 0,
+    inventoryPlanting: {
+      mode: 'disabled',
+      globalKeepCount: 0,
+      reserveRules: [],
+    },
     intervals: {},
     friendQuietHours: { enabled: false, start: '23:00', end: '07:00' },
-    tradeConfig: {
-      sell: {
-        scope: 'fruit_only',
-        keepMinEachFruit: 0,
-        keepFruitIds: [],
-        rareKeep: {
-          enabled: false,
-          judgeBy: 'either',
-          minPlantLevel: 40,
-          minUnitPrice: 2000,
-        },
-        batchSize: 15,
-        previewBeforeManualSell: false,
-      },
-    },
+    stakeoutSteal: { enabled: false, delaySec: 3 },
+    tradeConfig: createDefaultTradeConfig(),
     automation: {},
     reportConfig: {
       enabled: false,
@@ -341,25 +389,26 @@ export const useSettingStore = defineStore('setting', () => {
       })
       if (data && data.ok && data.data) {
         const d = data.data
-        settings.value.plantingStrategy = d.strategy || 'preferred'
-        settings.value.preferredSeedId = d.preferredSeed || 0
+        settings.value.accountMode = d.accountMode || 'main'
+        settings.value.harvestDelay = d.harvestDelay || { min: 0, max: 0 }
+        settings.value.riskPromptEnabled = d.riskPromptEnabled !== false
+        settings.value.modeScope = d.modeScope || {
+          zoneScope: 'same_zone_only',
+          requiresGameFriend: true,
+          fallbackBehavior: 'standalone',
+        }
+        settings.value.plantingStrategy = d.plantingStrategy || d.strategy || 'preferred'
+        settings.value.plantingFallbackStrategy = d.plantingFallbackStrategy || 'level'
+        settings.value.preferredSeedId = d.preferredSeedId || d.preferredSeed || 0
+        settings.value.inventoryPlanting = d.inventoryPlanting || {
+          mode: 'disabled',
+          globalKeepCount: 0,
+          reserveRules: [],
+        }
         settings.value.intervals = d.intervals || {}
         settings.value.friendQuietHours = d.friendQuietHours || { enabled: false, start: '23:00', end: '07:00' }
-        settings.value.tradeConfig = d.tradeConfig || {
-          sell: {
-            scope: 'fruit_only',
-            keepMinEachFruit: 0,
-            keepFruitIds: [],
-            rareKeep: {
-              enabled: false,
-              judgeBy: 'either',
-              minPlantLevel: 40,
-              minUnitPrice: 2000,
-            },
-            batchSize: 15,
-            previewBeforeManualSell: false,
-          },
-        }
+        settings.value.stakeoutSteal = d.stakeoutSteal || { enabled: false, delaySec: 3 }
+        settings.value.tradeConfig = normalizeTradeConfig(d.tradeConfig)
         settings.value.automation = d.automation || {}
         settings.value.reportConfig = d.reportConfig || {
           enabled: false,
@@ -382,8 +431,6 @@ export const useSettingStore = defineStore('setting', () => {
           retentionDays: 30,
         }
         settings.value.ui = d.ui || {}
-        // 蹲守配置挂到 settings 上层以便 StealSettings.vue 读取
-        ; (settings.value as any).stakeoutSteal = d.stakeoutSteal || { enabled: false, delaySec: 3 }
         settings.value.workflowConfig = d.workflowConfig || { farm: { enabled: false, minInterval: 30, maxInterval: 120, nodes: [] }, friend: { enabled: false, minInterval: 60, maxInterval: 300, nodes: [] } }
         settings.value.offlineReminder = d.offlineReminder || {
           channel: 'webhook',
@@ -411,19 +458,24 @@ export const useSettingStore = defineStore('setting', () => {
     try {
       // 1. Save general settings
       const settingsPayload: Record<string, any> = {
+        accountMode: newSettings.accountMode,
+        harvestDelay: newSettings.harvestDelay,
+        riskPromptEnabled: newSettings.riskPromptEnabled,
+        modeScope: newSettings.modeScope,
         plantingStrategy: newSettings.plantingStrategy,
+        plantingFallbackStrategy: newSettings.plantingFallbackStrategy,
         preferredSeedId: newSettings.preferredSeedId,
+        inventoryPlanting: newSettings.inventoryPlanting,
         intervals: newSettings.intervals,
         friendQuietHours: newSettings.friendQuietHours,
-        tradeConfig: newSettings.tradeConfig,
+        stakeoutSteal: newSettings.stakeoutSteal,
+        tradeConfig: normalizeTradeConfig(newSettings.tradeConfig),
+        automation: newSettings.automation,
       }
       // 蹲守配置透传
       // 工作流配置透传
       if (newSettings.workflowConfig) {
         settingsPayload.workflowConfig = newSettings.workflowConfig
-      }
-      if (newSettings.stakeoutSteal) {
-        settingsPayload.stakeoutSteal = newSettings.stakeoutSteal
       }
       if (newSettings.reportConfig) {
         settingsPayload.reportConfig = newSettings.reportConfig
@@ -433,16 +485,17 @@ export const useSettingStore = defineStore('setting', () => {
         headers: { 'x-account-id': accountId },
       })
 
-      // 2. Save automation settings
-      if (newSettings.automation) {
-        await api.post('/api/automation', newSettings.automation, {
-          headers: { 'x-account-id': accountId },
-        })
-      }
-
       // Refresh settings
       await fetchSettings(accountId)
       return { ok: true }
+    }
+    catch (e: any) {
+      const backendError = e.response?.data?.error
+      const validationErrors = Array.isArray(e.response?.data?.errors) ? e.response.data.errors.join('；') : ''
+      return {
+        ok: false,
+        error: resolveLocalizedError(backendError, validationErrors, e.message, '保存失败'),
+      }
     }
     finally {
       // loading 未在此处修改，无需 finally 中重置
@@ -461,10 +514,10 @@ export const useSettingStore = defineStore('setting', () => {
         settings.value.offlineReminder = data.data || config
         return { ok: true }
       }
-      return { ok: false, error: data?.error || '保存失败' }
+      return { ok: false, error: resolveLocalizedError(data?.error, '保存失败') }
     }
     catch (e: any) {
-      return { ok: false, error: e.response?.data?.error || e.message || '保存失败' }
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '保存失败') }
     }
     finally {
       // loading 未在此处修改，无需 finally 中重置
@@ -480,10 +533,10 @@ export const useSettingStore = defineStore('setting', () => {
       })
       if (data && data.ok)
         return { ok: true, data: data.data }
-      return { ok: false, error: data?.error || '发送失败' }
+      return { ok: false, error: resolveLocalizedError(data?.error, '发送失败') }
     }
     catch (e: any) {
-      return { ok: false, error: e.response?.data?.error || e.message || '发送失败' }
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '发送失败') }
     }
   }
 
@@ -496,10 +549,10 @@ export const useSettingStore = defineStore('setting', () => {
       })
       if (data && data.ok)
         return { ok: true, data: data.data }
-      return { ok: false, error: data?.error || '发送失败' }
+      return { ok: false, error: resolveLocalizedError(data?.error, '发送失败') }
     }
     catch (e: any) {
-      return { ok: false, error: e.response?.data?.error || e.message || '发送失败' }
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '发送失败') }
     }
   }
 
@@ -594,10 +647,10 @@ export const useSettingStore = defineStore('setting', () => {
         reportLogStats.value = createDefaultReportLogStats()
         return { ok: true, data: data.data }
       }
-      return { ok: false, error: data?.error || '清空失败' }
+      return { ok: false, error: resolveLocalizedError(data?.error, '清空失败') }
     }
     catch (e: any) {
-      return { ok: false, error: e.response?.data?.error || e.message || '清空失败' }
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '清空失败') }
     }
   }
 
@@ -614,10 +667,10 @@ export const useSettingStore = defineStore('setting', () => {
       })
       if (data && data.ok)
         return { ok: true, data: data.data }
-      return { ok: false, error: data?.error || '删除失败' }
+      return { ok: false, error: resolveLocalizedError(data?.error, '删除失败') }
     }
     catch (e: any) {
-      return { ok: false, error: e.response?.data?.error || e.message || '删除失败' }
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '删除失败') }
     }
   }
 
@@ -647,7 +700,7 @@ export const useSettingStore = defineStore('setting', () => {
       }
     }
     catch (e: any) {
-      return { ok: false, error: e.response?.data?.error || e.message || '导出失败' }
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '导出失败') }
     }
   }
 
@@ -663,7 +716,7 @@ export const useSettingStore = defineStore('setting', () => {
     catch (e: any) {
       // axios 对 4xx/5xx 状态码会抛异常，需要从 response.data 中提取后端错误信息
       const backendError = e.response?.data?.error
-      return { ok: false, error: backendError || e.message || '密码修改失败' }
+      return { ok: false, error: resolveLocalizedError(backendError, e.message, '密码修改失败') }
     }
   }
 

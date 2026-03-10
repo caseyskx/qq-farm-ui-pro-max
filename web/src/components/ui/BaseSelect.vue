@@ -57,16 +57,15 @@ onUnmounted(() => {
     <div class="relative">
       <!-- Trigger -->
       <div
-        class="base-select-trigger glass-text-main w-full flex cursor-pointer items-center justify-between border border-gray-200/50 rounded-lg bg-black/5 px-3 py-2 shadow-sm outline-none backdrop-blur-sm transition-all duration-200 dark:border-white/10 dark:bg-black/20 hover:bg-black/10 dark:hover:bg-black/40"
+        class="base-select-trigger glass-text-main w-full flex cursor-pointer items-center justify-between border rounded-lg px-3 py-2 shadow-sm outline-none backdrop-blur-sm transition-all duration-200"
         :class="{
-          'bg-gray-50/50 text-gray-400 cursor-not-allowed dark:bg-black/40 hover:bg-gray-50/50 dark:hover:bg-black/40': disabled,
-          'ring-2 ring-primary-500/20 border-primary-500 dark:focus:border-primary-500': isOpen,
-          'focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20': !disabled,
+          'base-select-disabled cursor-not-allowed': disabled,
+          'base-select-open': isOpen,
         }"
         @click="toggleDropdown"
       >
         <span class="truncate">{{ selectedLabel }}</span>
-        <div class="i-carbon-chevron-down text-lg text-gray-400 transition-transform duration-200" :class="{ 'rotate-180': isOpen }" />
+        <div class="i-carbon-chevron-down base-select-arrow text-lg transition-transform duration-200" :class="{ 'rotate-180': isOpen }" />
       </div>
 
       <!-- Dropdown Menu -->
@@ -80,16 +79,16 @@ onUnmounted(() => {
       >
         <div
           v-if="isOpen"
-          class="glass-panel absolute left-0 right-0 z-50 mt-1 max-h-60 overflow-auto border border-gray-200/50 rounded-lg py-1 shadow-lg dark:border-white/10"
+          class="glass-panel base-select-menu absolute left-0 right-0 z-50 mt-1 max-h-60 overflow-auto border rounded-lg py-1 shadow-lg"
         >
           <template v-if="options?.length">
             <div
               v-for="opt in options"
               :key="opt.value"
-              class="cursor-pointer px-3 py-2 text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/10"
+              class="base-select-option cursor-pointer px-3 py-2 text-sm transition-colors"
               :class="{
-                'bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400': model === opt.value,
-                'text-gray-400 cursor-not-allowed hover:bg-transparent dark:text-gray-500': opt.disabled,
+                'base-select-option--active': model === opt.value,
+                'base-select-option--disabled cursor-not-allowed': opt.disabled,
                 'glass-text-main': model !== opt.value && !opt.disabled,
               }"
               @click="!opt.disabled && selectOption(opt.value)"
@@ -104,7 +103,7 @@ onUnmounted(() => {
               </slot>
             </div>
           </template>
-          <div v-else class="px-3 py-2 text-center text-sm text-gray-400">
+          <div v-else class="glass-text-muted px-3 py-2 text-center text-sm">
             暂无选项
           </div>
         </div>
@@ -112,3 +111,51 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.base-select-trigger {
+  min-height: var(--ui-control-height);
+  border-color: var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent);
+  border-radius: var(--ui-control-radius);
+}
+
+.base-select-trigger:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 72%, transparent);
+}
+
+.base-select-open {
+  border-color: color-mix(in srgb, var(--ui-border-subtle) 48%, var(--ui-brand-500) 52%);
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.base-select-disabled {
+  background: color-mix(in srgb, var(--ui-bg-surface) 38%, transparent);
+  color: var(--ui-text-3);
+}
+
+.base-select-arrow {
+  color: var(--ui-text-3);
+}
+
+.base-select-menu {
+  border-color: var(--ui-border-subtle);
+}
+
+.base-select-option:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 72%, transparent);
+}
+
+.base-select-option--active {
+  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent);
+  color: var(--ui-text-1);
+}
+
+.base-select-option--disabled {
+  color: var(--ui-text-3);
+}
+
+.base-select-option--disabled:hover {
+  background: transparent;
+}
+</style>

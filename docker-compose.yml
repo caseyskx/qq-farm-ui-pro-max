@@ -27,7 +27,7 @@ services:
       - ROLE=master
       - FARM_PORT=3000
     volumes:
-      - ./data:/app/data
+      - ./data:/app/core/data
       - ./logs:/app/logs
 
   # Worker 执行节点（可以通过 docker-compose up --scale farm-worker=3 来水平扩展）

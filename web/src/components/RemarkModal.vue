@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import api from '@/api'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 const props = defineProps<{
   show: boolean
@@ -42,11 +43,11 @@ async function save() {
       emit('close')
     }
     else {
-      errorMessage.value = `保存失败: ${res.data.error}`
+      errorMessage.value = `保存失败: ${localizeRuntimeText(res.data.error || '未知错误')}`
     }
   }
   catch (e: any) {
-    errorMessage.value = `保存失败: ${e.response?.data?.error || e.message}`
+    errorMessage.value = `保存失败: ${localizeRuntimeText(e.response?.data?.error || e.message || '未知错误')}`
   }
   finally {
     loading.value = false
@@ -55,9 +56,9 @@ async function save() {
 </script>
 
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click="$emit('close')">
-    <div class="glass-panel max-w-sm w-full overflow-hidden border border-white/20 rounded-lg shadow-xl dark:border-white/10" @click.stop>
-      <div class="flex items-center justify-between border-b border-gray-200/50 p-4 dark:border-white/10">
+  <div v-if="show" class="remark-modal-backdrop fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm" @click="$emit('close')">
+    <div class="remark-modal-panel glass-panel max-w-sm w-full overflow-hidden rounded-lg shadow-xl" @click.stop>
+      <div class="remark-modal-header flex items-center justify-between p-4">
         <h3 class="glass-text-main text-lg font-semibold">
           修改备注
         </h3>
@@ -67,7 +68,7 @@ async function save() {
       </div>
 
       <div class="p-4 space-y-4">
-        <div v-if="errorMessage" class="rounded bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
+        <div v-if="errorMessage" class="remark-modal-error rounded p-3 text-sm">
           {{ errorMessage }}
         </div>
         <BaseInput
@@ -96,3 +97,26 @@ async function save() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.remark-modal-backdrop {
+  background: var(--ui-overlay-backdrop) !important;
+}
+
+.remark-modal-panel,
+.remark-modal-header,
+.remark-modal-error {
+  border: 1px solid var(--ui-border-subtle) !important;
+}
+
+.remark-modal-header {
+  border-left: none !important;
+  border-right: none !important;
+  border-top: none !important;
+}
+
+.remark-modal-error {
+  background: color-mix(in srgb, var(--ui-status-danger) 8%, var(--ui-bg-surface)) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1)) !important;
+}
+</style>

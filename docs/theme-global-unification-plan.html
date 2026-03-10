@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QQ Farm Bot UI - 主题全局统一方案（参考 JeecgBoot）</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --primary: #0b6bcb;
+      --ok: #16a34a;
+      --warn: #d97706;
+      --err: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #f8fafc 0%, #f3f6fb 100%);
+      color: var(--text);
+      font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 28px auto;
+      padding: 0 20px 48px;
+    }
+    .hero {
+      background: linear-gradient(135deg, #0b6bcb 0%, #0f7de8 45%, #0ea5e9 100%);
+      color: #fff;
+      border-radius: 16px;
+      padding: 20px 24px;
+      box-shadow: 0 12px 28px rgba(11,107,203,0.22);
+    }
+    .hero h1 { margin: 0 0 6px; font-size: 24px; }
+    .hero p { margin: 0; opacity: .95; }
+    .meta {
+      margin-top: 10px;
+      font-size: 12px;
+      opacity: .9;
+    }
+    .card {
+      margin-top: 16px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 8px 24px rgba(15,23,42,0.05);
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+    h3 {
+      margin: 14px 0 8px;
+      font-size: 15px;
+    }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0 8px 20px; }
+    li { margin: 4px 0; }
+    code {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 1px 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 12px;
+      border: 1px solid;
+      margin-right: 6px;
+    }
+    .ok { color: var(--ok); border-color: rgba(22,163,74,.25); background: rgba(22,163,74,.1); }
+    .warn { color: var(--warn); border-color: rgba(217,119,6,.25); background: rgba(217,119,6,.1); }
+    .err { color: var(--err); border-color: rgba(220,38,38,.25); background: rgba(220,38,38,.1); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f8fafc; }
+    .phase {
+      border-left: 4px solid var(--primary);
+      padding: 8px 12px;
+      background: #f8fbff;
+      margin: 10px 0;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>QQ Farm Bot UI 主题全局统一方案（Plan）</h1>
+      <p>目标：参考 JeecgBoot 的主题治理策略，建立统一、可扩展、低改动的主题控制框架；不改业务逻辑，仅改 UI 主题层。</p>
+      <div class="meta">版本：v1.0（计划稿） | 生成时间：2026-03-09 | 参考项目：/Users/smdk/Downloads/JeecgBoot-main/jeecgboot-vue3</div>
+    </section>
+
+    <section class="card">
+      <h2>1. 结论摘要</h2>
+      <p>本次方案采用“<strong>Jeecg 式配置中心 + 运行时主题应用器 + 分层设计令牌</strong>”模型，保留你现有的 <code>themeMode</code>、<code>colorTheme</code>、<code>ThemeSettingDrawer</code> 与背景联动逻辑，避免大规模重写。</p>
+      <p>
+        <span class="pill ok">保持业务逻辑不变</span>
+        <span class="pill ok">保留现有主题 key</span>
+        <span class="pill warn">逐步替换硬编码颜色</span>
+        <span class="pill warn">分阶段降低风险</span>
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>2. JeecgBoot 可复用的主题策略（提炼）</h2>
+      <h3>2.1 配置中心化</h3>
+      <ul>
+        <li>通过 <code>projectSetting.ts</code> 统一维护主题相关配置（主题色、暗黑、头部、侧栏、布局）。</li>
+        <li>通过 store（<code>store/modules/app.ts</code>）持久化并集中修改。</li>
+      </ul>
+
+      <h3>2.2 主题应用器分层</h3>
+      <ul>
+        <li><code>changeTheme</code>：处理主色谱变更（含亮暗派生色）。</li>
+        <li><code>updateDarkTheme</code>：只负责暗黑类名与 data-theme 切换。</li>
+        <li><code>updateHeaderBgColor / updateSidebarBgColor</code>：负责局部域变量更新（header/sider）。</li>
+      </ul>
+
+      <h3>2.3 事件化设置面板</h3>
+      <ul>
+        <li>设置抽屉以枚举事件驱动（<code>HandlerEnum</code> + <code>layoutHandler/baseHandler</code>），可追踪、可扩展。</li>
+        <li>色板采用预设列表：系统主题色、顶栏、菜单栏分离配置。</li>
+      </ul>
+
+      <h3>2.4 初始化一致性</h3>
+      <ul>
+        <li><code>initAppConfig.ts</code> 启动时统一恢复配置并一次性应用主题，避免页面各自做“补丁式改色”。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>3. 你当前项目的改造原则（严格约束）</h2>
+      <ol>
+        <li>不改任何业务流程、接口协议、状态机、数据结构。</li>
+        <li>保留已有主题 key：<code>default/sakura/cyber/elegant/ocean</code>。</li>
+        <li>保留已有主题模式：<code>light/dark/auto</code>，保留背景联动能力。</li>
+        <li>新增仅限“主题治理层”：token、映射、样式重构、组件颜色替换。</li>
+        <li>采用可回滚方案：每阶段可独立验收并回退。</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>4. 目标架构（新主题框架）</h2>
+      <h3>4.1 三层模型</h3>
+      <table>
+        <thead>
+          <tr><th>层级</th><th>职责</th><th>示例</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>L1 设计令牌（Design Tokens）</td>
+            <td>唯一颜色源，定义语义，不绑定组件</td>
+            <td><code>--ui-text-1</code>、<code>--ui-surface-1</code>、<code>--ui-border</code>、<code>--ui-brand-600</code></td>
+          </tr>
+          <tr>
+            <td>L2 主题映射（Theme Mapping）</td>
+            <td>将 <code>colorTheme + mode</code> 映射到 token 值</td>
+            <td><code>default+dark</code>、<code>sakura+light</code> 映射表</td>
+          </tr>
+          <tr>
+            <td>L3 组件语义类（Component Semantics）</td>
+            <td>组件只消费语义类，不直接写灰蓝红色号</td>
+            <td><code>.btn-primary/.text-muted/.panel</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>4.2 语义色域（推荐）</h3>
+      <ul>
+        <li><strong>Brand</strong>：主题色（主按钮、激活态、focus ring）</li>
+        <li><strong>Neutral</strong>：背景、文字、边框、分割线</li>
+        <li><strong>Semantic</strong>：成功/警告/错误/信息（与品牌色解耦）</li>
+        <li><strong>State</strong>：hover/active/disabled/focus</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>5. 兼容现有逻辑的最小改动方案</h2>
+      <h3>5.1 保留不动</h3>
+      <ul>
+        <li><code>stores/app.ts</code> 中的主题模式切换逻辑（含 auto 日出日落）。</li>
+        <li>现有主题抽屉交互流程与字段（主题、背景、性能模式）。</li>
+        <li>当前主题 class 机制（<code>html.dark</code>、<code>html.theme-*</code>）。</li>
+      </ul>
+
+      <h3>5.2 新增/调整</h3>
+      <ul>
+        <li>新增“主题治理配置层”（类似 Jeecg 的 <code>projectSetting + handler</code> 思路）。</li>
+        <li>把当前散落在页面中的灰色/蓝色硬编码，迁移为 token 语义类引用。</li>
+        <li>将“蓝色兼容补丁”和页面级 <code>!important</code> 大覆盖，改为正式 token。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>6. 分阶段执行计划（Plan）</h2>
+
+      <div class="phase">
+        <h3>Phase 0 - 基线冻结与规范确认（0.5 天）</h3>
+        <ul>
+          <li>冻结当前主题行为截图基线（light/dark + 5个主题）。</li>
+          <li>确认语义令牌命名规范与对比度基线（正文 >= 4.5:1）。</li>
+          <li>输出“禁止新增硬编码色类”的 lint 约束草案。</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Phase 1 - 主题内核搭建（1 天）</h3>
+        <ul>
+          <li>建立统一 token 表（light/dark + 每个 colorTheme 的 brand 映射）。</li>
+          <li>建立 runtime apply 函数：一次性把 token 注入到 root 变量。</li>
+          <li>保持现有 store 字段不变，仅增加“主题应用层调用点”。</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Phase 2 - 基础组件统一（1~1.5 天）</h3>
+        <ul>
+          <li>优先改：<code>BaseButton/BaseInput/BaseSelect/BaseSwitch/Toast</code>。</li>
+          <li>全部替换为语义类：不再出现 <code>text-gray-*</code> 等硬编码。</li>
+          <li>验证组件在 5 套主题 + 深浅模式下视觉一致。</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Phase 3 - 布局层统一（0.5~1 天）</h3>
+        <ul>
+          <li>改 <code>App.vue / DefaultLayout.vue / Sidebar.vue</code> 的颜色硬编码。</li>
+          <li>将奖杯按钮等“孤岛配色”纳入语义体系（accent/brand）。</li>
+          <li>保留原有结构和交互，不改功能。</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Phase 4 - 页面重点整治（2~3 天）</h3>
+        <ul>
+          <li>按污染优先级：<code>BagPanel</code>、<code>FarmTools</code>、<code>Settings</code>、<code>Accounts</code>、<code>Friends</code>。</li>
+          <li>逐页把业务页颜色改为 token 语义，去除页面级强制覆盖样式。</li>
+          <li>保留所有业务行为与接口调用不变。</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Phase 5 - 收敛与验收（0.5 天）</h3>
+        <ul>
+          <li>删除过时兼容补丁（如蓝色类强制映射）并回归测试。</li>
+          <li>输出“主题使用指南”和“新增页面接入规范”。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>7. 重点风险与规避</h2>
+      <table>
+        <thead>
+          <tr><th>风险</th><th>表现</th><th>规避策略</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>深色模式可读性下降</td>
+            <td>粉色/金色主题在暗背景上文字发灰</td>
+            <td>正文/辅助文分别绑定 <code>text-1/text-2</code> token；强制对比度校验</td>
+          </tr>
+          <tr>
+            <td>局部组件颜色回归</td>
+            <td>按钮、标签出现旧蓝色</td>
+            <td>先改基础组件，再改页面，最后删兼容补丁</td>
+          </tr>
+          <tr>
+            <td>改动面过大</td>
+            <td>难追踪、难回滚</td>
+            <td>按 Phase 分支提交；每阶段只处理一层</td>
+          </tr>
+          <tr>
+            <td>业务误伤</td>
+            <td>功能逻辑异常</td>
+            <td>仅改 class/token，不碰业务逻辑与 API</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>8. 验收标准（Definition of Done）</h2>
+      <ol>
+        <li>5 套主题在 light/dark 下主界面、设置页、账号页、好友页视觉统一。</li>
+        <li>全项目不再新增硬编码灰蓝红色类（允许语义异常色域少量白名单）。</li>
+        <li>基础组件全部使用语义 token，页面只使用语义类。</li>
+        <li>保留并通过：主题切换、深浅切换、auto 模式、背景联动、性能模式。</li>
+        <li>无业务回归（账号、任务、批量操作、设置保存等功能正常）。</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>9. 建议的第一轮交付边界</h2>
+      <p>第一轮仅做 Phase 1 + Phase 2 + Phase 3（先把“框架和基础组件”做稳），暂不全面清理所有业务页，避免一次性改动过大。</p>
+      <p>第二轮再处理高污染业务页面和历史补丁清理。</p>
+    </section>
+  </div>
+</body>
+</html>

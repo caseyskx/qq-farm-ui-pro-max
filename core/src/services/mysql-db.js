@@ -20,22 +20,39 @@ if (!/^\w+$/.test(DB_NAME)) {
 
 // MySQL 连接池配置 — Phase 2 扩容
 // connectionLimit: 100 可支撑数百账号的 Worker 并发 + UI 面板查询
-const pool = mysql.createPool({
-    host: DB_HOST,
-    port: DB_PORT,
-    user: DB_USER,
-    password: DB_PASS,
-    database: DB_NAME,
-    waitForConnections: true,
-    connectionLimit: DB_LIMIT,
-    queueLimit: DB_LIMIT * 2, // 排队上限为连接池的2倍，超额直接抛出快速失败
-    connectTimeout: 10000,    // 连接建立超时 10 秒，避免网络异常时长时间阻塞
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 10000,
-    // 空闲连接超时回收（毫秒），避免连接囤积占用 MySQL 资源
-    idleTimeout: 60000,
-    // 最大空闲连接数，超出的空闲连接会被回收
-    maxIdle: 20,
+let poolInstance = null;
+
+function createMainPool() {
+    return mysql.createPool({
+        host: DB_HOST,
+        port: DB_PORT,
+        user: DB_USER,
+        password: DB_PASS,
+        database: DB_NAME,
+        waitForConnections: true,
+        connectionLimit: DB_LIMIT,
+        queueLimit: DB_LIMIT * 2, // 排队上限为连接池的2倍，超额直接抛出快速失败
+        connectTimeout: 10000,    // 连接建立超时 10 秒，避免网络异常时长时间阻塞
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000,
+        // 空闲连接超时回收（毫秒），避免连接囤积占用 MySQL 资源
+        idleTimeout: 60000,
+        // 最大空闲连接数，超出的空闲连接会被回收
+        maxIdle: 20,
+    });
+}
+
+function getOrCreatePool() {
+    if (!poolInstance) {
+        poolInstance = createMainPool();
+    }
+    return poolInstance;
+}
+
+const pool = new Proxy({}, {
+    get(_target, property) {
+        return getOrCreatePool()[property];
+    },
 });
 
 let _initialized = false;
@@ -58,21 +75,37 @@ function getPoolStatus() {
     }
 }
 
-// 连接池使用率告警：每 30 秒检测，超过 80% 时输出 warn 日志
-const poolMonitorHandle = setInterval(() => {
-    try {
-        const status = getPoolStatus();
-        if (status.activeConnections < 0) return;
-        const usagePercent = (status.activeConnections / status.connectionLimit) * 100;
-        if (usagePercent > 80) {
-            logger.warn(`⚠️ 连接池使用率过高: ${usagePercent.toFixed(1)}% (活跃=${status.activeConnections}, 空闲=${status.idleConnections}, 排队=${status.waitingQueue}, 上限=${status.connectionLimit})`);
-        }
-    } catch {
-        // 监控本身不应影响业务
+let poolMonitorHandle = null;
+
+function startPoolMonitor() {
+    if (poolMonitorHandle) {
+        return poolMonitorHandle;
     }
-}, 30000);
-if (poolMonitorHandle && typeof poolMonitorHandle.unref === 'function') {
-    poolMonitorHandle.unref();
+
+    poolMonitorHandle = setInterval(() => {
+        try {
+            const status = getPoolStatus();
+            if (status.activeConnections < 0) return;
+            const usagePercent = (status.activeConnections / status.connectionLimit) * 100;
+            if (usagePercent > 80) {
+                logger.warn(`⚠️ 连接池使用率过高: ${usagePercent.toFixed(1)}% (活跃=${status.activeConnections}, 空闲=${status.idleConnections}, 排队=${status.waitingQueue}, 上限=${status.connectionLimit})`);
+            }
+        } catch {
+            // 监控本身不应影响业务
+        }
+    }, 30000);
+    if (poolMonitorHandle && typeof poolMonitorHandle.unref === 'function') {
+        poolMonitorHandle.unref();
+    }
+    return poolMonitorHandle;
+}
+
+function stopPoolMonitor() {
+    if (!poolMonitorHandle) {
+        return;
+    }
+    clearInterval(poolMonitorHandle);
+    poolMonitorHandle = null;
 }
 
 async function runMigrationFile(sqlPath, description) {
@@ -419,6 +452,7 @@ async function initMysql() {
         logger.info(`✅ MySQL 数据库连接池初始化成功 (${DB_HOST}:${DB_PORT}, 上限=${DB_LIMIT})`);
         connection.release();
         _initialized = true;
+        startPoolMonitor();
     } catch (e) {
         logger.error('❌ MySQL 初始化失败:', e.message);
         throw e;
@@ -490,15 +524,14 @@ function isMysqlInitialized() {
 }
 
 async function closeMysql() {
-    if (poolMonitorHandle) {
-        clearInterval(poolMonitorHandle);
-    }
+    stopPoolMonitor();
 
     if (!_initialized) {
         return;
     }
 
     await pool.end();
+    poolInstance = null;
     _initialized = false;
     logger.info('MySQL closed');
 }

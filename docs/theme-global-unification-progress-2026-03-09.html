@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>主题全局统一进度报告 - 2026-03-09</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --ok: #16a34a;
+      --warn: #d97706;
+      --info: #0284c7;
+    }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap { max-width: 1080px; margin: 24px auto; padding: 0 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    h2 { margin: 0 0 10px; font-size: 16px; }
+    p { margin: 6px 0; }
+    ul { margin: 8px 0 0 20px; }
+    code { background: #f1f5f9; border-radius: 6px; padding: 1px 6px; }
+    .muted { color: var(--muted); }
+    .ok { color: var(--ok); font-weight: 600; }
+    .warn { color: var(--warn); font-weight: 600; }
+    .info { color: var(--info); font-weight: 600; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>主题全局统一进度报告</h1>
+      <p class="muted">生成时间：2026-03-09（Asia/Shanghai）</p>
+      <p>目标：在不改业务逻辑前提下，建立并落地统一的深/浅色与主题色语义体系，降低硬编码颜色和页面风格漂移。</p>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>本轮已完成</h2>
+        <ul>
+          <li><span class="ok">完成</span> <code>BagPanel.vue</code> 大量自定义样式 token 化：按钮、输入、tab、筛选、卡片、详情弹窗、状态胶囊。</li>
+          <li><span class="ok">完成</span> <code>Settings.vue</code> 页面级语义覆写层：text/border/bg/hover 统一到 <code>--ui-*</code> 变量。</li>
+          <li><span class="ok">完成</span> <code>Settings.vue</code> 状态语义映射：success/danger/info/warning 文本与背景统一。</li>
+          <li><span class="ok">完成</span> <code>FarmTools.vue</code> 首轮样式统一：兜底色与局部控件样式改为语义 token。</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>当前收益</h2>
+        <ul>
+          <li>浅色模式下不再依赖大量暗色透明白字方案，阅读对比度明显稳定。</li>
+          <li>不同主题（default/cyber/elegant/ocean/sakura）在同一组件上的配色一致性提升。</li>
+          <li>状态色（成功/警告/错误/信息）从分散 class 走向统一语义变量，后续维护成本降低。</li>
+          <li>后续可逐步替换剩余硬编码而不动业务逻辑。</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>待完成项（下一步）</h2>
+      <ul>
+        <li><span class="info">进行中</span> 继续收敛 <code>BagPanel.vue</code> 剩余少量视觉特效硬编码（阴影/渐变细节）。</li>
+        <li><span class="info">进行中</span> 细化 <code>FarmTools.vue</code> iframe 注入样式中的个别绝对色（白字、toggle 默认色）。</li>
+        <li><span class="info">计划中</span> 补充一份“主题验收清单”（浅色/深色/5主题）逐页面截图核对。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>验证与风险</h2>
+      <p>类型检查命令：<code>cd web && npx vue-tsc -b</code></p>
+      <ul>
+        <li><span class="warn">已知基线问题</span>：<code>@/stores/bag</code> 模块解析失败（出现在 <code>BagPanel.vue</code> 与 <code>Dashboard.vue</code>），属于当前仓库既有问题，非本次主题改造引入。</li>
+        <li>本轮改动均在 UI 样式层，不涉及接口、状态流、业务计算逻辑。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>本轮变更文件</h2>
+      <ul>
+        <li><code>web/src/components/BagPanel.vue</code></li>
+        <li><code>web/src/views/Settings.vue</code></li>
+        <li><code>web/src/views/FarmTools.vue</code></li>
+        <li><code>docs/theme-global-unification-progress-2026-03-09.html</code></li>
+      </ul>
+    </section>
+  </div>
+</body>
+</html>

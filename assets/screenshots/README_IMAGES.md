@@ -6,6 +6,22 @@
 
 README.md 中引用了以下图片，请将相应的截图或图片保存到 `pic/` 目录下：
 
+### 当前截图映射（2026-03-10）
+
+为避免 README 图片断链，当前已使用现有 `feature-*` 资源补齐以下引用：
+
+| README 引用文件 | 当前来源文件 |
+|---|---|
+| `screenshot-03.png` | `feature-03.png` |
+| `screenshot-04.png` | `feature-04.png` |
+| `screenshot-05.png` | `feature-05.png` |
+| `screenshot-06.png` | `feature-06.png` |
+| `screenshot-07.png` | `feature-07.png` |
+
+说明：
+- 上述为“可用性优先”的临时映射，用于保证 README 图片引用完整。
+- 后续如有专门的帮助中心/设置页/用户管理/卡密管理/偷菜设置截图，可直接覆盖同名 `screenshot-0X.png`。
+
 ### 1. architecture.png
 - **用途**: 系统架构图
 - **建议内容**: 展示主进程、Worker 管理、HTTP 服务、WebSocket、前端面板之间的关系

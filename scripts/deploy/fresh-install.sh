@@ -268,6 +268,24 @@ sync_env_from_shell() {
     done
 }
 
+run_announcement_check_if_available() {
+    local checker="${REPO_ROOT}/scripts/utils/check-announcements.js"
+
+    if [ ! -f "${checker}" ]; then
+        print_info "未检测到公告自检脚本，跳过公告预检。"
+        return 0
+    fi
+
+    if ! command -v node >/dev/null 2>&1; then
+        print_warning "检测到公告自检脚本但系统缺少 node，已跳过公告预检。"
+        return 0
+    fi
+
+    print_info "执行公告预检..."
+    node "${checker}"
+    print_success "公告预检通过。"
+}
+
 load_deploy_env() {
     local file="$1"
     if [ -f "${file}" ]; then
@@ -280,7 +298,7 @@ load_deploy_env() {
 
 get_required_images() {
     printf '%s\n' \
-        "${APP_IMAGE:-smdk000/qq-farm-bot-ui:4.5.17}" \
+        "${APP_IMAGE:-smdk000/qq-farm-bot-ui:4.5.18}" \
         "${MYSQL_IMAGE:-mysql:8.0}" \
         "${REDIS_IMAGE:-redis:7-alpine}" \
         "${IPAD860_IMAGE:-smdk000/ipad860:latest}"
@@ -511,6 +529,7 @@ main() {
     require_cmd grep
     require_cmd curl
 
+    run_announcement_check_if_available
     ensure_docker
     ensure_clean_target
 

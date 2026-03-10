@@ -4,7 +4,7 @@
 import type { LoginBackgroundPreset } from '@/constants/ui-appearance'
 import type { ReportLogEntry } from '@/stores/setting'
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { computed, onMounted, ref, watch, watchEffect } from 'vue'
 import api from '@/api' // Apply config from server if possible
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -12,6 +12,7 @@ import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import BaseSwitch from '@/components/ui/BaseSwitch.vue'
 import BaseTooltip from '@/components/ui/BaseTooltip.vue'
+import { useViewPreferenceSync } from '@/composables/use-view-preference-sync'
 import { getThemeAppearanceConfig, getThemeBackgroundPreset, getThemeOption, getThemeWorkspaceVisualPreset, getWorkspaceAppearanceConfig, getWorkspaceVisualPreset, LOGIN_BACKGROUND_PRESETS, THEME_OPTIONS, UI_BACKGROUND_SCOPE_OPTIONS, UI_WORKSPACE_VISUAL_PRESETS } from '@/constants/ui-appearance'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
@@ -19,7 +20,7 @@ import { useFarmStore } from '@/stores/farm'
 import { useFriendStore } from '@/stores/friend'
 import { useSettingStore } from '@/stores/setting'
 import { createDefaultTradeConfig, normalizeTradeConfig, normalizeTradeKeepFruitIds } from '@/utils/trade-config'
-import { DEFAULT_REPORT_HISTORY_VIEW_STATE, fetchViewPreferences, normalizeReportHistoryViewState, saveViewPreferences } from '@/utils/view-preferences'
+import { DEFAULT_REPORT_HISTORY_VIEW_STATE, normalizeReportHistoryViewState } from '@/utils/view-preferences'
 
 const REPORT_HISTORY_VIEW_STORAGE_KEY = 'qq-farm-bot:report-history-view:v1'
 const REPORT_HISTORY_BROWSER_PREF_NOTE = '这里的筛选类型、筛选结果、每页条数、关键字和排序方式会跟随当前登录用户同步到服务器；本机缓存只作首屏兜底。汇报记录本身仍来自数据库。'
@@ -117,10 +118,6 @@ const reportSortOrder = ref<'desc' | 'asc'>(reportHistoryViewPrefs.sortOrder)
 const reportPageSize = ref<typeof DEFAULT_REPORT_HISTORY_VIEW_STATE.pageSize>(
   reportHistoryViewPrefs.pageSize as typeof DEFAULT_REPORT_HISTORY_VIEW_STATE.pageSize,
 )
-let reportHistoryViewSyncTimer: ReturnType<typeof setTimeout> | null = null
-let reportHistoryViewHydrating = false
-let reportHistoryViewSyncEnabled = false
-const reportHistoryViewSignature = computed(() => JSON.stringify(buildReportHistoryViewState()))
 
 function buildReportHistoryViewState() {
   return normalizeReportHistoryViewState({
@@ -139,9 +136,21 @@ function normalizeReportHistoryPageSize(value: number | undefined): typeof DEFAU
   ).pageSize
 }
 
+const {
+  hydrating: reportHistoryViewHydrating,
+  hydrate: hydrateReportHistoryViewState,
+  enableSync: enableReportHistoryViewSync,
+} = useViewPreferenceSync({
+  key: 'reportHistoryViewState',
+  label: '经营汇报历史视图偏好',
+  buildState: buildReportHistoryViewState,
+  applyState: applyReportHistoryViewState,
+  defaultState: DEFAULT_REPORT_HISTORY_VIEW_STATE,
+})
+
 function applyReportHistoryViewState(state: Partial<typeof DEFAULT_REPORT_HISTORY_VIEW_STATE> | null | undefined) {
   const normalized = normalizeReportHistoryViewState(state, DEFAULT_REPORT_HISTORY_VIEW_STATE)
-  reportHistoryViewHydrating = true
+  reportHistoryViewHydrating.value = true
   reportFilters.value = {
     mode: normalized.mode,
     status: normalized.status,
@@ -149,50 +158,7 @@ function applyReportHistoryViewState(state: Partial<typeof DEFAULT_REPORT_HISTOR
   reportKeyword.value = normalized.keyword
   reportSortOrder.value = normalized.sortOrder
   reportPageSize.value = normalized.pageSize
-  reportHistoryViewHydrating = false
-}
-
-function clearReportHistoryViewSyncTimer() {
-  if (reportHistoryViewSyncTimer) {
-    clearTimeout(reportHistoryViewSyncTimer)
-    reportHistoryViewSyncTimer = null
-  }
-}
-
-function scheduleReportHistoryViewSync() {
-  clearReportHistoryViewSyncTimer()
-  const payload = buildReportHistoryViewState()
-  reportHistoryViewSyncTimer = setTimeout(async () => {
-    try {
-      await saveViewPreferences({
-        reportHistoryViewState: payload,
-      })
-    }
-    catch (error) {
-      console.warn('保存经营汇报历史视图偏好失败', error)
-    }
-  }, 240)
-}
-
-async function hydrateReportHistoryViewState() {
-  const localFallback = buildReportHistoryViewState()
-  try {
-    const payload = await fetchViewPreferences()
-    if (payload?.reportHistoryViewState) {
-      applyReportHistoryViewState(payload.reportHistoryViewState)
-      return
-    }
-    applyReportHistoryViewState(localFallback)
-    if (JSON.stringify(localFallback) !== JSON.stringify(DEFAULT_REPORT_HISTORY_VIEW_STATE)) {
-      await saveViewPreferences({
-        reportHistoryViewState: localFallback,
-      })
-    }
-  }
-  catch (error) {
-    console.warn('读取经营汇报历史视图偏好失败', error)
-    applyReportHistoryViewState(localFallback)
-  }
+  reportHistoryViewHydrating.value = false
 }
 
 const reportHistoryStatsCards = computed(() => [
@@ -201,7 +167,7 @@ const reportHistoryStatsCards = computed(() => [
     label: '当前结果总数',
     value: reportLogStats.value.total,
     tone: 'settings-report-card-tone-main',
-    bg: 'settings-report-card-bg-neutral',
+    bg: 'settings-report-card-tone-surface',
     active: reportFilters.value.mode === 'all' && reportFilters.value.status === 'all',
   },
   {
@@ -331,10 +297,10 @@ const systemHealthStatusLabel = computed(() => {
 })
 const systemHealthStatusClass = computed(() => {
   if (!systemHealthSnapshot.value)
-    return 'settings-health-pill settings-health-pill-neutral'
+    return 'settings-health-pill ui-meta-chip--neutral'
   return systemHealthSnapshot.value.ok
-    ? 'settings-health-pill settings-health-pill-success'
-    : 'settings-health-pill settings-health-pill-warning'
+    ? 'settings-health-pill ui-meta-chip--success'
+    : 'settings-health-pill ui-meta-chip--warning'
 })
 void [webAssetsSnapshot, systemHealthCheckedAtLabel, systemHealthStatusLabel, systemHealthStatusClass]
 
@@ -922,18 +888,18 @@ function resolveModeMeta(mode?: string) {
   if (mode === 'alt') {
     return {
       label: '小号',
-      badge: 'settings-mode-badge settings-mode-badge-warning',
+      badge: 'settings-mode-badge ui-meta-chip--warning',
     }
   }
   if (mode === 'safe') {
     return {
       label: '避险',
-      badge: 'settings-mode-badge settings-mode-badge-success',
+      badge: 'settings-mode-badge ui-meta-chip--success',
     }
   }
   return {
     label: '主号',
-    badge: 'settings-mode-badge settings-mode-badge-brand',
+    badge: 'settings-mode-badge ui-meta-chip--brand',
   }
 }
 
@@ -1230,7 +1196,7 @@ const currentModeExecutionMeta = computed(() => {
       effectiveMeta,
       statusBadge: {
         label: '协同命中',
-        badge: 'settings-mode-badge settings-mode-badge-info',
+        badge: 'settings-mode-badge ui-meta-chip--info',
       },
       note: '同区 / 游戏好友约束已命中',
       noteClass: 'settings-mode-note-info',
@@ -1244,8 +1210,8 @@ const currentModeExecutionMeta = computed(() => {
       statusBadge: {
         label: '独立执行',
         badge: effectiveMode !== configuredMode
-          ? 'settings-mode-badge settings-mode-badge-warning'
-          : 'settings-mode-badge settings-mode-badge-neutral',
+          ? 'settings-mode-badge ui-meta-chip--warning'
+          : 'settings-mode-badge ui-meta-chip--neutral',
       },
       note: degradeLabel || '当前已按更保守模式执行',
       noteClass: effectiveMode !== configuredMode
@@ -1476,11 +1442,7 @@ async function loadData() {
 onMounted(async () => {
   await hydrateReportHistoryViewState()
   await loadData()
-  reportHistoryViewSyncEnabled = true
-})
-
-onBeforeUnmount(() => {
-  clearReportHistoryViewSyncTimer()
+  enableReportHistoryViewSync()
 })
 
 // 【关键修复】仅监听 accountId 字符串值，而非 currentAccount 对象引用
@@ -2415,7 +2377,7 @@ watch(() => [reportFilters.value.mode, reportFilters.value.status, reportSortOrd
   expandedReportLogIds.value = []
   selectedReportLogIds.value = []
   closeReportLogDetail()
-  if (reportHistoryViewHydrating)
+  if (reportHistoryViewHydrating.value)
     return
   if (!currentAccountId.value)
     return
@@ -2426,7 +2388,7 @@ watch(() => reportPageSize.value, (pageSize, prevPageSize) => {
   expandedReportLogIds.value = []
   selectedReportLogIds.value = []
   closeReportLogDetail()
-  if (reportHistoryViewHydrating)
+  if (reportHistoryViewHydrating.value)
     return
   if (!currentAccountId.value)
     return
@@ -2463,12 +2425,6 @@ watch(
   },
   { immediate: true },
 )
-
-watch(reportHistoryViewSignature, () => {
-  if (reportHistoryViewHydrating || !reportHistoryViewSyncEnabled)
-    return
-  scheduleReportHistoryViewSync()
-})
 
 async function loadTimingConfig() {
   if (!isAdmin.value)
@@ -2521,7 +2477,7 @@ async function restoreTimingDefaults() {
 </script>
 
 <template>
-  <div class="settings-page ui-page-shell">
+  <div class="settings-page ui-page-shell ui-page-density-relaxed">
     <div v-if="loading" class="glass-text-muted py-4 text-center">
       <div class="i-svg-spinners-ring-resize mx-auto mb-2 text-2xl" />
       <p>加载中...</p>
@@ -2531,33 +2487,49 @@ async function restoreTimingDefaults() {
       <!-- Card 1: Strategy & Automation -->
       <div v-if="currentAccountId" class="card glass-panel h-full flex flex-col rounded-lg shadow">
         <!-- Strategy Header -->
-        <div class="flex flex-col justify-between gap-3 border-b border-white/20 bg-transparent px-4 py-3 md:flex-row md:items-center dark:border-white/10">
-          <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
-            <div class="i-fas-cogs" />
-            策略设置
-            <span v-if="currentAccountName" class="glass-text-muted text-sm font-normal">
-              ({{ currentAccountName }})
-            </span>
-          </h3>
+        <div class="settings-card-divider settings-primary-toolbar ui-mobile-sticky-panel flex flex-col justify-between gap-3 px-4 py-3 md:flex-row md:items-center">
+          <div class="settings-primary-toolbar-heading">
+            <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
+              <div class="i-fas-cogs" />
+              策略设置
+              <span v-if="currentAccountName" class="glass-text-muted text-sm font-normal">
+                ({{ currentAccountName }})
+              </span>
+            </h3>
+            <div class="settings-primary-toolbar-summary md:hidden">
+              <span class="settings-primary-toolbar-chip ui-meta-chip--brand">
+                区服 {{ currentAccountZoneLabel }}
+              </span>
+              <span class="settings-primary-toolbar-chip ui-meta-chip--brand">
+                生效 {{ currentModeExecutionMeta.effectiveMeta.label }}
+              </span>
+              <span class="settings-primary-toolbar-chip ui-meta-chip--brand">
+                {{ localSettings.riskPromptEnabled ? '风控提示已开' : '风控提示已关' }}
+              </span>
+            </div>
+          </div>
           <!-- 预设配置快捷组 -->
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="settings-primary-actions ui-bulk-actions flex flex-wrap items-center gap-2">
             <span class="glass-text-muted mr-1 hidden text-xs lg:inline-block">预设:</span>
             <button
-              class="settings-preset-chip settings-preset-chip-brand"
+              type="button"
+              class="settings-preset-chip ui-meta-chip--brand"
               title="安全优先，最像真人"
               @click="applyPreset('conservative')"
             >
               <div class="i-carbon-security" /> 保守
             </button>
             <button
-              class="settings-preset-chip settings-preset-chip-info"
+              type="button"
+              class="settings-preset-chip ui-meta-chip--info"
               title="推荐配置，收益与安全并重"
               @click="applyPreset('balanced')"
             >
               <div class="i-carbon-scales" /> 平衡
             </button>
             <button
-              class="settings-preset-chip settings-preset-chip-warning"
+              type="button"
+              class="settings-preset-chip ui-meta-chip--warning"
               title="收益优先，适合小号跑图"
               @click="applyPreset('aggressive')"
             >
@@ -2570,7 +2542,7 @@ async function restoreTimingDefaults() {
               variant="primary"
               size="sm"
               :loading="saving"
-              class="flex items-center gap-1 text-xs !h-auto !px-3 !py-1"
+              class="settings-footer-button flex items-center gap-1 text-xs !h-auto !px-3 !py-1"
               @click="saveAccountSettings"
             >
               <div class="i-carbon-save" /> 快速保存
@@ -3180,11 +3152,15 @@ async function restoreTimingDefaults() {
         </div>
 
         <!-- Save Button -->
-        <div class="mt-auto flex justify-end border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel mt-auto flex justify-end px-4 py-3">
+          <p class="settings-sticky-save-note md:hidden">
+            保存后会立即应用到当前账号。
+          </p>
           <BaseButton
             variant="primary"
             size="sm"
             :loading="saving"
+            class="settings-footer-button"
             @click="saveAccountSettings"
           >
             保存策略与自动控制
@@ -3193,7 +3169,7 @@ async function restoreTimingDefaults() {
       </div>
 
       <div v-else class="card glass-panel flex flex-col items-center justify-center gap-4 rounded-lg p-12 text-center shadow">
-        <div class="rounded-full bg-gray-50/20 p-4 dark:bg-gray-700/20">
+        <div class="settings-empty-icon rounded-full p-4">
           <div class="i-carbon-settings-adjust glass-text-muted text-4xl" />
         </div>
         <div class="max-w-xs">
@@ -3209,11 +3185,11 @@ async function restoreTimingDefaults() {
       <!-- Card 2: System Settings (Password & Offline) -->
       <div class="card glass-panel h-full flex flex-col rounded-lg shadow">
         <!-- Password Header -->
-        <div class="border-b border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-divider px-4 py-3">
           <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
             <div class="i-carbon-password" />
             账号密码
-            <span v-if="currentUsername" class="rounded bg-primary-100 px-2 py-0.5 text-xs text-primary-600 font-normal dark:bg-primary-900/30 dark:text-primary-400">
+            <span v-if="currentUsername" class="settings-mode-badge ui-meta-chip--brand text-xs font-normal">
               {{ currentUsername }}
             </span>
           </h3>
@@ -3272,15 +3248,15 @@ async function restoreTimingDefaults() {
 
         <template v-if="isAdmin">
           <!-- Offline Header -->
-          <div class="border-b border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+          <div class="settings-card-divider settings-card-divider-top px-4 py-3">
             <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
               <div class="i-carbon-notification" />
               下线提醒
-              <span class="rounded-full bg-blue-500/12 px-2 py-0.5 text-[11px] text-blue-600 font-semibold dark:text-blue-300">
+              <span class="settings-mode-badge ui-meta-chip--info text-[11px]">
                 全局 / 仅管理员
               </span>
             </h3>
-            <p class="mt-2 text-xs text-gray-500">
+            <p class="settings-system-note mt-2 text-xs">
               这是系统级的统一提醒配置，所有账号共用一套渠道和文案，仅管理员可以修改。
             </p>
           </div>
@@ -3300,7 +3276,7 @@ async function restoreTimingDefaults() {
                   :href="channelDocUrl"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="mt-5 inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-blue-100 px-2 py-1.5 text-xs text-blue-700 font-medium transition dark:bg-blue-900/30 hover:bg-blue-200 dark:text-blue-300 dark:hover:bg-blue-800/40"
+                  class="settings-system-doc-link settings-system-doc-link-info mt-5 inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs font-medium"
                   title="查看官方文档"
                 >
                   <span class="i-carbon-launch text-xs" />
@@ -3361,7 +3337,7 @@ async function restoreTimingDefaults() {
               placeholder="提醒内容"
             />
 
-            <div v-if="localOffline.channel === 'webhook'" class="border border-gray-200/60 rounded-lg p-3 space-y-2 dark:border-gray-700/60">
+            <div v-if="localOffline.channel === 'webhook'" class="settings-system-panel rounded-lg p-3 space-y-2">
               <BaseSwitch
                 v-model="localOffline.webhookCustomJsonEnabled"
                 label="Webhook 自定义 JSON"
@@ -3371,18 +3347,19 @@ async function restoreTimingDefaults() {
               <textarea
                 v-model="localOffline.webhookCustomJsonTemplate"
                 :disabled="!localOffline.webhookCustomJsonEnabled"
-                class="min-h-[120px] w-full border border-gray-300/70 rounded-md bg-white/80 p-2 text-xs font-mono dark:border-gray-600/70 dark:bg-black/20"
+                class="settings-system-editor min-h-[120px] w-full p-2 text-xs font-mono"
                 placeholder="{&quot;title&quot;:&quot;{{title}}&quot;,&quot;content&quot;:&quot;{{content}}&quot;,&quot;accountId&quot;:&quot;{{accountId}}&quot;,&quot;accountName&quot;:&quot;{{accountName}}&quot;,&quot;timestamp&quot;:&quot;{{timestamp}}&quot;}"
               />
             </div>
           </div>
 
           <!-- Save Offline Button -->
-          <div class="flex justify-end border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+          <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel flex justify-end px-4 py-3">
             <BaseButton
               variant="primary"
               size="sm"
               :loading="offlineSaving"
+              class="settings-footer-button"
               @click="handleSaveOffline"
             >
               保存全局下线提醒
@@ -3391,23 +3368,23 @@ async function restoreTimingDefaults() {
         </template>
 
         <template v-if="currentAccountId">
-          <div class="border-b border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+          <div class="settings-card-divider settings-card-divider-top px-4 py-3">
             <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
               <div class="i-carbon-report-data" />
               经营汇报
-              <span class="rounded-full bg-emerald-500/12 px-2 py-0.5 text-[11px] text-emerald-600 font-semibold dark:text-emerald-300">
+              <span class="settings-mode-badge ui-meta-chip--success text-[11px]">
                 账号级 / 当前账号
               </span>
             </h3>
-            <p class="mt-2 text-xs text-gray-500">
+            <p class="settings-system-note mt-2 text-xs">
               这是当前选中账号的独立汇报配置。不同账号可以分别设置不同的推送渠道、发送时段和邮件收件人。
             </p>
           </div>
 
           <div class="p-4">
-            <div class="border border-emerald-100/60 rounded-2xl bg-emerald-50/40 p-5 dark:border-emerald-800/40 dark:bg-emerald-950/10">
+            <div class="settings-report-hero rounded-2xl p-5">
               <div class="mb-4 flex items-center justify-between gap-3">
-                <h4 class="flex items-center gap-2 text-xs text-emerald-700 font-bold tracking-widest uppercase dark:text-emerald-300">
+                <h4 class="settings-report-hero-title flex items-center gap-2 text-xs font-bold tracking-widest uppercase">
                   <div class="i-carbon-report-data mr-1" /> {{ currentAccountName || '当前账号' }} · 经营汇报
                 </h4>
                 <div class="flex flex-wrap gap-2">
@@ -3459,7 +3436,7 @@ async function restoreTimingDefaults() {
                       :href="reportChannelDocUrl"
                       target="_blank"
                       rel="noopener noreferrer"
-                      class="mt-5 inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-emerald-100 px-2 py-1.5 text-xs text-emerald-700 font-medium transition dark:bg-emerald-900/30 hover:bg-emerald-200 dark:text-emerald-300 dark:hover:bg-emerald-800/40"
+                      class="settings-system-doc-link settings-system-doc-link-success mt-5 inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs font-medium"
                       title="查看官方文档"
                     >
                       <span class="i-carbon-launch text-xs" />
@@ -3490,7 +3467,7 @@ async function restoreTimingDefaults() {
                   />
                 </div>
 
-                <div v-else class="border border-white/10 rounded-2xl bg-black/10 p-4 space-y-4">
+                <div v-else class="settings-report-mail-panel rounded-2xl p-4 space-y-4">
                   <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <BaseInput
                       v-model="localSettings.reportConfig.smtpHost"
@@ -3836,7 +3813,7 @@ async function restoreTimingDefaults() {
                         <div class="flex flex-wrap items-center gap-2">
                           <span
                             class="settings-result-badge rounded-full px-2 py-0.5 text-[11px] font-bold"
-                            :class="item.ok ? 'settings-result-badge-success' : 'settings-result-badge-danger'"
+                            :class="item.ok ? 'ui-meta-chip--success' : 'ui-meta-chip--danger'"
                           >
                             {{ item.ok ? '成功' : '失败' }}
                           </span>
@@ -4024,7 +4001,7 @@ async function restoreTimingDefaults() {
 
       <!-- Card Time Parameters: 系统级时间参数调优（仅管理员可见） -->
       <div v-if="isAdmin" class="card glass-panel h-full flex flex-col rounded-lg shadow lg:col-span-2">
-        <div class="flex items-center justify-between border-b border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-divider flex items-center justify-between px-4 py-3">
           <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
             <div class="i-carbon-time" />
             ⏱ 时间参数调优 (System Timing)
@@ -4096,7 +4073,7 @@ async function restoreTimingDefaults() {
                   min="1"
                 />
               </div>
-              <p class="text-[10px] text-orange-500 italic">
+              <p class="settings-system-warning-note text-[10px] italic">
                 模拟真人疲劳休眠，随机下线避开长时间挂机检测。
               </p>
             </div>
@@ -4113,10 +4090,10 @@ async function restoreTimingDefaults() {
                 min="500"
                 step="100"
               />
-              <div class="border border-white/10 rounded-lg bg-black/5 p-2 dark:bg-black/20">
+              <div class="settings-system-readonly-box rounded-lg p-2">
                 <div v-for="p in settingStore.settings.readonlyTimingParams" :key="p.key" class="flex justify-between py-1 text-[11px]">
                   <span class="glass-text-muted">{{ p.label }}</span>
-                  <span class="text-primary-500 font-mono">{{ p.value }}</span>
+                  <span class="settings-system-inline-value font-mono">{{ p.value }}</span>
                 </div>
               </div>
             </div>
@@ -4158,11 +4135,12 @@ async function restoreTimingDefaults() {
           </div>
         </div>
 
-        <div class="mt-auto flex justify-end border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel mt-auto flex justify-end px-4 py-3">
           <BaseButton
             variant="primary"
             size="sm"
             :loading="timingSaving"
+            class="settings-footer-button"
             @click="handleSaveTiming"
           >
             保存时间参数设置
@@ -4172,7 +4150,7 @@ async function restoreTimingDefaults() {
 
       <!-- Card New: 分布式与集群流控（仅管理员可见） -->
       <div v-if="isAdmin" class="card glass-panel h-full flex flex-col rounded-lg shadow lg:col-span-2">
-        <div class="border-b border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-divider px-4 py-3">
           <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
             <div class="i-carbon-flow-stream" />
             分布式与集群流控 (Cluster Routing)
@@ -4187,7 +4165,7 @@ async function restoreTimingDefaults() {
               :options="clusterStrategyOptions"
             />
           </div>
-          <div class="alert alert-info mt-2 flex items-start gap-2 rounded-md bg-blue-50/50 p-3 text-sm text-blue-800 dark:bg-blue-900/20 dark:text-blue-200">
+          <div class="settings-system-info-alert mt-2 flex items-start gap-2 rounded-md p-3 text-sm">
             <div class="i-carbon-information mt-0.5 shrink-0 text-base" />
             <div>
               <p class="font-bold">
@@ -4201,11 +4179,12 @@ async function restoreTimingDefaults() {
           </div>
         </div>
 
-        <div class="mt-auto flex justify-end border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel mt-auto flex justify-end px-4 py-3">
           <BaseButton
             variant="primary"
             size="sm"
             :loading="clusterSaving"
+            class="settings-footer-button"
             @click="saveClusterConfig"
           >
             保存集群路由策略
@@ -4215,7 +4194,7 @@ async function restoreTimingDefaults() {
 
       <!-- Card 3: 体验卡配置（仅管理员可见） -->
       <div v-if="isAdmin" class="card glass-panel relative z-10 h-full flex flex-col rounded-lg shadow lg:col-span-2">
-        <div class="border-b border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-divider px-4 py-3">
           <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
             <div class="i-carbon-chemistry" />
             体验卡配置
@@ -4256,11 +4235,12 @@ async function restoreTimingDefaults() {
           </div>
         </div>
 
-        <div class="mt-auto flex justify-end border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel mt-auto flex justify-end px-4 py-3">
           <BaseButton
             variant="primary"
             size="sm"
             :loading="trialSaving"
+            class="settings-footer-button"
             @click="saveTrialConfig"
           >
             保存体验卡设置
@@ -4270,7 +4250,7 @@ async function restoreTimingDefaults() {
 
       <!-- Card 4: 第三方 API 配置（仅管理员可见） -->
       <div v-if="isAdmin" class="card glass-panel h-full flex flex-col rounded-lg shadow lg:col-span-2">
-        <div class="border-b border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-divider px-4 py-3">
           <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
             <div class="i-carbon-api-1" />
             第三方 API 配置
@@ -4312,17 +4292,18 @@ async function restoreTimingDefaults() {
               placeholder="请输入 aineishe.com 获取的 Token"
             />
           </div>
-          <div class="alert alert-warning mt-2 flex items-start gap-2 rounded-md bg-yellow-50 p-3 text-sm text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200">
+          <div class="settings-system-warning-alert mt-2 flex items-start gap-2 rounded-md p-3 text-sm">
             <div class="i-carbon-warning-alt mt-0.5 mt-0.5 shrink-0 text-base" />
             <p>更改此项配置会立即刷新扫码中转服务器参数。如果改错导致扫码无反应，请重新设置正确的值，原环境变量已不再具有覆写能力。</p>
           </div>
         </div>
 
-        <div class="mt-auto flex justify-end border-t border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+        <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel mt-auto flex justify-end px-4 py-3">
           <BaseButton
             variant="primary"
             size="sm"
             :loading="thirdPartyApiSaving"
+            class="settings-footer-button"
             @click="saveThirdPartyApiConfig"
           >
             保存第三方 API 设置
@@ -4333,7 +4314,7 @@ async function restoreTimingDefaults() {
 
     <!-- Card 4: 系统主题与背景（仅管理员可见） -->
     <div v-if="isAdmin" class="card glass-panel h-full flex flex-col rounded-lg shadow lg:col-span-2">
-      <div class="border-b border-gray-200/50 bg-transparent px-4 py-3 dark:border-gray-700/50">
+      <div class="settings-card-divider px-4 py-3">
         <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
           <div class="i-carbon-paint-brush" />
           系统外观与自定义背景
@@ -4349,7 +4330,7 @@ async function restoreTimingDefaults() {
               placeholder="请输入图片链接 (如: https://example.com/bg.jpg)"
             />
 
-            <div class="border border-primary-500/20 rounded-2xl bg-primary-500/8 p-4">
+            <div class="settings-theme-highlight rounded-2xl p-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div class="glass-text-main text-sm font-bold">
@@ -4369,7 +4350,7 @@ async function restoreTimingDefaults() {
               </div>
             </div>
 
-            <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+            <div class="settings-theme-surface rounded-2xl p-4">
               <div class="flex items-start justify-between gap-4">
                 <div>
                   <div class="glass-text-main text-sm font-bold">
@@ -4386,10 +4367,10 @@ async function restoreTimingDefaults() {
               </div>
               <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <span
-                  class="rounded-full px-3 py-1 text-[11px] font-bold"
+                  class="settings-theme-chip px-3 py-1 text-[11px] font-bold"
                   :class="appStore.themeBackgroundLinked
-                    ? 'bg-primary-500/15 text-primary-500'
-                    : 'bg-white/10 text-gray-500 dark:bg-black/20 dark:text-gray-300'"
+                    ? 'ui-meta-chip--brand'
+                    : 'ui-meta-chip--neutral'"
                 >
                   {{ appStore.themeBackgroundLinked ? '已开启自动联动' : '当前为手动搭配模式' }}
                 </span>
@@ -4403,7 +4384,7 @@ async function restoreTimingDefaults() {
               </div>
             </div>
 
-            <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+            <div class="settings-theme-surface rounded-2xl p-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div class="glass-text-main text-sm font-bold">
@@ -4413,7 +4394,7 @@ async function restoreTimingDefaults() {
                     每套方案都会同步主题色、背景图、登录页参数、主界面参数和业务页卡片风格，并默认启用“登录页 + 主界面”。
                   </p>
                 </div>
-                <div class="rounded-full bg-primary-500/10 px-3 py-1 text-[11px] text-primary-600 dark:bg-black/20 dark:text-primary-300">
+                <div class="settings-theme-chip ui-meta-chip--brand px-3 py-1 text-[11px]">
                   一键套用整套皮肤
                 </div>
               </div>
@@ -4423,10 +4404,8 @@ async function restoreTimingDefaults() {
                   v-for="bundle in themePresetBundles"
                   :key="bundle.theme.key"
                   type="button"
-                  class="settings-theme-bundle-card group overflow-hidden border rounded-2xl bg-black/5 text-left transition-all duration-300 dark:bg-white/5 hover:shadow-xl hover:-translate-y-1"
-                  :class="isThemeBundleApplied(bundle.theme.key)
-                    ? 'border-primary-500 shadow-lg shadow-primary-500/15'
-                    : 'border-white/10 dark:border-white/10'"
+                  class="settings-theme-bundle-card settings-theme-surface group overflow-hidden rounded-2xl text-left transition-all duration-300 hover:shadow-xl hover:-translate-y-1"
+                  :class="isThemeBundleApplied(bundle.theme.key) ? 'settings-theme-surface-active' : ''"
                   @click="applyThemeBundle(bundle.theme.key)"
                 >
                   <div
@@ -4453,11 +4432,11 @@ async function restoreTimingDefaults() {
                           boxShadow: `0 0 0 4px ${bundle.theme.color}22`,
                         }"
                       />
-                      <span class="settings-theme-bundle-badge border border-white/20 rounded-full bg-black/35 px-2.5 py-1 text-[10px] text-white backdrop-blur-md">
+                      <span class="settings-theme-bundle-badge rounded-full px-2.5 py-1 text-[10px]">
                         {{ bundle.theme.name }}
                       </span>
                     </div>
-                    <div class="settings-theme-bundle-badge absolute bottom-3 right-3 border border-white/20 rounded-full bg-black/35 px-2.5 py-1 text-[10px] text-white backdrop-blur-md">
+                    <div class="settings-theme-bundle-badge absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
                       {{ bundle.preset.title }}
                     </div>
                   </div>
@@ -4466,10 +4445,10 @@ async function restoreTimingDefaults() {
                     <div class="settings-theme-bundle-head flex items-start justify-between gap-3">
                       <span class="settings-theme-bundle-title glass-text-main text-sm font-semibold">{{ bundle.preset.title }}</span>
                       <span
-                        class="settings-theme-bundle-action rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        class="settings-theme-bundle-action settings-theme-chip px-2 py-0.5 text-[10px] font-bold"
                         :class="isThemeBundleApplied(bundle.theme.key)
-                          ? 'bg-primary-500/15 text-primary-500'
-                          : 'bg-white/70 text-gray-700 dark:bg-black/20 dark:text-gray-200'"
+                          ? 'ui-meta-chip--brand'
+                          : 'ui-meta-chip--neutral'"
                       >
                         {{ isThemeBundleApplied(bundle.theme.key) ? '当前整套' : '点击套用' }}
                       </span>
@@ -4489,7 +4468,7 @@ async function restoreTimingDefaults() {
               </div>
             </div>
 
-            <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+            <div class="settings-theme-surface rounded-2xl p-4">
               <div class="glass-text-main text-sm font-medium">
                 背景作用范围
               </div>
@@ -4498,10 +4477,10 @@ async function restoreTimingDefaults() {
                   v-for="option in UI_BACKGROUND_SCOPE_OPTIONS"
                   :key="option.value"
                   type="button"
-                  class="border rounded-2xl px-3 py-3 text-left transition-all"
+                  class="settings-theme-scope-card rounded-2xl px-3 py-3 text-left transition-all"
                   :class="appStore.backgroundScope === option.value
-                    ? 'border-primary-500 bg-primary-500/10 shadow-lg shadow-primary-500/10'
-                    : 'border-white/10 bg-white/5 hover:border-primary-500/30 hover:bg-white/10 dark:bg-black/10'"
+                    ? 'settings-theme-scope-card-active'
+                    : 'settings-theme-scope-card-inactive'"
                   @click="appStore.backgroundScope = option.value"
                 >
                   <div class="glass-text-main text-sm font-semibold">
@@ -4514,7 +4493,7 @@ async function restoreTimingDefaults() {
               </div>
             </div>
 
-            <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+            <div class="settings-theme-surface rounded-2xl p-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div class="glass-text-main text-sm font-bold">
@@ -4524,7 +4503,7 @@ async function restoreTimingDefaults() {
                     {{ currentWorkspaceVisualSummary.description }}
                   </p>
                 </div>
-                <div class="rounded-full bg-primary-500/12 px-3 py-1 text-[11px] text-primary-500 font-bold">
+                <div class="settings-theme-chip ui-meta-chip--brand px-3 py-1 text-[11px]">
                   {{ currentWorkspaceVisualSummary.badge }}
                 </div>
               </div>
@@ -4534,26 +4513,24 @@ async function restoreTimingDefaults() {
                   v-for="preset in workspaceVisualPresets"
                   :key="preset.key"
                   type="button"
-                  class="group overflow-hidden border rounded-2xl bg-black/5 p-3 text-left transition-all duration-300 dark:bg-white/5 hover:shadow-lg hover:-translate-y-0.5"
-                  :class="isWorkspaceVisualPresetApplied(preset.key)
-                    ? 'border-primary-500 shadow-lg shadow-primary-500/15'
-                    : 'border-white/10 dark:border-white/10'"
+                  class="settings-theme-visual-card group overflow-hidden rounded-2xl p-3 text-left transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
+                  :class="isWorkspaceVisualPresetApplied(preset.key) ? 'settings-theme-surface-active' : ''"
                   @click="applyWorkspaceVisualPreset(preset.key)"
                 >
                   <div
-                    class="relative h-24 overflow-hidden border border-white/10 rounded-2xl p-3"
+                    class="settings-theme-visual-preview relative h-24 overflow-hidden rounded-2xl p-3"
                     :style="{ background: 'radial-gradient(circle at top, color-mix(in srgb, var(--ui-text-on-brand) 14%, transparent), transparent 58%), linear-gradient(180deg, color-mix(in srgb, var(--ui-text-on-brand) 8%, transparent), color-mix(in srgb, var(--ui-bg-canvas) 22%, transparent))' }"
                   >
-                    <div class="absolute inset-0 from-white/10 via-transparent to-black/20 bg-gradient-to-br" />
+                    <div class="settings-theme-visual-overlay absolute inset-0" />
                     <div class="relative z-10 h-full flex gap-3">
                       <div class="w-12 border rounded-xl p-2" :style="getWorkspacePreviewCardStyle(preset.key)">
-                        <div class="h-2.5 w-5 rounded bg-white/60" />
-                        <div class="mt-2 h-1.5 rounded bg-white/30" />
-                        <div class="mt-1.5 h-1.5 rounded bg-white/20" />
+                        <div class="settings-theme-visual-bar-strong h-2.5 w-5 rounded" />
+                        <div class="settings-theme-visual-bar-mid mt-2 h-1.5 rounded" />
+                        <div class="settings-theme-visual-bar-faint mt-1.5 h-1.5 rounded" />
                       </div>
                       <div class="flex flex-1 flex-col gap-2">
                         <div class="border rounded-xl px-3 py-2" :style="getWorkspacePreviewCardStyle(preset.key)">
-                          <div class="h-2.5 w-16 rounded bg-white/50" />
+                          <div class="settings-theme-visual-bar-strong h-2.5 w-16 rounded" />
                         </div>
                         <div class="grid grid-cols-2 flex-1 gap-2">
                           <div class="border rounded-xl" :style="getWorkspacePreviewCardStyle(preset.key)" />
@@ -4568,10 +4545,10 @@ async function restoreTimingDefaults() {
                       {{ preset.name }}
                     </div>
                     <span
-                      class="rounded-full px-2.5 py-0.5 text-[10px] font-bold"
+                      class="settings-theme-chip px-2.5 py-0.5 text-[10px] font-bold"
                       :class="isWorkspaceVisualPresetApplied(preset.key)
-                        ? 'bg-primary-500/15 text-primary-500'
-                        : 'bg-white/10 text-gray-300 dark:bg-black/20 dark:text-gray-200'"
+                        ? 'ui-meta-chip--brand'
+                        : 'ui-meta-chip--neutral'"
                     >
                       {{ isWorkspaceVisualPresetApplied(preset.key) ? '当前方案' : preset.badge }}
                     </span>
@@ -4596,10 +4573,10 @@ async function restoreTimingDefaults() {
             >
 
             <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+              <div class="settings-theme-range-card rounded-2xl p-4">
                 <div class="flex items-center justify-between gap-3">
                   <span class="glass-text-main text-sm font-medium">登录页遮罩强度</span>
-                  <span class="rounded-full bg-primary-500/15 px-2.5 py-1 text-[11px] text-primary-500 font-bold">
+                  <span class="settings-theme-chip ui-meta-chip--brand px-2.5 py-1 text-[11px]">
                     {{ appStore.loginBackgroundOverlayOpacity }}%
                   </span>
                 </div>
@@ -4616,10 +4593,10 @@ async function restoreTimingDefaults() {
                 </p>
               </div>
 
-              <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+              <div class="settings-theme-range-card rounded-2xl p-4">
                 <div class="flex items-center justify-between gap-3">
                   <span class="glass-text-main text-sm font-medium">登录页模糊度</span>
-                  <span class="rounded-full bg-primary-500/15 px-2.5 py-1 text-[11px] text-primary-500 font-bold">
+                  <span class="settings-theme-chip ui-meta-chip--brand px-2.5 py-1 text-[11px]">
                     {{ appStore.loginBackgroundBlur }}px
                   </span>
                 </div>
@@ -4638,10 +4615,10 @@ async function restoreTimingDefaults() {
             </div>
 
             <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+              <div class="settings-theme-range-card rounded-2xl p-4">
                 <div class="flex items-center justify-between gap-3">
                   <span class="glass-text-main text-sm font-medium">主界面遮罩强度</span>
-                  <span class="rounded-full bg-primary-500/15 px-2.5 py-1 text-[11px] text-primary-500 font-bold">
+                  <span class="settings-theme-chip ui-meta-chip--brand px-2.5 py-1 text-[11px]">
                     {{ appStore.appBackgroundOverlayOpacity }}%
                   </span>
                 </div>
@@ -4658,10 +4635,10 @@ async function restoreTimingDefaults() {
                 </p>
               </div>
 
-              <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+              <div class="settings-theme-range-card rounded-2xl p-4">
                 <div class="flex items-center justify-between gap-3">
                   <span class="glass-text-main text-sm font-medium">主界面模糊度</span>
-                  <span class="rounded-full bg-primary-500/15 px-2.5 py-1 text-[11px] text-primary-500 font-bold">
+                  <span class="settings-theme-chip ui-meta-chip--brand px-2.5 py-1 text-[11px]">
                     {{ appStore.appBackgroundBlur }}px
                   </span>
                 </div>
@@ -4679,7 +4656,7 @@ async function restoreTimingDefaults() {
               </div>
             </div>
 
-            <div class="border border-white/10 rounded-2xl bg-black/5 p-4 dark:bg-white/5">
+            <div class="settings-theme-action-panel rounded-2xl p-4">
               <div class="flex flex-wrap items-center gap-3">
                 <BaseButton
                   variant="secondary"
@@ -4731,7 +4708,7 @@ async function restoreTimingDefaults() {
               @click="openLoginPreview"
             >
               <div v-if="loginPreviewUsesCustomBackground" class="absolute inset-0" :style="loginPreviewMaskStyle" />
-              <div class="absolute inset-0 from-black/35 via-transparent to-white/10 bg-gradient-to-t opacity-80" />
+              <div class="settings-preview-login-sheen absolute inset-0 opacity-80" />
               <div class="absolute inset-0 flex items-center justify-center">
                 <div class="settings-preview-glass glass-text-main rounded-xl px-4 py-2 text-xs font-medium shadow-lg transition-transform duration-300 group-hover:scale-105">
                   玻璃拟态预览
@@ -4750,22 +4727,22 @@ async function restoreTimingDefaults() {
               :style="loginPreviewBackgroundStyle"
             >
               <div v-if="loginPreviewUsesCustomBackground" class="absolute inset-0" :style="appScenePreviewMaskStyle" />
-              <div class="absolute inset-0 from-white/10 via-transparent to-black/20 bg-gradient-to-br" />
+              <div class="settings-preview-overlay-soft absolute inset-0" />
               <div class="settings-preview-chip absolute left-3 top-3 rounded-full px-2.5 py-1 text-[10px]">
                 主界面氛围预览
               </div>
               <div class="absolute inset-0 flex gap-3 p-4">
                 <div class="settings-preview-sidebar w-20 rounded-2xl p-3">
-                  <div class="mb-3 h-6 w-6 rounded-lg bg-white/70" />
+                  <div class="settings-preview-block-strong mb-3 h-6 w-6 rounded-lg" />
                   <div class="space-y-2">
-                    <div class="h-2 rounded bg-white/40" />
-                    <div class="h-2 rounded bg-white/20" />
-                    <div class="h-2 rounded bg-white/20" />
+                    <div class="settings-preview-block-mid h-2 rounded" />
+                    <div class="settings-preview-block-faint h-2 rounded" />
+                    <div class="settings-preview-block-faint h-2 rounded" />
                   </div>
                 </div>
                 <div class="flex flex-1 flex-col gap-3">
                   <div class="settings-preview-panel rounded-2xl p-3">
-                    <div class="h-3 w-36 rounded bg-white/55" />
+                    <div class="settings-preview-block-strong h-3 w-36 rounded" />
                   </div>
                   <div class="grid grid-cols-2 flex-1 gap-3">
                     <div class="settings-preview-panel rounded-2xl p-3" />
@@ -4778,10 +4755,10 @@ async function restoreTimingDefaults() {
               </div>
             </div>
 
-            <p v-if="loginPreviewLoading" class="text-xs text-amber-500">
+            <p v-if="loginPreviewLoading" class="settings-theme-preview-note settings-theme-preview-note-warning text-xs">
               正在验证图片链接，加载完成后会自动应用到预览。
             </p>
-            <p v-else-if="loginPreviewLoadFailed" class="text-xs text-rose-400">
+            <p v-else-if="loginPreviewLoadFailed" class="settings-theme-preview-note settings-theme-preview-note-danger text-xs">
               当前图片链接加载失败，预览已回退到默认渐变。建议使用可直接访问的 JPG / PNG / WebP 地址。
             </p>
             <p v-else class="glass-text-muted text-xs">
@@ -4790,7 +4767,7 @@ async function restoreTimingDefaults() {
           </div>
         </div>
 
-        <div class="border-t border-white/10 pt-5">
+        <div class="settings-card-footer pt-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div class="glass-text-main text-sm font-bold">
@@ -4810,10 +4787,8 @@ async function restoreTimingDefaults() {
               v-for="preset in orderedLoginBackgroundPresets"
               :key="preset.key"
               type="button"
-              class="group overflow-hidden border rounded-2xl bg-black/5 text-left transition-all duration-300 dark:bg-white/5 hover:shadow-xl hover:-translate-y-1"
-              :class="isSelectedLoginBackgroundPreset(preset)
-                ? 'border-primary-500 shadow-lg shadow-primary-500/15'
-                : 'border-white/10 dark:border-white/10'"
+              class="settings-theme-gallery-card group overflow-hidden rounded-2xl text-left transition-all duration-300 hover:shadow-xl hover:-translate-y-1"
+              :class="isSelectedLoginBackgroundPreset(preset) ? 'settings-theme-surface-active' : ''"
               @click="applyBackgroundPreset(preset)"
             >
               <div
@@ -4831,10 +4806,10 @@ async function restoreTimingDefaults() {
                     WebkitBackdropFilter: `blur(${preset.blur}px)`,
                   }"
                 />
-                <div class="absolute left-3 top-3 border border-white/20 rounded-full bg-black/35 px-2.5 py-1 text-[10px] text-white backdrop-blur-md">
+                <div class="settings-theme-bundle-badge absolute left-3 top-3 rounded-full px-2.5 py-1 text-[10px]">
                   {{ preset.themeKey === appStore.colorTheme ? '当前主题推荐' : (preset.badge || '预设') }}
                 </div>
-                <div class="absolute bottom-3 right-3 border border-white/20 rounded-full bg-black/35 px-2.5 py-1 text-[10px] text-white backdrop-blur-md">
+                <div class="settings-theme-bundle-badge absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
                   {{ preset.overlayOpacity }}% / {{ preset.blur }}px
                 </div>
               </div>
@@ -4844,7 +4819,7 @@ async function restoreTimingDefaults() {
                   <span class="glass-text-main text-sm font-semibold">{{ preset.title }}</span>
                   <span
                     v-if="isSelectedLoginBackgroundPreset(preset)"
-                    class="rounded-full bg-primary-500/15 px-2 py-0.5 text-[10px] text-primary-500 font-bold"
+                    class="settings-theme-chip ui-meta-chip--brand px-2 py-0.5 text-[10px]"
                   >
                     当前
                   </span>
@@ -4874,7 +4849,7 @@ async function restoreTimingDefaults() {
             :style="loginPreviewBackgroundStyle"
           >
             <div v-if="loginPreviewUsesCustomBackground" class="absolute inset-0" :style="loginPreviewMaskStyle" />
-            <div v-else class="absolute inset-0 from-white/10 via-transparent to-black/5 bg-gradient-to-br" />
+            <div v-else class="settings-preview-modal-sheen absolute inset-0" />
 
             <div class="settings-preview-chip absolute left-5 top-5 z-20 rounded-full px-4 py-1.5 text-xs">
               登录页玻璃拟态预览
@@ -4999,14 +4974,14 @@ async function restoreTimingDefaults() {
             <div class="flex flex-wrap items-center gap-2">
               <span
                 class="settings-result-badge rounded-full px-2.5 py-1 text-[11px] font-bold"
-                :class="reportDetailItem.ok ? 'settings-result-badge-success' : 'settings-result-badge-danger'"
+                :class="reportDetailItem.ok ? 'ui-meta-chip--success' : 'ui-meta-chip--danger'"
               >
                 {{ reportDetailItem.ok ? '发送成功' : '发送失败' }}
               </span>
-              <span class="settings-report-detail-chip rounded-full px-2.5 py-1 text-[11px]">
+              <span class="settings-report-detail-chip ui-meta-chip--neutral rounded-full px-2.5 py-1 text-[11px]">
                 账号：{{ reportDetailItem.accountName || reportDetailItem.accountId || '-' }}
               </span>
-              <span class="settings-report-detail-chip rounded-full px-2.5 py-1 text-[11px]">
+              <span class="settings-report-detail-chip ui-meta-chip--neutral rounded-full px-2.5 py-1 text-[11px]">
                 ID：{{ reportDetailItem.accountId || '-' }}
               </span>
             </div>
@@ -5063,8 +5038,8 @@ async function restoreTimingDefaults() {
         <p class="glass-text-muted text-sm">
           检测到以下配置项已变动：
         </p>
-        <div class="max-h-60 overflow-y-auto border border-gray-100 rounded-xl bg-gray-50/50 p-2 dark:border-gray-700 dark:bg-gray-900/40">
-          <div v-for="item in diffItems" :key="item.label" class="flex items-center justify-between border-b border-gray-100 p-2 last:border-0 dark:border-gray-700/50">
+        <div class="settings-system-diff-panel max-h-60 overflow-y-auto rounded-xl p-2">
+          <div v-for="item in diffItems" :key="item.label" class="settings-system-diff-row flex items-center justify-between p-2 last:border-0">
             <span class="glass-text-muted text-xs font-medium">{{ item.label }}</span>
             <div class="flex items-center gap-2 text-xs">
               <span class="glass-text-muted line-through">{{ item.from }}</span>
@@ -5073,7 +5048,7 @@ async function restoreTimingDefaults() {
             </div>
           </div>
         </div>
-        <p class="text-[10px] text-orange-500 italic">
+        <p class="settings-system-warning-note text-[10px] italic">
           {{ diffModalHint }}
         </p>
       </div>
@@ -5086,31 +5061,291 @@ async function restoreTimingDefaults() {
   color: var(--ui-text-1);
 }
 
-.settings-page :is(.text-gray-500, .text-gray-400, .glass-text-muted) {
+.settings-page :is([class*='text-'][class*='gray-500'], [class*='text-'][class*='gray-400'], .glass-text-muted) {
   color: var(--ui-text-2) !important;
 }
 
-.settings-page [class*='text-white/90'],
-.settings-page [class*='text-white/80'],
-.settings-page [class*='text-white/70'] {
+.settings-page [class*='text-'][class*='white/90'],
+.settings-page [class*='text-'][class*='white/80'],
+.settings-page [class*='text-'][class*='white/70'] {
   color: color-mix(in srgb, var(--ui-text-on-brand) 90%, var(--ui-text-1) 10%) !important;
 }
 
-.settings-page [class*='border-gray-100'],
-.settings-page [class*='border-gray-200/'],
-.settings-page [class*='dark:border-gray-700'],
-.settings-page [class*='border-white/10'],
-.settings-page [class*='border-white/20'] {
+.settings-page [class*='border-'][class*='gray-100'],
+.settings-page [class*='border-'][class*='gray-200/'],
+.settings-page [class*='dark:border-'][class*='gray-700'],
+.settings-page [class*='border-'][class*='white/10'],
+.settings-page [class*='border-'][class*='white/20'] {
   border-color: var(--ui-border-subtle) !important;
 }
 
-.settings-page [class*='bg-black/5'],
-.settings-page [class*='bg-black/25'],
-.settings-page [class*='bg-white/5'],
-.settings-page [class*='bg-white/10'],
-.settings-page [class*='bg-white/80'],
-.settings-page [class*='dark:bg-gray-900/40'] {
+.settings-page [class*='bg-'][class*='black/5'],
+.settings-page [class*='bg-'][class*='black/25'],
+.settings-page [class*='bg-'][class*='white/5'],
+.settings-page [class*='bg-'][class*='white/10'],
+.settings-page [class*='bg-'][class*='white/80'],
+.settings-page [class*='dark:bg-'][class*='gray-900/40'] {
   background-color: color-mix(in srgb, var(--ui-bg-surface) 64%, transparent) !important;
+}
+
+.settings-card-divider {
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: transparent;
+}
+
+.settings-card-divider-top {
+  border-top: 1px solid var(--ui-border-subtle);
+}
+
+.settings-card-footer {
+  border-top: 1px solid var(--ui-border-subtle);
+  background: transparent;
+}
+
+.settings-primary-toolbar-heading {
+  min-width: 0;
+}
+
+.settings-primary-toolbar-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.settings-primary-toolbar-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.25rem 0.625rem;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.settings-primary-actions {
+  min-width: 0;
+}
+
+.settings-sticky-save-note {
+  color: var(--ui-text-2);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.settings-footer-button {
+  min-width: 0;
+}
+
+.settings-empty-icon {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 74%, transparent);
+}
+
+.settings-system-note {
+  color: var(--ui-text-2);
+}
+
+.settings-system-doc-link {
+  border: 1px solid var(--ui-border-subtle);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.settings-system-doc-link-info {
+  border-color: color-mix(in srgb, var(--ui-status-info) 22%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-info) 10%, var(--ui-bg-surface-raised));
+  color: var(--ui-status-info);
+}
+
+.settings-system-doc-link-info:hover {
+  background: color-mix(in srgb, var(--ui-status-info) 16%, var(--ui-bg-surface-raised));
+}
+
+.settings-system-doc-link-success {
+  border-color: color-mix(in srgb, var(--ui-status-success) 22%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-success) 10%, var(--ui-bg-surface-raised));
+  color: var(--ui-status-success);
+}
+
+.settings-system-doc-link-success:hover {
+  background: color-mix(in srgb, var(--ui-status-success) 16%, var(--ui-bg-surface-raised));
+}
+
+.settings-system-panel,
+.settings-report-mail-panel,
+.settings-system-readonly-box,
+.settings-system-diff-panel {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 78%, transparent);
+}
+
+.settings-system-editor {
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent);
+  color: var(--ui-text-1);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.settings-system-editor::placeholder {
+  color: var(--ui-text-2);
+}
+
+.settings-system-editor:focus-visible {
+  outline: none;
+  border-color: var(--ui-border-strong);
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.settings-system-editor:disabled {
+  cursor: not-allowed;
+  opacity: 0.66;
+}
+
+.settings-system-inline-value {
+  color: var(--ui-brand-600);
+}
+
+.settings-system-info-alert {
+  border: 1px solid color-mix(in srgb, var(--ui-status-info) 24%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-info-soft) 72%, var(--ui-bg-surface-raised));
+  color: var(--ui-status-info);
+}
+
+.settings-system-warning-alert {
+  border: 1px solid color-mix(in srgb, var(--ui-status-warning) 24%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-warning-soft) 72%, var(--ui-bg-surface-raised));
+  color: var(--ui-status-warning);
+}
+
+.settings-system-warning-note {
+  color: var(--ui-status-warning);
+}
+
+.settings-system-diff-row {
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+
+.settings-report-hero {
+  border: 1px solid color-mix(in srgb, var(--ui-status-success) 18%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-success-soft) 70%, var(--ui-bg-surface-raised));
+}
+
+.settings-report-hero-title {
+  color: var(--ui-status-success);
+}
+
+.settings-theme-surface,
+.settings-theme-range-card,
+.settings-theme-action-panel,
+.settings-theme-visual-card,
+.settings-theme-gallery-card {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+}
+
+.settings-theme-highlight {
+  border: 1px solid color-mix(in srgb, var(--ui-brand-500) 20%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-brand-500) 8%, var(--ui-bg-surface-raised));
+}
+
+.settings-theme-surface-active {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 30%, var(--ui-border-subtle));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-brand-500) 20%, transparent);
+  background: color-mix(in srgb, var(--ui-brand-500) 8%, var(--ui-bg-surface-raised));
+}
+
+.settings-theme-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.75rem;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.settings-theme-scope-card {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 74%, transparent);
+}
+
+.settings-theme-scope-card:hover,
+.settings-theme-scope-card-inactive:hover,
+.settings-theme-visual-card:hover,
+.settings-theme-gallery-card:hover {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 26%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 90%, transparent);
+}
+
+.settings-theme-scope-card-active {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 30%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-brand-500) 8%, var(--ui-bg-surface-raised));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-brand-500) 18%, transparent);
+}
+
+.settings-theme-visual-preview {
+  border: 1px solid color-mix(in srgb, white 18%, var(--ui-border-subtle));
+}
+
+.settings-theme-visual-overlay {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(15, 23, 42, 0.14));
+}
+
+.settings-theme-visual-bar-strong,
+.settings-preview-block-strong {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.settings-theme-visual-bar-mid,
+.settings-preview-block-mid {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.settings-theme-visual-bar-faint,
+.settings-preview-block-faint {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.settings-preview-overlay-soft {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(15, 23, 42, 0.18));
+}
+
+.settings-preview-login-sheen {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--ui-shadow-panel) 30%, transparent),
+    transparent 58%,
+    color-mix(in srgb, var(--ui-bg-surface) 12%, transparent)
+  );
+}
+
+.settings-preview-modal-sheen {
+  background: linear-gradient(
+    to bottom right,
+    color-mix(in srgb, var(--ui-bg-surface) 12%, transparent),
+    transparent 52%,
+    color-mix(in srgb, var(--ui-shadow-panel) 8%, transparent)
+  );
+}
+
+.settings-theme-preview-note-warning {
+  color: var(--ui-status-warning);
+}
+
+.settings-theme-preview-note-danger {
+  color: var(--ui-status-danger);
 }
 
 /* 5 套主题联动卡片：统一封面/正文高度与按钮尺寸，避免“有大有小” */
@@ -5154,6 +5389,11 @@ async function restoreTimingDefaults() {
 }
 
 .settings-theme-bundle-badge {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(15, 23, 42, 0.36);
+  color: var(--ui-text-on-brand);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   white-space: nowrap;
 }
 
@@ -5170,36 +5410,69 @@ async function restoreTimingDefaults() {
   align-items: center;
   gap: 0.25rem;
   border-radius: 0.5rem;
-  border: 1px solid var(--ui-border-subtle);
+  border-width: 1px;
+  border-style: solid;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 600;
+  line-height: 1;
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
     color 160ms ease;
-}
-
-.settings-preset-chip-brand {
-  background: var(--ui-brand-soft-10);
-  border-color: color-mix(in srgb, var(--ui-brand-500) 26%, var(--ui-border-subtle));
-  color: var(--ui-brand-700);
-}
-
-.settings-preset-chip-info {
-  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent);
-  border-color: color-mix(in srgb, var(--ui-status-info) 24%, var(--ui-border-subtle));
-  color: var(--ui-status-info);
-}
-
-.settings-preset-chip-warning {
-  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent);
-  border-color: color-mix(in srgb, var(--ui-status-warning) 24%, var(--ui-border-subtle));
-  color: var(--ui-status-warning);
+  white-space: nowrap;
 }
 
 .settings-toolbar-divider {
   background: color-mix(in srgb, var(--ui-border-strong) 72%, transparent);
+}
+
+@media (max-width: 767px) {
+  .settings-primary-toolbar {
+    top: 0;
+    z-index: 15;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-bg-surface-raised) 90%, transparent) 0%,
+      color-mix(in srgb, var(--ui-bg-surface) 84%, transparent) 80%,
+      color-mix(in srgb, var(--ui-bg-surface) 66%, transparent) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .settings-primary-actions {
+    margin-inline: -0.25rem;
+    padding-inline: 0.25rem;
+    padding-bottom: 0.125rem;
+  }
+
+  .settings-toolbar-divider {
+    display: none;
+  }
+
+  .settings-sticky-save {
+    position: sticky;
+    bottom: 0;
+    z-index: 13;
+    align-items: stretch;
+    gap: 0.75rem;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-bg-surface) 10%, transparent) 0%,
+      color-mix(in srgb, var(--ui-bg-surface-raised) 92%, transparent) 38%,
+      color-mix(in srgb, var(--ui-bg-surface) 96%, transparent) 100%
+    );
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 -18px 28px -24px var(--ui-shadow-panel);
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .settings-footer-button {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .settings-mode-panel,
@@ -5305,43 +5578,17 @@ async function restoreTimingDefaults() {
 }
 
 .settings-mode-badge,
-.settings-health-pill {
+.settings-health-pill,
+.settings-result-badge,
+.settings-report-detail-chip {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
   padding: 0.25rem 0.625rem;
   font-size: 0.75rem;
   font-weight: 600;
-  border: 1px solid transparent;
-}
-
-.settings-mode-badge-brand {
-  background: var(--ui-brand-soft-12);
-  color: var(--ui-brand-700);
-}
-
-.settings-mode-badge-success,
-.settings-health-pill-success {
-  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent);
-  color: var(--ui-status-success);
-}
-
-.settings-mode-badge-warning,
-.settings-health-pill-warning {
-  background: color-mix(in srgb, var(--ui-status-warning) 12%, transparent);
-  color: var(--ui-status-warning);
-}
-
-.settings-mode-badge-info {
-  background: color-mix(in srgb, var(--ui-status-info) 12%, transparent);
-  color: var(--ui-status-info);
-}
-
-.settings-mode-badge-neutral,
-.settings-health-pill-neutral {
-  background: color-mix(in srgb, var(--ui-bg-surface) 84%, transparent);
-  color: var(--ui-text-2);
-  border-color: var(--ui-border-subtle);
+  border-width: 1px;
+  border-style: solid;
 }
 
 .settings-strategy-preview {
@@ -5601,7 +5848,7 @@ async function restoreTimingDefaults() {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-status-success) 42%, transparent);
 }
 
-.settings-report-card-bg-neutral {
+.settings-report-card-tone-surface {
   background: color-mix(in srgb, var(--ui-bg-surface) 88%, transparent);
 }
 
@@ -5671,17 +5918,7 @@ async function restoreTimingDefaults() {
 }
 
 .settings-result-badge {
-  border: 1px solid transparent;
-}
-
-.settings-result-badge-success {
-  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent);
-  color: var(--ui-status-success);
-}
-
-.settings-result-badge-danger {
-  background: color-mix(in srgb, var(--ui-status-danger) 12%, transparent);
-  color: var(--ui-status-danger);
+  justify-content: center;
 }
 
 .settings-report-log-body,
@@ -5764,8 +6001,6 @@ async function restoreTimingDefaults() {
 }
 
 .settings-report-detail-chip {
-  border: 1px solid var(--ui-border-subtle);
-  background: color-mix(in srgb, var(--ui-bg-surface) 82%, transparent);
-  color: var(--ui-text-2);
+  white-space: nowrap;
 }
 </style>

@@ -4,6 +4,7 @@ import { io } from 'socket.io-client'
 import { ref } from 'vue'
 import api from '@/api'
 import { adminToken, clearAuth, registerDisconnectRealtimeHook } from '@/utils/auth'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 // Define interfaces for better type checking
 interface DailyGift {
@@ -49,8 +50,18 @@ export const useStatusStore = defineStore('status', () => {
     const ts = Number(entry.ts) || Date.parse(String(entry.time || '')) || Date.now()
     return Object.freeze({
       ...entry,
+      msg: localizeRuntimeText(entry.msg || ''),
       ts,
       time: entry.time || new Date(ts).toISOString().replace('T', ' ').slice(0, 19),
+    })
+  }
+
+  function normalizeAccountLogEntry(input: any) {
+    const entry = (input && typeof input === 'object') ? { ...input } : {}
+    return Object.freeze({
+      ...entry,
+      msg: localizeRuntimeText(entry.msg || ''),
+      reason: localizeRuntimeText(entry.reason || ''),
     })
   }
 
@@ -82,8 +93,8 @@ export const useStatusStore = defineStore('status', () => {
   }
 
   function pushRealtimeAccountLog(entry: any) {
-    const next = (entry && typeof entry === 'object') ? entry : {}
-    accountLogs.value.push(Object.freeze({ ...next }))
+    const next = normalizeAccountLogEntry(entry)
+    accountLogs.value.push(next)
     if (accountLogs.value.length > 300)
       accountLogs.value = accountLogs.value.slice(-300)
   }
@@ -146,7 +157,7 @@ export const useStatusStore = defineStore('status', () => {
 
     // 首次加载直接赋值
     if (accountLogs.value.length === 0) {
-      accountLogs.value = list
+      accountLogs.value = list.map((item: any) => normalizeAccountLogEntry(item))
       return
     }
 
@@ -154,9 +165,10 @@ export const useStatusStore = defineStore('status', () => {
     const existingKeys = new Set(accountLogs.value.map((l: any) => `${l.time}_${l.msg}`))
     const merged = [...accountLogs.value]
     for (const entry of list) {
-      const key = `${entry.time}_${entry.msg}`
+      const normalized = normalizeAccountLogEntry(entry)
+      const key = `${normalized.time}_${normalized.msg}`
       if (!existingKeys.has(key)) {
-        merged.push(entry)
+        merged.push(normalized)
         existingKeys.add(key)
       }
     }
@@ -301,7 +313,7 @@ export const useStatusStore = defineStore('status', () => {
       }
     }
     catch (e: any) {
-      error.value = e.message
+      error.value = localizeRuntimeText(e.message)
     }
     finally {
       loading.value = false
@@ -323,7 +335,7 @@ export const useStatusStore = defineStore('status', () => {
     try {
       const { data } = await api.get('/api/logs', { headers, params })
       if (data.ok) {
-        logs.value = data.data
+        logs.value = Array.isArray(data.data) ? data.data.map((item: any) => normalizeLogEntry(item)) : []
         error.value = ''
       }
     }
@@ -352,7 +364,7 @@ export const useStatusStore = defineStore('status', () => {
     try {
       const res = await api.get(`/api/account-logs?limit=${Math.max(1, Number(limit) || 100)}`)
       if (Array.isArray(res.data)) {
-        accountLogs.value = res.data
+        accountLogs.value = res.data.map((item: any) => normalizeAccountLogEntry(item))
       }
     }
     catch (e) {

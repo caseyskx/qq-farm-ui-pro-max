@@ -62,6 +62,7 @@ function buildFriendSnapshot(friends) {
 }
 
 function updateRuntimeFriendsSnapshot(friends, accountId = '') {
+    bindRuntimeFriendListener();
     const resolvedId = resolveRuntimeAccountId(accountId);
     if (!resolvedId) return null;
     const snapshot = buildFriendSnapshot(friends);
@@ -74,6 +75,7 @@ function updateRuntimeFriendsSnapshot(friends, accountId = '') {
 }
 
 function clearRuntimeFriendsSnapshot(accountId = '') {
+    bindRuntimeFriendListener();
     const resolvedId = resolveRuntimeAccountId(accountId);
     if (resolvedId) {
         runtimeFriendSnapshots.delete(resolvedId);
@@ -83,6 +85,7 @@ function clearRuntimeFriendsSnapshot(accountId = '') {
 }
 
 function getRuntimeFriendsSnapshot(accountId = '') {
+    bindRuntimeFriendListener();
     const resolvedId = resolveRuntimeAccountId(accountId);
     if (!resolvedId) return null;
     const snapshot = runtimeFriendSnapshots.get(resolvedId);
@@ -139,6 +142,7 @@ function bindRuntimeFriendListener() {
 }
 
 function getRuntimeAccountModePolicy(accountId = '') {
+    bindRuntimeFriendListener();
     const resolvedId = resolveRuntimeAccountId(accountId);
     const configSnapshot = (typeof store.getConfigSnapshot === 'function')
         ? (store.getConfigSnapshot(resolvedId) || {})
@@ -247,8 +251,6 @@ function getRuntimeAccountModePolicy(accountId = '') {
     policy.degradeReasonLabel = describeModeScopeReason(policy.degradeReason);
     return policy;
 }
-
-bindRuntimeFriendListener();
 
 module.exports = {
     clearRuntimeFriendsSnapshot,

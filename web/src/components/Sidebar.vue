@@ -236,7 +236,7 @@ const connectionStatus = computed(() => {
   if (!systemConnected.value) {
     return {
       text: '系统离线',
-      color: 'bg-red-500',
+      color: 'status-dot-danger',
       pulse: false,
     }
   }
@@ -253,7 +253,7 @@ const connectionStatus = computed(() => {
   if (isConnected) {
     return {
       text: '运行中',
-      color: 'bg-primary-500',
+      color: 'status-dot-brand',
       pulse: true,
     }
   }
@@ -397,7 +397,7 @@ const copyrightText = computed(() => appStore.copyrightText)
           <circle cx="470" cy="150" r="5" fill="white" opacity="0.5" />
           <circle cx="490" cy="125" r="3" fill="white" opacity="0.35" />
         </svg>
-        <span class="from-primary-600 to-emerald-500 bg-gradient-to-r bg-clip-text px-1 text-lg text-transparent font-bold tracking-widest">
+        <span class="sidebar-brand-wordmark px-1 text-lg font-bold tracking-widest">
           🌌 御农
         </span>
       </div>
@@ -435,7 +435,7 @@ const copyrightText = computed(() => appStore.copyrightText)
             :class="{ 'rotate-180': showAccountDropdown }"
           />
         </button>
-        <p class="mt-2 px-1 text-[11px] text-sky-600 leading-5 dark:text-sky-300">
+        <p class="sidebar-account-note mt-2 px-1 text-[11px] leading-5">
           {{ ACCOUNT_SELECTION_BROWSER_PREF_NOTE }}
         </p>
 
@@ -470,7 +470,7 @@ const copyrightText = computed(() => appStore.copyrightText)
                 </div>
                 <div class="flex items-center gap-1">
                   <button
-                    class="glass-text-muted rounded-full p-1 transition-colors hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-900/20"
+                    class="sidebar-dropdown-edit glass-text-muted rounded-full p-1 transition-colors"
                     title="修改备注"
                     @click.stop="openRemarkModal(acc)"
                   >
@@ -512,8 +512,8 @@ const copyrightText = computed(() => appStore.copyrightText)
         :key="item.path"
         :to="item.path"
         class="sidebar-nav-link group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-200"
-        :active-class="item.path === '/' ? '' : 'bg-primary-50 dark:bg-primary-900/10 text-primary-600 dark:text-primary-400 font-medium shadow-sm ring-1 ring-primary-500/10'"
-        :exact-active-class="item.path === '/' ? 'bg-primary-50 dark:bg-primary-900/10 text-primary-600 dark:text-primary-400 font-medium shadow-sm ring-1 ring-primary-500/10' : ''"
+        :active-class="item.path === '/' ? '' : 'sidebar-nav-link-active font-medium shadow-sm ring-1'"
+        :exact-active-class="item.path === '/' ? 'sidebar-nav-link-active font-medium shadow-sm ring-1' : ''"
         @click="onNavClick"
       >
         <div class="text-xl transition-transform duration-200 group-hover:scale-110" :class="[item.icon]" />
@@ -531,7 +531,7 @@ const copyrightText = computed(() => appStore.copyrightText)
           <div class="i-carbon-notification text-xl" />
           <div
             v-if="hasUnread"
-            class="absolute h-2.5 w-2.5 animate-pulse rounded-full bg-red-500 ring-2 ring-white -right-1 -top-1 dark:ring-gray-800"
+            class="sidebar-unread-dot absolute h-2.5 w-2.5 animate-pulse rounded-full ring-2 -right-1 -top-1"
           />
         </div>
         <span>更新公告</span>
@@ -543,7 +543,7 @@ const copyrightText = computed(() => appStore.copyrightText)
       <router-link
         to="/farm-tools"
         class="sidebar-entry-btn sidebar-entry-btn--farm w-full flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-200"
-        active-class="bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400 font-medium shadow-sm ring-1 ring-emerald-500/10"
+        active-class="sidebar-entry-btn--farm-active font-medium shadow-sm ring-1"
         @click="onNavClick"
       >
         <div class="i-carbon-tool-box text-xl" />
@@ -726,8 +726,49 @@ const copyrightText = computed(() => appStore.copyrightText)
   color: color-mix(in srgb, var(--ui-text-3) 80%, transparent);
 }
 
+.sidebar-brand-wordmark {
+  background-image: linear-gradient(to right, var(--ui-brand-600), var(--ui-status-success));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.sidebar-account-note {
+  color: color-mix(in srgb, var(--ui-status-info) 66%, var(--ui-text-2) 34%);
+}
+
 .status-dot-muted {
   background-color: var(--ui-text-3);
+}
+
+.status-dot-brand {
+  background-color: var(--ui-brand-500);
+}
+
+.status-dot-danger {
+  background-color: var(--ui-status-danger);
+}
+
+.sidebar-dropdown-edit:hover {
+  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent) !important;
+  color: var(--ui-brand-600) !important;
+}
+
+.sidebar-nav-link-active {
+  background: color-mix(in srgb, var(--ui-brand-500) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-brand-600) 72%, var(--ui-text-1) 28%);
+  --un-ring-color: color-mix(in srgb, var(--ui-brand-500) 18%, transparent);
+}
+
+.sidebar-unread-dot {
+  background: var(--ui-status-danger);
+  --un-ring-color: var(--ui-bg-surface);
+}
+
+.sidebar-entry-btn--farm-active {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-status-success) 72%, var(--ui-text-1) 28%);
+  --un-ring-color: color-mix(in srgb, var(--ui-status-success) 18%, transparent);
 }
 
 .sidebar-shell
@@ -743,14 +784,5 @@ const copyrightText = computed(() => appStore.copyrightText)
 .sidebar-dropdown-avatar {
   background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent) !important;
   border: 1px solid var(--ui-border-subtle) !important;
-}
-
-.sidebar-shell [class*='hover:bg-blue-50'],
-.sidebar-shell [class*='dark:hover:bg-blue-900/20'] {
-  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent) !important;
-}
-
-.sidebar-shell [class*='hover:text-blue-500'] {
-  color: var(--ui-brand-600) !important;
 }
 </style>

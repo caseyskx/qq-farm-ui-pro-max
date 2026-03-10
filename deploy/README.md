@@ -29,7 +29,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
 ```
 
-自 `v4.5.17` 起，部署目录会固定带上两类修复脚本：
+自 `v4.5.18` 起，部署目录会固定带上两类修复脚本：
 
 - `repair-mysql.sh`：修复旧 MySQL 结构、补齐缺失表/列并回填历史数据
 - `repair-deploy.sh`：修复旧部署目录缺脚本、缺 `docker-compose.yml`、缺 `init-db`、缺 `/opt/qq-farm-bot-current` 链接的问题
@@ -55,7 +55,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/m
 可选镜像配置（写入 `.env`）：
 
 ```bash
-APP_IMAGE=smdk000/qq-farm-bot-ui:4.5.17
+APP_IMAGE=smdk000/qq-farm-bot-ui:4.5.18
 MYSQL_IMAGE=mysql:8.0
 REDIS_IMAGE=redis:7-alpine
 IPAD860_IMAGE=smdk000/ipad860:latest
@@ -101,7 +101,7 @@ cd /opt/qq-farm-bot-current
 bash update-app.sh
 
 # 如需切到指定版本
-bash update-app.sh --image smdk000/qq-farm-bot-ui:4.5.17
+bash update-app.sh --image smdk000/qq-farm-bot-ui:4.5.18
 
 # 仅执行历史数据库修复
 bash repair-mysql.sh --backup
@@ -131,7 +131,7 @@ chmod +x repair-deploy.sh
 ./repair-deploy.sh --backup
 
 # 再升级主程序
-./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.17
+./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.18
 ```
 
 可选参数：

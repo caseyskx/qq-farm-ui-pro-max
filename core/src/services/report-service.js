@@ -238,19 +238,19 @@ async function collectLiveDetails(accountId, runtimeStatus, dataProvider) {
     if (landsRes.status === 'fulfilled') {
         details.farmLine = summarizeLandsData(landsRes.value);
     } else {
-        details.notes.push(`农场详情采集失败: ${landsRes.reason && landsRes.reason.message ? landsRes.reason.message : 'unknown'}`);
+        details.notes.push(`农场详情采集失败: ${landsRes.reason && landsRes.reason.message ? landsRes.reason.message : '未知原因'}`);
     }
 
     if (bagRes.status === 'fulfilled') {
         details.bagLine = summarizeBagData(bagRes.value);
     } else {
-        details.notes.push(`背包详情采集失败: ${bagRes.reason && bagRes.reason.message ? bagRes.reason.message : 'unknown'}`);
+        details.notes.push(`背包详情采集失败: ${bagRes.reason && bagRes.reason.message ? bagRes.reason.message : '未知原因'}`);
     }
 
     if (friendsRes.status === 'fulfilled') {
         details.friendLine = summarizeFriendsData(friendsRes.value);
     } else {
-        details.notes.push(`好友详情采集失败: ${friendsRes.reason && friendsRes.reason.message ? friendsRes.reason.message : 'unknown'}`);
+        details.notes.push(`好友详情采集失败: ${friendsRes.reason && friendsRes.reason.message ? friendsRes.reason.message : '未知原因'}`);
     }
 
     return details;
@@ -554,7 +554,7 @@ function createReportService(options = {}) {
         try {
             addAccountLog(event, message, accountId, accountName, extra);
         } catch (error) {
-            logger.warn(`记录服务器重启提醒账号日志失败(${accountId || 'unknown'}): ${error && error.message ? error.message : String(error)}`);
+            logger.warn(`记录服务器重启提醒账号日志失败(${accountId || '未知账号'}): ${error && error.message ? error.message : String(error)}`);
         }
     }
 

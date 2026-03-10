@@ -6,7 +6,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const process = require('node:process');
 const { ensureLogDir } = require('../config/runtime-paths');
+const { createModuleLogger } = require('../services/logger');
 
 /** 单个日志文件最大字节数（默认 2MB） */
 const MAX_LOG_SIZE = 2 * 1024 * 1024;
@@ -14,6 +16,27 @@ const MAX_LOG_SIZE = 2 * 1024 * 1024;
 const MAX_LOG_FILES = 5;
 /** 日志文件名 */
 const LOG_FILENAME = 'user-actions.log';
+const verboseUserActionLogsEnabled = String(process.env.FARM_VERBOSE_USER_ACTION_LOGS || '') === '1';
+let userActionLogger = null;
+
+function getUserActionLogger() {
+    if (userActionLogger) {
+        return userActionLogger;
+    }
+
+    try {
+        userActionLogger = createModuleLogger('user-actions');
+    } catch {
+        userActionLogger = {
+            info() { },
+            warn() { },
+            error() { },
+            debug() { },
+        };
+    }
+
+    return userActionLogger;
+}
 
 /**
  * 获取日志目录路径
@@ -53,7 +76,9 @@ function rotateIfNeeded(logFile) {
         fs.renameSync(logFile, `${logFile}.1`);
     } catch (err) {
         // 轮转失败不阻断主流程
-        console.error('[日志轮转失败]', err.message);
+        getUserActionLogger().error('[日志轮转失败]', {
+            error: err && err.message ? err.message : String(err || ''),
+        });
     }
 }
 
@@ -70,7 +95,7 @@ function cleanupOldLogs(logsDir) {
                 fs.unlinkSync(path.join(logsDir, file));
             }
         }
-    } catch (_) {
+    } catch {
         // 静默忽略
     }
 }
@@ -112,10 +137,20 @@ function logUserAction(action, username, details = {}) {
         cleanupOldLogs(logsDir);
     } catch (err) {
         // 日志写入失败不应阻断主流程，仅控制台输出
-        console.error('[日志写入失败]', err.message);
+        getUserActionLogger().error('[日志写入失败]', {
+            action,
+            username,
+            error: err && err.message ? err.message : String(err || ''),
+        });
     }
 
-    console.log(`[用户操作] ${action} - ${username}`, details);
+    if (verboseUserActionLogsEnabled) {
+        getUserActionLogger().info('用户操作记录', {
+            action,
+            username,
+            details,
+        });
+    }
 }
 
 module.exports = {

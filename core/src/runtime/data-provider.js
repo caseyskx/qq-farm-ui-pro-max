@@ -73,7 +73,7 @@ function createDataProvider(options) {
             return { downgraded: [] };
         }
         if (!store.ACCOUNT_MODE_PRESETS || !store.ACCOUNT_MODE_PRESETS[mode]) {
-            throw new Error('Invalid account mode');
+            throw new Error('无效的账号模式');
         }
 
         let downgraded = [];
@@ -140,12 +140,17 @@ function createDataProvider(options) {
         getLands: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getLands'),
         getFriends: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getFriends'),
         getFriendLands: async (accountRef, gid) => callWorkerApi(await resolveAccountRefId(accountRef), 'getFriendLands', gid),
+        getInteractRecords: async (accountRef, limit) => callWorkerApi(await resolveAccountRefId(accountRef), 'getInteractRecords', limit),
         doFriendOp: async (accountRef, gid, opType) => callWorkerApi(await resolveAccountRefId(accountRef), 'doFriendOp', gid, opType),
         doFriendBatchOp: async (accountRef, gids, opType, options) => callWorkerApi(await resolveAccountRefId(accountRef), 'doFriendBatchOp', gids, opType, options),
         getBag: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getBag'),
         useBagItem: async (accountRef, itemId, count, landIds) => callWorkerApi(await resolveAccountRefId(accountRef), 'useBagItem', itemId, count, landIds),
         getMallGoods: async (accountRef, slotType) => callWorkerApi(await resolveAccountRefId(accountRef), 'getMallGoods', slotType),
+        getMallCatalog: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getMallCatalog'),
         buyMallGoods: async (accountRef, goodsId, count) => callWorkerApi(await resolveAccountRefId(accountRef), 'buyMallGoods', goodsId, count),
+        claimMonthCardReward: async (accountRef, goodsId) => callWorkerApi(await resolveAccountRefId(accountRef), 'claimMonthCardReward', goodsId),
+        getShopCatalog: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getShopCatalog'),
+        buyShopGoods: async (accountRef, goodsId, count, price) => callWorkerApi(await resolveAccountRefId(accountRef), 'buyShopGoods', goodsId, count, price),
         getSellPreview: async (accountRef, tradeConfig) => callWorkerApi(await resolveAccountRefId(accountRef), 'getSellPreview', tradeConfig),
         sellByPolicy: async (accountRef, tradeConfig, options) => callWorkerApi(await resolveAccountRefId(accountRef), 'sellByPolicy', tradeConfig, options),
         sellSelected: async (accountRef, itemIds, options) => callWorkerApi(await resolveAccountRefId(accountRef), 'sellSelected', itemIds, options),
@@ -155,9 +160,12 @@ function createDataProvider(options) {
         setAutomation: async (accountRef, key, value) => {
             const accountId = await resolveAccountRefId(accountRef);
             if (!accountId) {
-                throw new Error('Missing x-account-id');
+                throw new Error('缺少账号标识 (x-account-id)');
             }
             store.setAutomation(key, value, accountId);
+            if (typeof store.flushGlobalConfigSave === 'function') {
+                await store.flushGlobalConfigSave();
+            }
             const rev = nextConfigRevision();
             broadcastConfigToWorkers(accountId);
             return { automation: store.getAutomation(accountId), configRevision: rev };
@@ -168,7 +176,7 @@ function createDataProvider(options) {
         saveSettings: async (accountRef, payload) => {
             const accountId = await resolveAccountRefId(accountRef);
             if (!accountId) {
-                throw new Error('Missing x-account-id');
+                throw new Error('缺少账号标识 (x-account-id)');
             }
             const body = (payload && typeof payload === 'object') ? payload : {};
             const automation = (body.automation && typeof body.automation === 'object') ? body.automation : {};
@@ -240,6 +248,9 @@ function createDataProvider(options) {
             const { downgraded } = await applyAccountModeWithinSettings(accountId, requestedMode);
             store.applyConfigSnapshot(snapshot, { accountId });
             await persistModeSnapshot(accountId, downgraded);
+            if (typeof store.flushGlobalConfigSave === 'function') {
+                await store.flushGlobalConfigSave();
+            }
             const rev = nextConfigRevision();
             broadcastConfigToWorkers(accountId);
             for (const item of downgraded) {
@@ -264,6 +275,9 @@ function createDataProvider(options) {
 
         setUITheme: async (theme) => {
             const snapshot = store.setUITheme(theme);
+            if (typeof store.flushGlobalConfigSave === 'function') {
+                await store.flushGlobalConfigSave();
+            }
             return { ui: snapshot.ui || store.getUI() };
         },
 
@@ -288,6 +302,13 @@ function createDataProvider(options) {
                 const worker = workers[accountId];
                 const storedRunning = !!a.running;
                 const storedConnected = !!a.connected;
+                a.level = Math.max(0, Number(a.level) || 0);
+                a.gold = Math.max(0, Number(a.gold) || 0);
+                a.exp = Math.max(0, Number(a.exp) || 0);
+                a.coupon = Math.max(0, Number(a.coupon) || 0);
+                a.uptime = Math.max(0, Number(a.uptime) || 0);
+                a.lastStatusAt = Math.max(0, Number(a.lastStatusAt) || 0);
+                a.lastOnlineAt = Math.max(0, Number(a.lastOnlineAt) || 0);
 
                 a.running = storedRunning || !!worker;
                 const configSnapshot = typeof store.getConfigSnapshot === 'function'
@@ -322,17 +343,26 @@ function createDataProvider(options) {
                 }
 
                 if (worker && worker.status) {
+                    const panelStatus = worker.status || {};
                     const st = worker.status.status || {};
+                    const hasLiveSnapshot = !!st.name
+                        || Number(st.level) > 0
+                        || Number(st.gold) > 0
+                        || Number(st.exp) > 0
+                        || Number(st.coupon) > 0
+                        || Number(panelStatus.uptime) > 0;
                     // 附加昵称
                     if (st.name) {
                         a.nick = st.name;
                     }
-                    // 附加实时统计数据（用于排行榜和面板展示）
-                    a.level = st.level || 0;
-                    a.gold = st.gold || 0;
-                    a.exp = st.exp || 0;
-                    a.coupon = st.coupon || 0;
-                    a.uptime = worker.status.uptime || 0;
+                    // 仅在拿到有效实时快照后覆盖持久化数据，避免启动阶段的 0 值覆盖历史等级
+                    if (hasLiveSnapshot) {
+                        a.level = Math.max(0, Number(st.level) || 0);
+                        a.gold = Math.max(0, Number(st.gold) || 0);
+                        a.exp = Math.max(0, Number(st.exp) || 0);
+                        a.coupon = Math.max(0, Number(st.coupon) || 0);
+                        a.uptime = Math.max(0, Number(panelStatus.uptime) || 0);
+                    }
                     a.effectiveMode = worker.status.effectiveMode || a.effectiveMode;
                     a.accountZone = worker.status.accountZone || a.accountZone;
                     a.collaborationEnabled = !!worker.status.collaborationEnabled;
@@ -374,7 +404,8 @@ function createDataProvider(options) {
             if (store && typeof store.getAccountFull === 'function') {
                 const fullAcc = await store.getAccountFull(acc.id);
                 if (fullAcc) {
-                    acc = { ...fullAcc, ...acc };
+                    // 重启必须以刚落库的完整账号数据为准，避免旧缓存把新 code/uin 覆盖回去
+                    acc = { ...acc, ...fullAcc };
                 }
             }
             return !!(await restartWorker(acc));

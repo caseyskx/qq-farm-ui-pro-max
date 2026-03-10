@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>系统更新实施任务拆解 - 2026-03-10</title>
+  <style>
+    :root {
+      --bg: #071019;
+      --panel: #0d1b2a;
+      --panel-2: #132536;
+      --text: #eaf0f6;
+      --muted: #9fb3c8;
+      --line: #2b455d;
+      --brand: #6ee7f2;
+      --brand-2: #c9f9ff;
+      --ok: #61c58f;
+      --warn: #ffc86e;
+      --danger: #ff8e8e;
+      --code: #09141e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(110, 231, 242, 0.13), transparent 26%),
+        radial-gradient(circle at top right, rgba(201, 249, 255, 0.07), transparent 20%),
+        linear-gradient(180deg, #071019 0%, #09131b 100%);
+      font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { max-width: 1260px; margin: 0 auto; }
+    .hero, .card {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(13, 27, 42, 0.98), rgba(19, 37, 54, 0.96));
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.24);
+    }
+    .hero { padding: 24px 26px; }
+    .card { margin-top: 16px; padding: 18px 20px; }
+    h1, h2, h3 { margin: 0 0 12px; line-height: 1.32; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 20px; margin-top: 24px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--code);
+      color: var(--brand-2);
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .metric {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(9, 20, 30, 0.72);
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .metric .value {
+      margin-top: 7px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .brand { color: var(--brand); font-weight: 700; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .danger { color: var(--danger); font-weight: 700; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    code {
+      background: var(--code);
+      border: 1px solid rgba(110, 231, 242, 0.18);
+      color: #d9fbff;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 13px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: rgba(9, 20, 30, 0.9);
+      color: var(--brand-2);
+      font-weight: 700;
+    }
+    ul, ol { margin: 8px 0 0 20px; color: var(--muted); }
+    li { margin: 6px 0; }
+    .callout {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: rgba(9, 20, 30, 0.92);
+      border-left: 4px solid var(--brand);
+      color: var(--muted);
+    }
+    .footer {
+      margin-top: 28px;
+      color: #8fa6ba;
+      font-size: 12px;
+    }
+    @media (max-width: 1000px) {
+      body { padding: 16px; }
+      .hero, .card { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>系统更新实施任务拆解</h1>
+      <p>这份清单把实现工作拆到具体文件、测试和验收项，默认目标是先交付第一阶段：管理员版本提醒、更新任务模型、后台 API、宿主机更新代理和统一安装器骨架。</p>
+      <div class="meta">
+        <span class="chip">实现阶段：P0 + P1</span>
+        <span class="chip">不含：专用更新服务器</span>
+        <span class="chip">前端入口：Settings 管理员系统区</span>
+        <span class="chip">执行环境：Linux 宿主机</span>
+      </div>
+      <div class="grid">
+        <div class="metric">
+          <div class="label">后端任务</div>
+          <div class="value">数据表 + service + routes</div>
+        </div>
+        <div class="metric">
+          <div class="label">前端任务</div>
+          <div class="value">设置页更新卡片 + 轮询状态</div>
+        </div>
+        <div class="metric">
+          <div class="label">脚本任务</div>
+          <div class="value">update-agent + install-or-update</div>
+        </div>
+        <div class="metric">
+          <div class="label">测试任务</div>
+          <div class="value">route/service/script smoke</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>一、推荐实际开发顺序</h2>
+      <ol>
+        <li>先做数据库和 service 层，先把数据模型站稳。</li>
+        <li>再做管理员 API，保证前端能拉数据和发起任务。</li>
+        <li>然后做设置页更新卡片和轮询状态。</li>
+        <li>最后再做宿主机代理和统一安装器入口。</li>
+        <li>不要先写前端按钮，再回头补后端和脚本，那样返工最多。</li>
+      </ol>
+      <div class="callout">
+        <span class="brand">推荐里程碑：</span>
+        第 1 个可演示节点不是“真更新成功”，而是“后台能看到最新版本、能创建任务、任务能被模拟推进状态”。这样前后端能尽快合并，不必等脚本全部写完。
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>二、后端实施任务</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>任务</th>
+            <th>建议文件</th>
+            <th>动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>新增更新任务表迁移</td>
+            <td><code>core/src/database/migrations/017-system-update-jobs.sql</code></td>
+            <td>创建 <code>update_jobs</code> 表</td>
+          </tr>
+          <tr>
+            <td>补迁移检测</td>
+            <td><code>core/src/services/mysql-db.js</code></td>
+            <td>显式检测 <code>update_jobs</code> 是否存在，不存在则执行 017 迁移</td>
+          </tr>
+          <tr>
+            <td>更新任务 service</td>
+            <td><code>core/src/services/system-update-jobs.js</code></td>
+            <td>封装 create/get/list/claim/update/finish/retry</td>
+          </tr>
+          <tr>
+            <td>Manifest 拉取 service</td>
+            <td><code>core/src/services/system-update-manifest.js</code></td>
+            <td>读取 GitHub Manifest，带超时、缓存和白名单域校验</td>
+          </tr>
+          <tr>
+            <td>更新配置 service</td>
+            <td><code>core/src/services/system-update-config.js</code></td>
+            <td>基于 <code>system_settings</code> 读写 <code>update_config</code> / <code>update_release_cache</code> / <code>update_runtime</code></td>
+          </tr>
+          <tr>
+            <td>管理员路由</td>
+            <td><code>core/src/controllers/admin/system-update-routes.js</code></td>
+            <td>提供 overview/check/config/jobs/latest/job detail/retry</td>
+          </tr>
+          <tr>
+            <td>路由注册</td>
+            <td><code>core/src/controllers/admin/feature-wiring.js</code></td>
+            <td>把新路由接进管理员路由注册链</td>
+          </tr>
+          <tr>
+            <td>管理员操作审计</td>
+            <td><code>core/src/services/admin-operation-logs.js</code></td>
+            <td>可选扩展 <code>VALID_SCOPES</code> 增加 <code>system_update</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>后端 service 层建议最少导出的方法</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>文件</th>
+            <th>方法建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>system-update-jobs.js</code></td>
+            <td><code>createUpdateJob</code>, <code>getUpdateJobById</code>, <code>getLatestUpdateJob</code>, <code>listUpdateJobs</code>, <code>claimQueuedUpdateJob</code>, <code>updateUpdateJobProgress</code>, <code>finishUpdateJob</code>, <code>createRetryUpdateJob</code></td>
+          </tr>
+          <tr>
+            <td><code>system-update-manifest.js</code></td>
+            <td><code>fetchLatestManifest</code>, <code>normalizeManifest</code>, <code>validateManifestUrl</code></td>
+          </tr>
+          <tr>
+            <td><code>system-update-config.js</code></td>
+            <td><code>getSystemUpdateConfig</code>, <code>saveSystemUpdateConfig</code>, <code>getSystemUpdateReleaseCache</code>, <code>setSystemUpdateReleaseCache</code>, <code>getSystemUpdateRuntime</code>, <code>setSystemUpdateRuntime</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>三、前端实施任务</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>任务</th>
+            <th>建议文件</th>
+            <th>动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>设置页状态接口对接</td>
+            <td><code>web/src/stores/setting.ts</code></td>
+            <td>新增获取更新概览、检查更新、保存更新配置、创建任务、轮询任务的方法</td>
+          </tr>
+          <tr>
+            <td>设置页 UI</td>
+            <td><code>web/src/views/Settings.vue</code></td>
+            <td>新增管理员“系统更新”卡片</td>
+          </tr>
+          <tr>
+            <td>可选组件抽离</td>
+            <td><code>web/src/components/settings/SystemUpdateCard.vue</code></td>
+            <td>如果设置页体积继续变大，再把更新卡片独立成组件</td>
+          </tr>
+          <tr>
+            <td>提醒已读同步</td>
+            <td><code>web/src/utils/view-preferences.ts</code> 与现有调用点</td>
+            <td>复用 <code>appSeenVersion</code> 写入“已看过这次更新提醒”</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Settings.vue 里建议出现的内容</h3>
+      <ul>
+        <li>当前版本</li>
+        <li>最新版本</li>
+        <li>是否有新版本</li>
+        <li>更新摘要</li>
+        <li>最近检查时间</li>
+        <li>更新通道与 Manifest 地址配置</li>
+        <li>“检查更新”按钮</li>
+        <li>“保留旧版本更新”按钮</li>
+        <li>“覆盖更新”按钮</li>
+        <li>当前任务进度、步骤、摘要、详情按钮</li>
+      </ul>
+
+      <h3>前端状态机建议</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>状态</th>
+            <th>前端处理</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>空闲</td>
+            <td>允许检查更新和创建任务</td>
+          </tr>
+          <tr>
+            <td>检查中</td>
+            <td>只禁用检查按钮</td>
+          </tr>
+          <tr>
+            <td>任务进行中</td>
+            <td>禁用两个更新按钮，保留详情展示</td>
+          </tr>
+          <tr>
+            <td>任务成功</td>
+            <td>刷新 overview，并更新提示状态</td>
+          </tr>
+          <tr>
+            <td>任务失败 / 已回滚</td>
+            <td>显示重试按钮和错误摘要</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>四、宿主机脚本实施任务</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>任务</th>
+            <th>建议文件</th>
+            <th>动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>统一安装入口</td>
+            <td><code>scripts/deploy/install-or-update.sh</code></td>
+            <td>统一识别 install / upgrade / repair 模式，调度已有脚本</td>
+          </tr>
+          <tr>
+            <td>宿主机更新代理</td>
+            <td><code>scripts/deploy/update-agent.sh</code></td>
+            <td>轮询任务、认领任务、推进状态、执行回滚</td>
+          </tr>
+          <tr>
+            <td>代理 systemd 文件</td>
+            <td><code>scripts/deploy/system-update-agent.service</code></td>
+            <td>提供 Linux 宿主机托管模板</td>
+          </tr>
+          <tr>
+            <td>Manifest 示例</td>
+            <td><code>deploy/latest.example.json</code></td>
+            <td>统一版本清单口径，方便前后端和脚本联调</td>
+          </tr>
+          <tr>
+            <td>部署文档更新</td>
+            <td><code>deploy/README.md</code>、<code>deploy/README.cn.md</code></td>
+            <td>增加更新代理安装、启动、排障说明</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>update-agent.sh 第一版建议最少支持</h3>
+      <ul>
+        <li>每 5-10 秒轮询一次 queued 任务</li>
+        <li>原子认领任务</li>
+        <li>按阶段回写 progress/current_step/summary</li>
+        <li>调用 <code>repair-deploy.sh</code>、<code>repair-mysql.sh</code>、<code>update-app.sh</code></li>
+        <li>失败时执行回滚并回写 rolled_back / rollback_failed</li>
+      </ul>
+
+      <h3>统一安装入口第一版建议最少支持</h3>
+      <ul>
+        <li>自动判断当前机器是全新安装还是升级</li>
+        <li>自动识别保留旧目录或覆盖更新</li>
+        <li>统一输出安装报告</li>
+        <li>失败后进入手动救援模式</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>五、测试任务</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>测试类型</th>
+            <th>建议文件</th>
+            <th>覆盖点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>service 测试</td>
+            <td><code>core/__tests__/system-update-jobs.test.js</code></td>
+            <td>创建任务、认领任务、推进状态、重试任务</td>
+          </tr>
+          <tr>
+            <td>manifest 测试</td>
+            <td><code>core/__tests__/system-update-manifest.test.js</code></td>
+            <td>合法 Manifest、缺字段、超时、白名单域</td>
+          </tr>
+          <tr>
+            <td>route 测试</td>
+            <td><code>core/__tests__/admin-system-update-routes.test.js</code></td>
+            <td>管理员权限、overview/check/jobs/config/retry</td>
+          </tr>
+          <tr>
+            <td>初始化测试</td>
+            <td><code>core/__tests__/mysql-update-jobs-migration.test.js</code></td>
+            <td><code>mysql-db.js</code> 能检测并补建新表</td>
+          </tr>
+          <tr>
+            <td>前端 store 测试</td>
+            <td><code>web/__tests__/system-update-store.test.mjs</code></td>
+            <td>概览拉取、任务轮询、错误状态映射</td>
+          </tr>
+          <tr>
+            <td>前端页面测试</td>
+            <td><code>web/__tests__/settings-system-update.test.mjs</code></td>
+            <td>按钮禁用、任务中展示、失败重试展示</td>
+          </tr>
+          <tr>
+            <td>脚本 smoke 测试</td>
+            <td><code>core/__tests__/update-agent-smoke.test.js</code> 或 shell smoke</td>
+            <td>代理脚本参数、模式识别、锁文件逻辑</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>推荐最先补的测试</h3>
+      <ol>
+        <li><code>admin-system-update-routes.test.js</code></li>
+        <li><code>system-update-jobs.test.js</code></li>
+        <li><code>settings-system-update.test.mjs</code></li>
+      </ol>
+      <p>原因很简单：这三项先稳住，前后端主链路就不会一边写一边飘。</p>
+    </section>
+
+    <section class="card">
+      <h2>六、验收清单</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>验收条件</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>P0.1 数据模型</td>
+            <td>MySQL 初始化后自动补出 <code>update_jobs</code> 表，service 能正常增删改查</td>
+          </tr>
+          <tr>
+            <td>P0.2 后台接口</td>
+            <td>管理员能成功调用 overview/check/create job/latest job 接口；非管理员全部被拒绝</td>
+          </tr>
+          <tr>
+            <td>P0.3 设置页展示</td>
+            <td>管理员在设置页能看到更新卡片；普通用户看不到更新操作按钮</td>
+          </tr>
+          <tr>
+            <td>P0.4 任务轮询</td>
+            <td>任务进入进行中后，前端能轮询显示步骤和进度</td>
+          </tr>
+          <tr>
+            <td>P1.1 宿主机代理</td>
+            <td>代理能认领 queued 任务并推进到 succeeded 或 rolled_back</td>
+          </tr>
+          <tr>
+            <td>P1.2 统一安装器</td>
+            <td>脚本能判断 install/upgrade/repair，输出安装报告并在失败时进入手动救援模式</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>七、明确的非目标</h2>
+      <ul>
+        <li>第一阶段不做专门的更新服务器。</li>
+        <li>第一阶段不做多实例并行运行的新旧两套完整环境。</li>
+        <li>第一阶段不做前端实时 WebSocket 推送更新进度。</li>
+        <li>第一阶段不做“取消执行中的更新”。</li>
+        <li>第一阶段不做 Windows/macOS 的完整宿主机更新代理。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>八、建议你现在怎么推进</h2>
+      <ol>
+        <li>先做后端数据表和 service。</li>
+        <li>再做管理员 API 与设置页卡片。</li>
+        <li>确认前端轮询和任务展示稳定后，再接宿主机代理。</li>
+        <li>统一安装器放在最后收口，因为它依赖前面所有脚本和状态定义已经稳定。</li>
+      </ol>
+      <div class="callout">
+        <span class="brand">如果下一步转入编码：</span>
+        最合理的第一批落地文件是
+        <code>017-system-update-jobs.sql</code>、
+        <code>mysql-db.js</code>、
+        <code>system-update-jobs.js</code>、
+        <code>system-update-routes.js</code>、
+        <code>feature-wiring.js</code>、
+        <code>setting.ts</code>、
+        <code>Settings.vue</code>。
+      </div>
+    </section>
+
+    <p class="footer">
+      说明：本任务拆解以当前仓库中的管理员路由拆分方式、设置页集中管理方式和已有测试目录结构为依据，目标是让后续编码按模块推进而不是按想法推进。
+    </p>
+  </div>
+</body>
+</html>

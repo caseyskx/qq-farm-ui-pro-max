@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/api'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 export const useFriendStore = defineStore('friend', () => {
   const friends = ref<any[]>([])
@@ -9,6 +10,27 @@ export const useFriendStore = defineStore('friend', () => {
   const friendLands = ref<Record<string, any[]>>({})
   const friendLandsLoading = ref<Record<string, boolean>>({})
   const blacklist = ref<number[]>([])
+  const interactRecords = ref<any[]>([])
+  const interactLoading = ref(false)
+  const interactError = ref('')
+  let interactRequestSeq = 0
+
+  function normalizeInteractError(input: any, errorCode?: string) {
+    const raw = String(input || '').trim()
+    const lower = raw.toLowerCase()
+    const code = String(errorCode || '').trim().toUpperCase()
+    if (!raw)
+      return '加载访客记录失败'
+    if (code === 'INTERACT_PROTO_MISSING' || raw.includes('INTERACT_PROTO_MISSING') || raw.includes('协议未加载'))
+      return '访客协议未加载，当前版本暂不支持专用访客接口'
+    if (code === 'INTERACT_TIMEOUT' || raw.includes('INTERACT_TIMEOUT') || lower.includes('timeout') || raw.includes('超时'))
+      return '访客接口请求超时，已自动回退到日志视图'
+    if (code === 'INTERACT_AUTH' || raw.includes('INTERACT_AUTH') || lower.includes('unauthorized') || lower.includes('forbidden') || raw.includes('权限'))
+      return '访客接口权限校验失败，请检查账号登录状态'
+    if (code === 'INTERACT_RPC_UNAVAILABLE' || raw.includes('INTERACT_RPC_UNAVAILABLE') || raw.includes('接口不可用') || raw.includes('版本不支持'))
+      return '访客接口不可用（可能是协议版本不支持），已自动回退到日志视图'
+    return localizeRuntimeText(raw)
+  }
 
   /**
    * T5: 从土地详情构建植物摘要 (来源: PR 版 friend.ts)
@@ -184,6 +206,58 @@ export const useFriendStore = defineStore('friend', () => {
     }
   }
 
+  async function fetchInteractRecords(accountId: string, limit = 50): Promise<boolean> {
+    const normalizedAccountId = String(accountId || '').trim()
+    if (!normalizedAccountId) {
+      interactRequestSeq++
+      interactRecords.value = []
+      interactError.value = ''
+      interactLoading.value = false
+      return false
+    }
+
+    const reqSeq = ++interactRequestSeq
+    interactLoading.value = true
+    interactError.value = ''
+    try {
+      const res = await api.get('/api/interact-records', {
+        headers: { 'x-account-id': normalizedAccountId },
+        params: { limit: Math.max(1, Math.min(200, Number(limit) || 50)) },
+      })
+      // 仅允许最后一次请求写入状态，避免快速切号导致旧响应覆盖
+      if (reqSeq !== interactRequestSeq)
+        return false
+      if (res.data?.ok) {
+        interactRecords.value = Array.isArray(res.data.data) ? res.data.data : []
+        return true
+      }
+      else {
+        interactError.value = normalizeInteractError(res.data?.error || '加载访客记录失败', res.data?.errorCode)
+        return true
+      }
+    }
+    catch (error: any) {
+      if (reqSeq !== interactRequestSeq)
+        return false
+      interactError.value = normalizeInteractError(
+        error?.response?.data?.error || error?.message || '加载访客记录失败',
+        error?.response?.data?.errorCode,
+      )
+      return true
+    }
+    finally {
+      if (reqSeq === interactRequestSeq)
+        interactLoading.value = false
+    }
+  }
+
+  function clearInteractState() {
+    interactRequestSeq++
+    interactRecords.value = []
+    interactError.value = ''
+    interactLoading.value = false
+  }
+
   return {
     friends,
     cachedFriends,
@@ -191,11 +265,16 @@ export const useFriendStore = defineStore('friend', () => {
     friendLands,
     friendLandsLoading,
     blacklist,
+    interactRecords,
+    interactLoading,
+    interactError,
+    clearInteractState,
     fetchFriends,
     fetchCachedFriends,
     fetchBlacklist,
     toggleBlacklist,
     fetchFriendLands,
+    fetchInteractRecords,
     operate,
     batchOperate,
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 const menuItems = ref([
   { id: 'calculator.html', title: '经验时间计算', icon: 'i-carbon-calculator', shortTitle: '经验计算' },
@@ -10,6 +10,7 @@ const menuItems = ref([
 
 const selectedArticle = ref('calculator.html')
 const iframeRef = ref<HTMLIFrameElement | null>(null)
+const selectedMenuItem = computed(() => menuItems.value.find(item => item.id === selectedArticle.value) ?? menuItems.value[0]!)
 
 // 中屏侧栏折叠状态
 const sidebarVisible = ref(false)
@@ -33,7 +34,7 @@ const BASE_STATIC_CSS = `
   aside, header, #sidebar-backdrop { display: none !important; }
   
   /* =========== 卡片与全局玻璃质感同步 =========== */
-  .bg-white, [class*="dark:bg-slate-800"] { 
+  [class~="bg-white"], [class*="dark:bg-"][class*="slate-800"] { 
     background-color: var(--glass-bg) !important; 
     backdrop-filter: blur(12px) !important;
     border-color: var(--glass-border) !important;
@@ -43,7 +44,7 @@ const BASE_STATIC_CSS = `
   /* 所有 Hero 区域渐变（保留渐变但用系统色） */
   .bg-gradient-to-br.from-primary-700,
   .bg-gradient-to-br[class*="from-primary-700"] {
-    background-image: linear-gradient(135deg, rgba(var(--color-primary-700), 0.85), rgba(var(--color-primary-500), 0.7)) !important;
+    background-image: linear-gradient(135deg, var(--farm-brand-700-soft-85), var(--farm-brand-soft-70)) !important;
     --tw-gradient-from: transparent !important;
     --tw-gradient-to: transparent !important;
   }
@@ -54,24 +55,24 @@ const BASE_STATIC_CSS = `
   }
   
   /* =========== 原色劫持兜底 =========== */
-  .text-green-600, .text-green-500, .text-farm-500 { color: rgb(var(--color-primary-500)) !important; }
-  .bg-green-500, .bg-green-600, .bg-farm-500 { background-color: rgb(var(--color-primary-500)) !important; }
+  .text-green-600, .text-green-500, .text-farm-500 { color: var(--farm-brand-500) !important; }
+  .bg-green-500, .bg-green-600, .bg-farm-500 { background-color: var(--farm-brand-500) !important; }
   
   /* =========== 表单元素 =========== */
   input:active, input:focus, select:active, select:focus {
-    border-color: rgb(var(--color-primary-500)) !important;
+    border-color: var(--farm-brand-500) !important;
     outline: none !important;
-    box-shadow: 0 0 0 2px rgba(var(--color-primary-500), 0.2) !important;
+    box-shadow: 0 0 0 2px var(--farm-brand-soft-20) !important;
   }
 
   /* =========== 表格 =========== */
   table, th, td { border-color: var(--glass-border) !important; }
-  tr:hover td { background-color: rgba(var(--color-primary-500), 0.05) !important; }
+  tr:hover td { background-color: var(--farm-brand-soft-05) !important; }
   
   /* =========== Modal 弹窗 =========== */
-  .fixed.inset-0[class*="bg-black"] {
+  .fixed.inset-0[class*="bg-"][class*="black"] {
      backdrop-filter: blur(8px) !important;
-     background-color: rgba(0,0,0,0.4) !important;
+     background-color: var(--ui-overlay-backdrop) !important;
   }
 
   /* =========== 搜索框暗色适配 =========== */
@@ -103,53 +104,53 @@ const BASE_STATIC_CSS = `
   /* =========== 🔘 按钮/交互组件 深浅色适配 =========== */
   /* 主按钮（开始计算等）—— 确保白字在任何主题色上可读 */
   .btn-calc {
-    color: #fff !important;
-    box-shadow: 0 2px 8px rgba(var(--color-primary-500), 0.35) !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    color: var(--ui-text-on-brand) !important;
+    box-shadow: 0 2px 8px var(--farm-brand-soft-35) !important;
+    text-shadow: 0 1px 2px var(--ui-shadow-text);
   }
-  .btn-calc:hover { box-shadow: 0 4px 16px rgba(var(--color-primary-500), 0.45) !important; }
+  .btn-calc:hover { box-shadow: 0 4px 16px var(--farm-brand-soft-45) !important; }
   
   /* 验算按钮 —— 跟随主题色渐变 */
   .btn-verify {
-    background: linear-gradient(135deg, rgb(var(--color-primary-400)), rgb(var(--color-primary-600))) !important;
-    color: #fff !important;
-    box-shadow: 0 2px 8px rgba(var(--color-primary-500), 0.3) !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    background: linear-gradient(135deg, var(--farm-brand-400), var(--farm-brand-600)) !important;
+    color: var(--ui-text-on-brand) !important;
+    box-shadow: 0 2px 8px var(--farm-brand-soft-30) !important;
+    text-shadow: 0 1px 2px var(--ui-shadow-text);
   }
   
   /* 排行切换 active / 验算植物 Tab active */
   .rank-tab.active,
   .v-crop-tab.v-active {
-    background: rgb(var(--color-primary-500)) !important;
-    color: #fff !important;
-    border-color: rgb(var(--color-primary-500)) !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    background: var(--farm-brand-500) !important;
+    color: var(--ui-text-on-brand) !important;
+    border-color: var(--farm-brand-500) !important;
+    text-shadow: 0 1px 2px var(--ui-shadow-text);
   }
   
   /* 计算器模式切换 Tab active */
   .calc-mode-tab.active {
-    background: rgb(var(--color-primary-500)) !important;
-    color: #fff !important;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-    box-shadow: 0 2px 8px rgba(var(--color-primary-500), 0.25) !important;
+    background: var(--farm-brand-500) !important;
+    color: var(--ui-text-on-brand) !important;
+    text-shadow: 0 1px 2px var(--ui-shadow-text);
+    box-shadow: 0 2px 8px var(--farm-brand-soft-25) !important;
   }
   .calc-mode-tab:hover:not(.active) {
-    color: rgb(var(--color-primary-600)) !important;
-    background: rgba(var(--color-primary-500), 0.08) !important;
+    color: var(--farm-brand-600) !important;
+    background: var(--farm-brand-soft-08) !important;
   }
   
   /* 开关 Toggle */
-  .fert-toggle input[type="checkbox"]:checked { background: rgb(var(--color-primary-500)) !important; }
-  .fert-toggle input[type="checkbox"]::after { background: #fff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+  .fert-toggle input[type="checkbox"]:checked { background: var(--farm-brand-500) !important; }
+  .fert-toggle input[type="checkbox"]::after { background: var(--ui-text-on-brand) !important; box-shadow: 0 1px 3px var(--ui-shadow-text); }
   
   /* 施肥阶段选择按钮 selected */
   .tc-fert-phase-btn.selected {
-    border-color: rgb(var(--color-primary-500)) !important;
-    background: rgba(var(--color-primary-500), 0.15) !important;
+    border-color: var(--farm-brand-500) !important;
+    background: var(--farm-brand-soft-15) !important;
   }
   
   /* Spinner 加载圈白色可见 */
-  .spinner { border-color: rgba(255,255,255,0.3) !important; border-top-color: #fff !important; }
+  .spinner { border-color: color-mix(in srgb, var(--ui-text-on-brand) 30%, transparent) !important; border-top-color: var(--ui-text-on-brand) !important; }
 `
 
 // 🔧 优化 #2：持有一个 iframeObserver 引用用于在组件销毁时断开
@@ -195,6 +196,15 @@ function syncThemeToIframe() {
 
     let cssVars = ''
     const varsToSync = [
+      '--ui-brand-100',
+      '--ui-brand-200',
+      '--ui-brand-300',
+      '--ui-brand-400',
+      '--ui-brand-500',
+      '--ui-brand-600',
+      '--ui-brand-700',
+      '--ui-brand-800',
+      '--ui-brand-900',
       '--color-primary-50',
       '--color-primary-100',
       '--color-primary-200',
@@ -211,6 +221,24 @@ function syncThemeToIframe() {
       '--text-main',
       '--text-muted',
       '--theme-dark-bg',
+      '--ui-bg-surface',
+      '--ui-bg-surface-raised',
+      '--ui-border-subtle',
+      '--ui-border-strong',
+      '--ui-text-on-brand',
+      '--ui-status-success',
+      '--ui-status-success-soft',
+      '--ui-status-warning',
+      '--ui-status-warning-soft',
+      '--ui-status-danger',
+      '--ui-status-danger-soft',
+      '--ui-status-info',
+      '--ui-status-info-soft',
+      '--ui-shadow-text',
+      '--ui-shadow-panel',
+      '--ui-shadow-panel-strong',
+      '--ui-shadow-inner',
+      '--ui-overlay-backdrop',
     ]
 
     varsToSync.forEach((v) => {
@@ -221,19 +249,73 @@ function syncThemeToIframe() {
       else {
         // 🔧 容错处理：确保取到的值不是空
         if (v === '--glass-bg') {
-          cssVars += `${v}: ${isDark ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.4)'};\n`
+          cssVars += `${v}: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent);\n`
         }
         else if (v === '--glass-border') {
-          cssVars += `${v}: ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'};\n`
+          cssVars += `${v}: var(--ui-border-subtle);\n`
         }
         else if (v === '--text-main') {
-          cssVars += `${v}: ${isDark ? '#e2e8f0' : '#334155'};\n`
+          cssVars += `${v}: var(--ui-text-1);\n`
         }
         else if (v === '--text-muted') {
-          cssVars += `${v}: ${isDark ? '#94a3b8' : '#64748b'};\n`
+          cssVars += `${v}: var(--ui-text-2);\n`
         }
         else if (v === '--theme-dark-bg') {
-          cssVars += `${v}: ${isDark ? '#111827' : '#f9fafb'};\n`
+          cssVars += `${v}: var(--ui-bg-canvas);\n`
+        }
+        else if (v === '--ui-bg-surface') {
+          cssVars += `${v}: var(--ui-bg-surface);\n`
+        }
+        else if (v === '--ui-bg-surface-raised') {
+          cssVars += `${v}: var(--ui-bg-surface-raised);\n`
+        }
+        else if (v === '--ui-border-subtle') {
+          cssVars += `${v}: var(--ui-border-subtle);\n`
+        }
+        else if (v === '--ui-border-strong') {
+          cssVars += `${v}: var(--ui-border-strong);\n`
+        }
+        else if (v === '--ui-text-on-brand') {
+          cssVars += `${v}: var(--ui-text-on-brand);\n`
+        }
+        else if (v === '--ui-status-success') {
+          cssVars += `${v}: var(--ui-status-success);\n`
+        }
+        else if (v === '--ui-status-success-soft') {
+          cssVars += `${v}: var(--ui-status-success-soft);\n`
+        }
+        else if (v === '--ui-status-warning') {
+          cssVars += `${v}: var(--ui-status-warning);\n`
+        }
+        else if (v === '--ui-status-warning-soft') {
+          cssVars += `${v}: var(--ui-status-warning-soft);\n`
+        }
+        else if (v === '--ui-status-danger') {
+          cssVars += `${v}: var(--ui-status-danger);\n`
+        }
+        else if (v === '--ui-status-danger-soft') {
+          cssVars += `${v}: var(--ui-status-danger-soft);\n`
+        }
+        else if (v === '--ui-status-info') {
+          cssVars += `${v}: var(--ui-status-info);\n`
+        }
+        else if (v === '--ui-status-info-soft') {
+          cssVars += `${v}: var(--ui-status-info-soft);\n`
+        }
+        else if (v === '--ui-shadow-text') {
+          cssVars += `${v}: var(--ui-shadow-text);\n`
+        }
+        else if (v === '--ui-shadow-panel') {
+          cssVars += `${v}: var(--ui-shadow-panel);\n`
+        }
+        else if (v === '--ui-shadow-panel-strong') {
+          cssVars += `${v}: var(--ui-shadow-panel-strong);\n`
+        }
+        else if (v === '--ui-shadow-inner') {
+          cssVars += `${v}: var(--ui-shadow-inner);\n`
+        }
+        else if (v === '--ui-overlay-backdrop') {
+          cssVars += `${v}: var(--ui-overlay-backdrop);\n`
         }
         else if (v.startsWith('--color-primary-')) {
           // 兜底一个蓝色的 primary 色系，防止空值
@@ -263,29 +345,62 @@ function syncThemeToIframe() {
       doc.documentElement.classList.remove('dark')
     }
 
-    // 通用半透明背景色 —— 根据主题深浅自动切换
-    const subtleBg = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'
-    const stripeBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)'
+    // 通用中性色层改为语义 token，降低主题漂移
+    const subtleBg = 'var(--ui-bg-surface)'
+    const stripeBg = 'var(--ui-bg-surface-raised)'
 
     // 🔧 仅注入真正受 isDark 影响的动态属性，包括背景色，拒绝白底透传
     styleEl.innerHTML = `
-      :root { ${cssVars} }
+      :root {
+        ${cssVars}
+        --farm-brand-100: var(--ui-brand-100);
+        --farm-brand-200: var(--ui-brand-200);
+        --farm-brand-300: var(--ui-brand-300);
+        --farm-brand-400: var(--ui-brand-400);
+        --farm-brand-500: var(--ui-brand-500);
+        --farm-brand-600: var(--ui-brand-600);
+        --farm-brand-700: var(--ui-brand-700);
+        --farm-brand-800: var(--ui-brand-800);
+        --farm-brand-900: var(--ui-brand-900);
+        --farm-brand-soft-05: color-mix(in srgb, var(--farm-brand-500) 5%, transparent);
+        --farm-brand-soft-06: color-mix(in srgb, var(--farm-brand-500) 6%, transparent);
+        --farm-brand-soft-08: color-mix(in srgb, var(--farm-brand-500) 8%, transparent);
+        --farm-brand-soft-10: color-mix(in srgb, var(--farm-brand-500) 10%, transparent);
+        --farm-brand-soft-12: color-mix(in srgb, var(--farm-brand-500) 12%, transparent);
+        --farm-brand-soft-15: color-mix(in srgb, var(--farm-brand-500) 15%, transparent);
+        --farm-brand-soft-20: color-mix(in srgb, var(--farm-brand-500) 20%, transparent);
+        --farm-brand-soft-25: color-mix(in srgb, var(--farm-brand-500) 25%, transparent);
+        --farm-brand-soft-30: color-mix(in srgb, var(--farm-brand-500) 30%, transparent);
+        --farm-brand-soft-35: color-mix(in srgb, var(--farm-brand-500) 35%, transparent);
+        --farm-brand-soft-45: color-mix(in srgb, var(--farm-brand-500) 45%, transparent);
+        --farm-brand-soft-50: color-mix(in srgb, var(--farm-brand-500) 50%, transparent);
+        --farm-brand-soft-70: color-mix(in srgb, var(--farm-brand-500) 70%, transparent);
+        --farm-brand-soft-85: color-mix(in srgb, var(--farm-brand-500) 85%, transparent);
+        --farm-brand-soft-90: color-mix(in srgb, var(--farm-brand-500) 90%, transparent);
+        --farm-brand-700-soft-85: color-mix(in srgb, var(--farm-brand-700) 85%, transparent);
+        --farm-brand-800-soft-25: color-mix(in srgb, var(--farm-brand-800) 25%, transparent);
+        --farm-brand-900-soft-30: color-mix(in srgb, var(--farm-brand-900) 30%, transparent);
+        --farm-brand-900-soft-40: color-mix(in srgb, var(--farm-brand-900) 40%, transparent);
+        --farm-brand-300-soft-40: color-mix(in srgb, var(--farm-brand-300) 40%, transparent);
+        --farm-brand-200-soft-30: color-mix(in srgb, var(--farm-brand-200) 30%, transparent);
+        --farm-brand-100-soft-20: color-mix(in srgb, var(--farm-brand-100) 20%, transparent);
+      }
       ${BASE_STATIC_CSS}
       
       /* =============== 🔥 终极防白底与系统深度融合补丁 =============== */
       :root, html, body {
         /* 深色模式：用不透明的 --theme-dark-bg 作为画布底色，防止半透明 --glass-bg 混合浏览器默认白色 */
-        background: ${isDark ? 'var(--theme-dark-bg, #111827)' : 'var(--glass-bg)'} !important;
-        background-color: ${isDark ? 'var(--theme-dark-bg, #111827)' : 'var(--glass-bg)'} !important;
+        background: ${isDark ? 'var(--theme-dark-bg, var(--ui-bg-canvas))' : 'var(--glass-bg)'} !important;
+        background-color: ${isDark ? 'var(--theme-dark-bg, var(--ui-bg-canvas))' : 'var(--glass-bg)'} !important;
         background-image: none !important;
         color: var(--text-main) !important;
       }
       
       /* 强制将所有文本类的颜色继承系统的字体色彩，不再局限于 dark class 的动态切换失效问题 */
-      .text-slate-800, .text-gray-800 {
+      .text-slate-800, [class*="text-"][class*="gray-800"] {
         color: var(--text-main) !important;
       }
-      .text-slate-500, .text-gray-500 {
+      .text-slate-500, [class*="text-"][class*="gray-500"] {
         color: var(--text-muted) !important;
       }
       
@@ -307,69 +422,69 @@ function syncThemeToIframe() {
       .tc-input-panel,
       .tc-timeline-card,
       .tc-summary-card {
-        background-color: ${isDark ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.3)'} !important;
+        background-color: var(--ui-bg-surface) !important;
         backdrop-filter: blur(8px) !important;
         -webkit-backdrop-filter: blur(8px) !important;
         border-color: var(--glass-border) !important;
       }
-      
-      .bg-white\\/60, [class*="dark:bg-slate-800\\/60"] { 
-        background-color: ${isDark ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.6)'} !important; 
+
+      [class*="bg-"][class*="white/60"], [class*="dark:bg-"][class*="slate-800/60"] {
+        background-color: var(--ui-bg-surface-raised) !important;
       }
-      
+
       /* 土地卡片图片区 & 特殊土地状态区域的各种浅色渐变 → 彻底清除渐变 */
       .bg-gradient-to-br[class*="from-red-50"], .bg-gradient-to-br[class*="from-orange-50"],
       .bg-gradient-to-br[class*="from-slate-100"], .bg-gradient-to-br[class*="from-stone-100"],
       .bg-gradient-to-br[class*="from-stone-50"], .bg-gradient-to-br[class*="from-yellow-50"],
       .bg-gradient-to-br[class*="from-gray-50"] {
         background-image: none !important;
-        background-color: ${isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'} !important;
+        background-color: var(--ui-bg-surface) !important;
         --tw-gradient-from: transparent !important; --tw-gradient-to: transparent !important;
       }
 
       /* 植物卡片种子缩略图区域 & 网格格子 */
       .bg-gradient-to-br.from-primary-50, .bg-gradient-to-br[class*="from-primary-50"] {
         background-image: none !important;
-        background-color: ${isDark ? 'rgba(var(--color-primary-500), 0.08)' : 'rgba(var(--color-primary-500), 0.06)'} !important;
+        background-color: ${isDark ? 'var(--farm-brand-soft-08)' : 'var(--farm-brand-soft-06)'} !important;
         --tw-gradient-from: transparent !important; --tw-gradient-to: transparent !important;
       }
 
       /* 网格格子 */
       .grid-cell.bg-gradient-to-br, .grid-cell[class*="from-primary-50"] {
         background-image: none !important;
-        background-color: ${isDark ? 'rgba(var(--color-primary-500), 0.1)' : 'rgba(var(--color-primary-500), 0.08)'} !important;
+        background-color: ${isDark ? 'var(--farm-brand-soft-10)' : 'var(--farm-brand-soft-08)'} !important;
       }
       
       /* 兜底：所有未被上面匹配的渐变容器，如果包含浅色 from-* 类名 */
       [class*="from-"][class*="-50"], [class*="from-"][class*="-100"]:not([class*="from-primary-700"]) {
-        background-image: none !important; background-color: ${isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'} !important;
+        background-image: none !important; background-color: var(--ui-bg-surface) !important;
       }
       /* 🔥 暴力全局覆盖：高特异性复合选择器，确保所有浅色渐变被清除 */
       .bg-gradient-to-br[class*="-50"], .bg-gradient-to-br[class*="-100"]:not([class*="from-primary-700"]),
       .bg-gradient-to-r[class*="-50"], .bg-gradient-to-r[class*="-100"]:not([class*="from-primary-700"]) {
         --tw-gradient-from: transparent !important; --tw-gradient-to: transparent !important; --tw-gradient-stops: transparent !important;
-        background-image: none !important; background-color: ${isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'} !important;
+        background-image: none !important; background-color: var(--ui-bg-surface) !important;
       }
       
       /* =========== 属性行的浅色背景条 =========== */
-      .bg-primary-50, [class*="bg-primary-50"] { background-color: ${isDark ? 'rgba(var(--color-primary-500), 0.08)' : 'rgba(var(--color-primary-500), 0.06)'} !important; }
-      .bg-blue-50, [class*="bg-blue-50"] { background-color: ${isDark ? 'rgba(59, 130, 246, 0.08)' : 'rgba(59, 130, 246, 0.06)'} !important; }
-      .bg-purple-50, [class*="bg-purple-50"] { background-color: ${isDark ? 'rgba(168, 85, 247, 0.08)' : 'rgba(168, 85, 247, 0.06)'} !important; }
-      .bg-red-50, [class*="bg-red-50"] { background-color: ${isDark ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.06)'} !important; }
-      .bg-green-50, [class*="bg-green-50"] { background-color: ${isDark ? 'rgba(34, 197, 94, 0.08)' : 'rgba(34, 197, 94, 0.06)'} !important; }
-      .bg-yellow-50, [class*="bg-yellow-50"] { background-color: ${isDark ? 'rgba(234, 179, 8, 0.08)' : 'rgba(234, 179, 8, 0.06)'} !important; }
+      .bg-primary-50, [class*="bg-primary-50"] { background-color: ${isDark ? 'var(--farm-brand-soft-08)' : 'var(--farm-brand-soft-06)'} !important; }
+      .bg-blue-50, [class*="bg-blue-50"] { background-color: color-mix(in srgb, var(--ui-status-info-soft) ${isDark ? '44%' : '32%'}, transparent) !important; }
+      .bg-purple-50, [class*="bg-purple-50"] { background-color: color-mix(in srgb, var(--ui-status-info-soft) ${isDark ? '36%' : '28%'}, transparent) !important; }
+      .bg-red-50, [class*="bg-red-50"] { background-color: color-mix(in srgb, var(--ui-status-danger-soft) ${isDark ? '42%' : '30%'}, transparent) !important; }
+      .bg-green-50, [class*="bg-green-50"] { background-color: color-mix(in srgb, var(--ui-status-success-soft) ${isDark ? '42%' : '30%'}, transparent) !important; }
+      .bg-yellow-50, [class*="bg-yellow-50"] { background-color: color-mix(in srgb, var(--ui-status-warning-soft) ${isDark ? '44%' : '32%'}, transparent) !important; }
       .bg-stone-50, .bg-stone-100, [class*="bg-stone-50"], [class*="bg-stone-100"] { background-color: ${subtleBg} !important; }
       
       /* =========== 徽章底色统一 =========== */
-      .bg-primary-100, [class*="bg-primary-100"] { background-color: ${isDark ? 'rgba(var(--color-primary-500), 0.15)' : 'rgba(var(--color-primary-500), 0.12)'} !important; }
-      .bg-red-100 { background-color: ${isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)'} !important; }
-      .bg-yellow-100 { background-color: ${isDark ? 'rgba(234, 179, 8, 0.15)' : 'rgba(234, 179, 8, 0.1)'} !important; }
-      .bg-slate-200 { background-color: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'} !important; }
-      .bg-amber-400 { background-color: rgba(var(--color-primary-500), 0.9) !important; }
+      .bg-primary-100, [class*="bg-primary-100"] { background-color: ${isDark ? 'var(--farm-brand-soft-15)' : 'var(--farm-brand-soft-12)'} !important; }
+      .bg-red-100 { background-color: color-mix(in srgb, var(--ui-status-danger-soft) ${isDark ? '70%' : '52%'}, transparent) !important; }
+      .bg-yellow-100 { background-color: color-mix(in srgb, var(--ui-status-warning-soft) ${isDark ? '70%' : '52%'}, transparent) !important; }
+      .bg-slate-200 { background-color: var(--ui-bg-surface-raised) !important; }
+      .bg-amber-400 { background-color: var(--farm-brand-soft-90) !important; }
       
       /* =========== 表单元素动态背景 =========== */
       input, select, textarea {
-        background: ${isDark ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.5)'} !important;
+        background: var(--ui-bg-surface-raised) !important;
         border: 1px solid var(--glass-border) !important; color: inherit !important;
       }
       
@@ -377,108 +492,108 @@ function syncThemeToIframe() {
       th { background-color: ${stripeBg} !important; color: var(--text-main) !important; }
 
       /* =========== 🎨 卡片边框色统一软化 =========== */
-      .land-card, .plant-card { border-color: ${isDark ? 'rgba(255,255,255,0.12)' : 'var(--glass-border)'} !important; }
+      .land-card, .plant-card { border-color: var(--ui-border-subtle) !important; }
       /* 特定颜色边框降噪 */
-      .border-primary-200, .border-primary-400, [class*="border-primary-"] { border-color: ${isDark ? 'rgba(var(--color-primary-500), 0.25)' : 'rgba(var(--color-primary-500), 0.35)'} !important; }
-      .border-red-300, [class*="border-red-"] { border-color: ${isDark ? 'rgba(239, 68, 68, 0.25)' : 'rgba(239, 68, 68, 0.35)'} !important; }
-      .border-yellow-400, [class*="border-yellow-"] { border-color: ${isDark ? 'rgba(234, 179, 8, 0.3)' : 'rgba(234, 179, 8, 0.45)'} !important; }
-      .border-green-300, [class*="border-green-"] { border-color: ${isDark ? 'rgba(34, 197, 94, 0.25)' : 'rgba(34, 197, 94, 0.35)'} !important; }
-      .border-slate-300, .border-slate-400, [class*="border-slate-3"], [class*="border-slate-4"] { border-color: ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'} !important; }
+      .border-primary-200, .border-primary-400, [class*="border-primary-"] { border-color: ${isDark ? 'var(--farm-brand-soft-25)' : 'var(--farm-brand-soft-35)'} !important; }
+      .border-red-300, [class*="border-red-"] { border-color: color-mix(in srgb, var(--ui-border-subtle) ${isDark ? '62%' : '52%'}, var(--ui-status-danger) ${isDark ? '38%' : '48%'}) !important; }
+      .border-yellow-400, [class*="border-yellow-"] { border-color: color-mix(in srgb, var(--ui-border-subtle) ${isDark ? '58%' : '50%'}, var(--ui-status-warning) ${isDark ? '42%' : '50%'}) !important; }
+      .border-green-300, [class*="border-green-"] { border-color: color-mix(in srgb, var(--ui-border-subtle) ${isDark ? '62%' : '52%'}, var(--ui-status-success) ${isDark ? '38%' : '48%'}) !important; }
+      .border-slate-300, .border-slate-400, [class*="border-slate-3"], [class*="border-slate-4"] { border-color: var(--ui-border-subtle) !important; }
       
       /* =========== 🏷️ 徽章文字色柔化 =========== */
       .bonus-tag.bg-primary-100, .bonus-tag[class*="bg-primary-100"] {
-        background-color: ${isDark ? 'rgba(var(--color-primary-500), 0.15)' : 'rgba(var(--color-primary-500), 0.12)'} !important;
-        color: ${isDark ? 'rgb(var(--color-primary-300))' : 'rgb(var(--color-primary-700))'} !important;
+        background-color: ${isDark ? 'var(--farm-brand-soft-15)' : 'var(--farm-brand-soft-12)'} !important;
+        color: ${isDark ? 'var(--farm-brand-300)' : 'var(--farm-brand-700)'} !important;
       }
-      .bonus-tag.bg-red-100 { background-color: ${isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)'} !important; color: ${isDark ? '#fca5a5' : '#dc2626'} !important; }
-      .bonus-tag.bg-yellow-100 { background-color: ${isDark ? 'rgba(234, 179, 8, 0.15)' : 'rgba(234, 179, 8, 0.1)'} !important; color: ${isDark ? '#fde047' : '#a16207'} !important; }
-      .bonus-tag.bg-slate-200 { background-color: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'} !important; color: var(--text-muted) !important; }
+      .bonus-tag.bg-red-100 { background-color: color-mix(in srgb, var(--ui-status-danger-soft) ${isDark ? '70%' : '52%'}, transparent) !important; color: var(--ui-status-danger) !important; }
+      .bonus-tag.bg-yellow-100 { background-color: color-mix(in srgb, var(--ui-status-warning-soft) ${isDark ? '70%' : '52%'}, transparent) !important; color: var(--ui-status-warning) !important; }
+      .bonus-tag.bg-slate-200 { background-color: var(--ui-bg-surface-raised) !important; color: var(--text-muted) !important; }
       /* 通用 Lv 徽章（amber-400底色的那种） */
-      .bg-amber-400 { background-color: ${isDark ? 'rgba(var(--color-primary-500), 0.7)' : 'rgba(var(--color-primary-500), 0.85)'} !important; }
+      .bg-amber-400 { background-color: ${isDark ? 'var(--farm-brand-soft-70)' : 'var(--farm-brand-soft-85)'} !important; }
       
       /* =========== 📊 属性值文字色降噪 =========== */
-      .text-primary-600, .text-primary-700, [class*="text-primary-6"], [class*="text-primary-7"] { color: ${isDark ? 'rgb(var(--color-primary-400))' : 'rgb(var(--color-primary-600))'} !important; }
-      .text-blue-600, [class*="text-blue-6"] { color: ${isDark ? '#93c5fd' : '#2563eb'} !important; }
-      .text-purple-600, [class*="text-purple-6"] { color: ${isDark ? '#c4b5fd' : '#7c3aed'} !important; }
-      .text-red-600, .text-red-700, [class*="text-red-6"], [class*="text-red-7"] { color: ${isDark ? '#fca5a5' : '#dc2626'} !important; }
-      .text-yellow-700, [class*="text-yellow-7"] { color: ${isDark ? '#fde047' : '#a16207'} !important; }
+      .text-primary-600, .text-primary-700, [class*="text-primary-6"], [class*="text-primary-7"] { color: ${isDark ? 'var(--farm-brand-400)' : 'var(--farm-brand-600)'} !important; }
+      .text-blue-600, [class*="text-blue-6"] { color: ${isDark ? 'var(--farm-brand-400)' : 'var(--farm-brand-600)'} !important; }
+      .text-purple-600, [class*="text-purple-6"] { color: ${isDark ? 'var(--farm-brand-400)' : 'var(--farm-brand-600)'} !important; }
+      .text-red-600, .text-red-700, [class*="text-red-6"], [class*="text-red-7"] { color: var(--ui-status-danger) !important; }
+      .text-yellow-700, [class*="text-yellow-7"] { color: var(--ui-status-warning) !important; }
       
       /* =========== 🔲 网格格子边框与文字 =========== */
-      .grid-cell { border-color: ${isDark ? 'rgba(var(--color-primary-500), 0.2)' : 'rgba(var(--color-primary-500), 0.3)'} !important; }
-      .grid-cell[class*="border-amber"], .grid-cell[class*="border-yellow"] { border-color: ${isDark ? 'rgba(234, 179, 8, 0.2)' : 'rgba(234, 179, 8, 0.35)'} !important; }
-      .grid-cell[class*="border-slate"], .grid-cell[class*="border-gray"] { border-color: ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)'} !important; }
-      .grid-cell .text-primary-700 { color: ${isDark ? 'rgb(var(--color-primary-300))' : 'rgb(var(--color-primary-700))'} !important; }
-      .grid-cell .text-primary-600, .grid-cell [class*="text-primary-6"] { color: ${isDark ? 'rgb(var(--color-primary-400))' : 'rgb(var(--color-primary-600))'} !important; }
-      .grid-cell [class*="text-amber"], .grid-cell [class*="text-yellow"] { color: ${isDark ? '#fde047' : '#92400e'} !important; }
+      .grid-cell { border-color: ${isDark ? 'var(--farm-brand-soft-20)' : 'var(--farm-brand-soft-30)'} !important; }
+      .grid-cell[class*="border-amber"], .grid-cell[class*="border-yellow"] { border-color: color-mix(in srgb, var(--ui-border-subtle) ${isDark ? '68%' : '58%'}, var(--ui-status-warning) ${isDark ? '32%' : '42%'}) !important; }
+      .grid-cell[class*="border-slate"], .grid-cell[class*="border-gray"] { border-color: var(--ui-border-subtle) !important; }
+      .grid-cell .text-primary-700 { color: ${isDark ? 'var(--farm-brand-300)' : 'var(--farm-brand-700)'} !important; }
+      .grid-cell .text-primary-600, .grid-cell [class*="text-primary-6"] { color: ${isDark ? 'var(--farm-brand-400)' : 'var(--farm-brand-600)'} !important; }
+      .grid-cell [class*="text-amber"], .grid-cell [class*="text-yellow"] { color: var(--ui-status-warning) !important; }
       .grid-cell [class*="text-slate"] { color: var(--text-muted) !important; }
       
       /* 开关 Toggle */
-      .fert-toggle input[type="checkbox"] { background: ${isDark ? '#475569' : '#94a3b8'} !important; }
+      .fert-toggle input[type="checkbox"] { background: var(--ui-border-strong) !important; }
       
       /* 施肥阶段选择动态字色 */
-      .tc-fert-phase-btn.selected { color: ${isDark ? 'rgb(var(--color-primary-300))' : 'rgb(var(--color-primary-700))'} !important; }
-      .tc-fert-phase-btn:hover { border-color: ${isDark ? 'rgb(var(--color-primary-400))' : 'rgb(var(--color-primary-300))'} !important; }
+      .tc-fert-phase-btn.selected { color: ${isDark ? 'var(--farm-brand-300)' : 'var(--farm-brand-700)'} !important; }
+      .tc-fert-phase-btn:hover { border-color: ${isDark ? 'var(--farm-brand-400)' : 'var(--farm-brand-300)'} !important; }
       
       /* ⓘ 说明按钮 */
-      .info-btn:hover { background: rgba(var(--color-primary-500), 0.1) !important; color: ${isDark ? 'rgb(var(--color-primary-300))' : 'rgb(var(--color-primary-600))'} !important; }
-      .info-btn[data-info-key="smart-fert"] { color: ${isDark ? 'rgb(var(--color-primary-400))' : 'rgb(var(--color-primary-600))'} !important; }
+      .info-btn:hover { background: var(--farm-brand-soft-10) !important; color: ${isDark ? 'var(--farm-brand-300)' : 'var(--farm-brand-600)'} !important; }
+      .info-btn[data-info-key="smart-fert"] { color: ${isDark ? 'var(--farm-brand-400)' : 'var(--farm-brand-600)'} !important; }
       
       /* =========== 🌙 深色模式下 Hero/Tab 亮度柔化 =========== */
       /* calc-hero 渐变区域：降低渐变不透明度，避免浅色系主题的 primary 色在深底上太亮 */
       .calc-hero, .level-hero, .plant-hero, .land-hero {
-        background: ${isDark ? 'linear-gradient(135deg, rgba(var(--color-primary-900), 0.4) 0%, rgba(var(--color-primary-800), 0.25) 50%, transparent 100%)' : 'linear-gradient(135deg, rgba(var(--color-primary-200), 0.3) 0%, rgba(var(--color-primary-100), 0.2) 50%, var(--glass-bg) 100%)'} !important;
-        border-bottom-color: ${isDark ? 'rgba(var(--color-primary-500), 0.15)' : 'rgba(var(--color-primary-300), 0.4)'} !important;
+        background: ${isDark ? 'linear-gradient(135deg, var(--farm-brand-900-soft-40) 0%, var(--farm-brand-800-soft-25) 50%, transparent 100%)' : 'linear-gradient(135deg, var(--farm-brand-200-soft-30) 0%, var(--farm-brand-100-soft-20) 50%, var(--glass-bg) 100%)'} !important;
+        border-bottom-color: ${isDark ? 'var(--farm-brand-soft-15)' : 'var(--farm-brand-300-soft-40)'} !important;
       }
       .calc-hero h1, .level-hero h1, .plant-hero h1, .land-hero h1 {
-        color: ${isDark ? 'rgb(var(--color-primary-300))' : 'rgb(var(--color-primary-800))'} !important;
+        color: ${isDark ? 'var(--farm-brand-300)' : 'var(--farm-brand-800)'} !important;
       }
       
       /* Tab 激活态：使用深色系主题色替代原始 primary-500 纯色 */
       .calc-mode-tab.active {
-        background: ${isDark ? 'rgb(var(--color-primary-900))' : 'rgb(var(--color-primary-500))'} !important;
-        color: ${isDark ? 'rgb(var(--color-primary-200))' : '#fff'} !important;
-        border-color: ${isDark ? 'rgba(var(--color-primary-500), 0.3)' : 'rgb(var(--color-primary-500))'} !important;
+        background: ${isDark ? 'var(--farm-brand-900)' : 'var(--farm-brand-500)'} !important;
+        color: ${isDark ? 'var(--farm-brand-200)' : 'var(--ui-text-on-brand)'} !important;
+        border-color: ${isDark ? 'var(--farm-brand-soft-30)' : 'var(--farm-brand-500)'} !important;
       }
       .rank-tab.active, .v-crop-tab.v-active, .level-tab.active {
-        background: ${isDark ? 'rgb(var(--color-primary-900))' : 'rgb(var(--color-primary-500))'} !important;
-        color: ${isDark ? 'rgb(var(--color-primary-200))' : '#fff'} !important;
-        border-color: ${isDark ? 'rgba(var(--color-primary-500), 0.3)' : 'rgb(var(--color-primary-500))'} !important;
+        background: ${isDark ? 'var(--farm-brand-900)' : 'var(--farm-brand-500)'} !important;
+        color: ${isDark ? 'var(--farm-brand-200)' : 'var(--ui-text-on-brand)'} !important;
+        border-color: ${isDark ? 'var(--farm-brand-soft-30)' : 'var(--farm-brand-500)'} !important;
       }
 
       /* 计算摘要条 */
       .calc-summary {
-        background: ${isDark ? 'rgba(var(--color-primary-900), 0.3)' : 'rgba(var(--color-primary-100), 0.2)'} !important;
-        border-color: ${isDark ? 'rgba(var(--color-primary-500), 0.15)' : 'rgba(var(--color-primary-300), 0.4)'} !important;
-        color: ${isDark ? 'var(--text-main)' : 'rgb(var(--color-primary-800))'} !important;
+        background: ${isDark ? 'var(--farm-brand-900-soft-30)' : 'var(--farm-brand-100-soft-20)'} !important;
+        border-color: ${isDark ? 'var(--farm-brand-soft-15)' : 'var(--farm-brand-300-soft-40)'} !important;
+        color: ${isDark ? 'var(--text-main)' : 'var(--farm-brand-800)'} !important;
       }
       
       /* 推荐卡左侧彩条降低亮度 */
       .rec-card.card-no-fert {
-        border-left-color: ${isDark ? 'rgba(var(--color-primary-500), 0.5)' : 'rgb(var(--color-primary-500))'} !important;
+        border-left-color: ${isDark ? 'var(--farm-brand-soft-50)' : 'var(--farm-brand-500)'} !important;
       }
       
       /* 主按钮在深色模式下使用更深的底色 */
       .btn-calc {
-        background: ${isDark ? 'linear-gradient(135deg, rgb(var(--color-primary-800)), rgb(var(--color-primary-900)))' : 'linear-gradient(135deg, rgb(var(--color-primary-500)), rgb(var(--color-primary-600)))'} !important;
-        color: ${isDark ? 'rgb(var(--color-primary-200))' : '#fff'} !important;
-        box-shadow: ${isDark ? '0 2px 8px rgba(var(--color-primary-500), 0.2)' : '0 2px 8px rgba(var(--color-primary-500), 0.35)'} !important;
+        background: ${isDark ? 'linear-gradient(135deg, var(--farm-brand-800), var(--farm-brand-900))' : 'linear-gradient(135deg, var(--farm-brand-500), var(--farm-brand-600))'} !important;
+        color: ${isDark ? 'var(--farm-brand-200)' : 'var(--ui-text-on-brand)'} !important;
+        box-shadow: ${isDark ? '0 2px 8px var(--farm-brand-soft-20)' : '0 2px 8px var(--farm-brand-soft-35)'} !important;
       }
       
       /* 验算按钮 */
       .btn-verify {
-        background: ${isDark ? 'linear-gradient(135deg, rgb(var(--color-primary-800)), rgb(var(--color-primary-900)))' : 'linear-gradient(135deg, rgb(var(--color-primary-400)), rgb(var(--color-primary-600)))'} !important;
-        color: ${isDark ? 'rgb(var(--color-primary-200))' : '#fff'} !important;
+        background: ${isDark ? 'linear-gradient(135deg, var(--farm-brand-800), var(--farm-brand-900))' : 'linear-gradient(135deg, var(--farm-brand-400), var(--farm-brand-600))'} !important;
+        color: ${isDark ? 'var(--farm-brand-200)' : 'var(--ui-text-on-brand)'} !important;
       }
       
       /* 开关激活态柔化 */
       .fert-toggle input[type="checkbox"]:checked { 
-        background: ${isDark ? 'rgb(var(--color-primary-800))' : 'rgb(var(--color-primary-500))'} !important;
+        background: ${isDark ? 'var(--farm-brand-800)' : 'var(--farm-brand-500)'} !important;
       }
       
       /* land-info 信息条 */
       .land-info {
-        background: ${isDark ? 'rgba(var(--color-primary-900), 0.3)' : 'rgba(var(--color-primary-100), 0.2)'} !important;
-        color: ${isDark ? 'rgb(var(--color-primary-300))' : 'rgb(var(--color-primary-600))'} !important;
+        background: ${isDark ? 'var(--farm-brand-900-soft-30)' : 'var(--farm-brand-100-soft-20)'} !important;
+        color: ${isDark ? 'var(--farm-brand-300)' : 'var(--farm-brand-600)'} !important;
       }
     `
 
@@ -518,7 +633,7 @@ function syncThemeToIframe() {
         // 检测是否包含浅色渐变类
         if (lightGradientKeywords.some(k => cls.includes(k))) {
           el.style.setProperty('background-image', 'none', 'important')
-          el.style.setProperty('background-color', isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)', 'important')
+          el.style.setProperty('background-color', 'var(--ui-bg-surface)', 'important')
         }
       })
     }
@@ -567,47 +682,71 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-full flex flex-col overflow-hidden p-0 lg:p-4 sm:p-2">
+  <div class="farm-tools-page ui-page-shell ui-page-density-relaxed h-full min-h-0 w-full flex flex-col overflow-hidden">
     <!-- ═══ 移动端/中屏 顶部工具选择栏（< lg 时可见） ═══ -->
-    <div class="farm-tools-tab-bar flex flex-shrink-0 items-center gap-1.5 overflow-x-auto px-2 py-2 lg:hidden">
-      <button
-        v-for="item in menuItems"
-        :key="`tab-${item.id}`"
-        class="farm-tool-tab flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-sm transition-all"
-        :class="[
-          selectedArticle === item.id
-            ? 'farm-tool-tab--active'
-            : 'farm-tool-tab--inactive',
-        ]"
-        @click="selectArticle(item.id)"
-      >
-        <div class="text-base" :class="item.icon" />
-        <span class="font-medium">{{ item.shortTitle }}</span>
-      </button>
+    <div class="farm-tools-mobile-toolbar ui-mobile-sticky-panel ui-mobile-action-panel lg:hidden">
+      <div class="farm-tools-mobile-toolbar-head">
+        <button
+          class="farm-tools-menu-trigger"
+          :title="sidebarVisible ? '收起目录' : '展开目录'"
+          @click="toggleSidebar"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 transition-transform duration-200" :class="{ 'rotate-180': !sidebarVisible }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+          </svg>
+          <span>{{ sidebarVisible ? '收起目录' : '打开目录' }}</span>
+        </button>
+        <div class="farm-tools-mobile-toolbar-current">
+          <div class="farm-tools-mobile-toolbar-eyebrow">
+            农场百科工具
+          </div>
+          <div class="farm-tools-mobile-toolbar-title">
+            <div class="shrink-0 text-base" :class="selectedMenuItem.icon" />
+            <span>{{ selectedMenuItem.title }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="farm-tools-tab-bar ui-bulk-actions flex flex-shrink-0 items-center gap-1.5 overflow-x-auto px-0 py-0">
+        <button
+          v-for="item in menuItems"
+          :key="`tab-${item.id}`"
+          class="farm-tool-tab flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-sm transition-all"
+          :class="[
+            selectedArticle === item.id
+              ? 'farm-tool-tab--active'
+              : 'farm-tool-tab--inactive',
+          ]"
+          @click="selectArticle(item.id)"
+        >
+          <div class="text-base" :class="item.icon" />
+          <span class="font-medium">{{ item.shortTitle }}</span>
+        </button>
+      </div>
     </div>
 
-    <div class="mx-auto h-full max-w-[1600px] min-h-0 w-full flex gap-4">
+    <div class="farm-tools-shell h-full min-h-0 w-full flex gap-4">
       <!-- ═══ 左侧分类导航（≥lg 固定显示；<lg 通过折叠按钮浮动显示）═══ -->
 
       <!-- 中小屏遮罩层 -->
       <div
         v-if="sidebarVisible"
-        class="fixed inset-0 z-20 bg-black/40 backdrop-blur-sm lg:hidden"
+        class="farm-tools-backdrop fixed inset-0 z-20 backdrop-blur-sm lg:hidden"
         @click="sidebarVisible = false"
       />
 
       <aside
-        class="glass-panel h-full w-64 shrink-0 flex-col rounded-2xl p-4 shadow-sm transition-all duration-300 lg:flex"
+        class="farm-tools-sidebar glass-panel h-full shrink-0 flex-col rounded-2xl p-4 shadow-sm transition-all duration-300 lg:flex"
         :class="[
           // ≥lg：固定显示
-          sidebarVisible ? 'flex fixed lg:static inset-y-4 left-4 z-30' : 'hidden lg:flex',
+          sidebarVisible ? 'flex fixed inset-y-4 left-4 z-30 lg:static lg:inset-auto' : 'hidden lg:flex',
         ]"
       >
-        <h2 class="mb-6 from-blue-600 to-indigo-600 bg-gradient-to-r bg-clip-text px-2 text-xl text-transparent font-bold tracking-wide dark:from-cyan-400 dark:to-blue-500">
+        <h2 class="farm-tools-page-title mb-6 bg-clip-text px-2 text-xl text-transparent font-bold tracking-wide">
           农场百科工具
         </h2>
 
-        <nav class="flex-1 overflow-y-auto pr-1 space-y-2">
+        <nav class="min-h-0 flex-1 overflow-y-auto pr-1 space-y-2">
           <div class="pt-2 space-y-2">
             <button
               v-for="item in menuItems"
@@ -615,34 +754,23 @@ onUnmounted(() => {
               class="w-full flex items-center justify-between rounded-xl px-4 py-3.5 text-left transition-all"
               :class="[
                 selectedArticle === item.id
-                  ? 'bg-primary-500/10 border border-primary-500/20 dark:bg-white/[0.08] dark:border-white/10 text-primary-700 dark:text-primary-300 font-bold shadow-[0_0_15px_rgba(var(--color-primary-500),0.15)] scale-100'
-                  : 'glass-text-main dark:text-gray-300 hover:text-gray-900 border border-transparent dark:hover:text-gray-100 dark:hover:bg-white/5 font-medium hover:bg-black/5 opacity-80 hover:opacity-100',
+                  ? 'farm-tools-nav-active theme-glow-soft scale-100'
+                  : 'farm-tools-nav-idle',
               ]"
               @click="selectArticle(item.id)"
             >
               <div class="flex items-center gap-3">
-                <div class="text-xl" :class="[item.icon, selectedArticle === item.id ? 'text-primary-600 dark:text-primary-400' : '']" />
+                <div class="text-xl" :class="[item.icon, selectedArticle === item.id ? 'farm-tools-nav-icon-active' : 'farm-tools-nav-icon-idle']" />
                 <span class="tracking-wide">{{ item.title }}</span>
               </div>
-              <div v-if="selectedArticle === item.id" class="h-1.5 w-1.5 rounded-full bg-primary-500 shadow-[0_0_8px_rgba(var(--color-primary-500),0.8)]" />
+              <div v-if="selectedArticle === item.id" class="theme-glow-dot h-1.5 w-1.5 rounded-full bg-primary-500" />
             </button>
           </div>
         </nav>
       </aside>
 
       <!-- ═══ 右侧自适应无边界容器 ═══ -->
-      <main class="glass-panel relative m-0 h-full min-w-0 flex flex-1 flex-col overflow-hidden rounded-2xl p-0">
-        <!-- 中屏折叠按钮（lg 以上固定显示侧栏，不显示此按钮） -->
-        <button
-          class="sidebar-toggle-btn absolute left-3 top-3 z-10 flex lg:hidden"
-          :title="sidebarVisible ? '收起侧栏' : '展开侧栏'"
-          @click="toggleSidebar"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform duration-200" :class="{ 'rotate-180': !sidebarVisible }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-          </svg>
-        </button>
-
+      <main class="farm-tools-main glass-panel relative m-0 h-full min-w-0 flex flex-1 flex-col overflow-hidden rounded-2xl p-0">
         <iframe
           ref="iframeRef"
           :src="`/nc_local_version/${selectedArticle}`"
@@ -655,16 +783,96 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.farm-tools-shell {
+  align-items: stretch;
+  gap: var(--ui-page-gap-current);
+}
+
+.farm-tools-sidebar {
+  width: min(18.5rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+}
+
+.farm-tools-page-title {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ui-brand-700) 88%, var(--ui-text-1) 12%),
+    color-mix(in srgb, var(--ui-brand-500) 92%, var(--ui-text-1) 8%)
+  );
+}
+
+.farm-tools-main {
+  min-width: 0;
+}
+
+.farm-tools-mobile-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding: 0.875rem;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent);
+  box-shadow:
+    0 12px 24px -24px var(--ui-shadow-panel),
+    inset 0 1px 0 var(--ui-shadow-inner);
+}
+
+.farm-tools-mobile-toolbar-head {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  min-width: 0;
+}
+
+.farm-tools-mobile-toolbar-current {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.farm-tools-mobile-toolbar-eyebrow {
+  color: var(--ui-text-3);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.farm-tools-mobile-toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+  min-width: 0;
+  color: var(--ui-text-1);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.farm-tools-mobile-toolbar-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 1024px) {
+  .farm-tools-sidebar {
+    width: 18.5rem;
+    max-width: none;
+  }
+}
+
 .glass-panel {
   box-shadow:
-    0 8px 32px 0 rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 8px 32px 0 var(--ui-shadow-panel),
+    inset 0 1px 0 var(--ui-shadow-inner);
 }
 
 .dark .glass-panel {
   box-shadow:
-    0 8px 32px 0 rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    0 8px 32px 0 var(--ui-shadow-panel-strong),
+    inset 0 1px 0 var(--ui-shadow-inner);
 }
 
 /* iframe 内部背景透明，以便透出 Vue 系统的真实玻璃背景 */
@@ -681,39 +889,87 @@ iframe {
   display: none; /* Chrome/Safari */
 }
 
+.farm-tools-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle) 55%, var(--farm-brand-500) 45%);
+  background: color-mix(in srgb, var(--farm-brand-500) 10%, transparent);
+  color: var(--ui-text-1);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.farm-tools-menu-trigger:hover {
+  background: color-mix(in srgb, var(--farm-brand-500) 16%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--farm-brand-500) 24%, transparent);
+}
+
 .farm-tool-tab--active {
-  background: rgba(var(--color-primary-500), 0.15);
-  color: rgb(var(--color-primary-400));
-  border: 1px solid rgba(var(--color-primary-500), 0.25);
-  box-shadow: 0 0 12px rgba(var(--color-primary-500), 0.2);
+  background: color-mix(in srgb, var(--farm-brand-500) 14%, transparent);
+  color: var(--ui-text-1);
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle) 55%, var(--farm-brand-500) 45%);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--farm-brand-500) 22%, transparent);
 }
 
 .farm-tool-tab--inactive {
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-muted, #94a3b8);
-  border: 1px solid transparent;
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-2);
+  border: 1px solid var(--ui-border-subtle);
 }
 .farm-tool-tab--inactive:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-main, #e2e8f0);
+  background: var(--ui-bg-surface-raised);
+  color: var(--ui-text-1);
 }
 
-/* ═══ 侧栏折叠按钮 ═══ */
-.sidebar-toggle-btn {
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: rgba(var(--color-primary-500), 0.12);
-  color: rgb(var(--color-primary-400));
-  border: 1px solid rgba(var(--color-primary-500), 0.2);
-  cursor: pointer;
-  transition: all 0.2s;
-  backdrop-filter: blur(8px);
+.farm-tools-backdrop {
+  background: var(--ui-overlay-backdrop) !important;
 }
-.sidebar-toggle-btn:hover {
-  background: rgba(var(--color-primary-500), 0.2);
-  box-shadow: 0 0 10px rgba(var(--color-primary-500), 0.25);
+
+.farm-tools-nav-active {
+  background: color-mix(in srgb, var(--farm-brand-500) 12%, var(--ui-bg-surface-raised) 88%) !important;
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle) 55%, var(--farm-brand-500) 45%) !important;
+  color: color-mix(in srgb, var(--farm-brand-700) 76%, var(--ui-text-1)) !important;
+  font-weight: 700;
+}
+
+.farm-tools-nav-idle {
+  border: 1px solid transparent !important;
+  background: color-mix(in srgb, var(--ui-bg-surface) 66%, transparent) !important;
+  color: var(--ui-text-1) !important;
+  font-weight: 500;
+  opacity: 0.84;
+}
+
+.farm-tools-nav-idle:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
+  color: var(--ui-text-1) !important;
+  opacity: 1;
+}
+
+.farm-tools-nav-icon-active {
+  color: var(--farm-brand-600) !important;
+}
+
+.farm-tools-nav-icon-idle {
+  color: var(--ui-text-2) !important;
+}
+
+.theme-glow-soft {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--farm-brand-500) 22%, transparent);
+}
+
+.theme-glow-dot {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--farm-brand-500) 70%, transparent);
 }
 </style>

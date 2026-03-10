@@ -31,11 +31,15 @@ function navigateToHelp() {
 .help-button {
   @apply fixed bottom-6 right-6 z-50;
   @apply flex items-center gap-2 px-4 py-3;
-  @apply bg-gradient-to-r from-blue-600 to-indigo-600;
-  @apply text-white rounded-full shadow-lg;
+  @apply rounded-full shadow-lg;
   @apply transition-all duration-300 ease-out;
   @apply hover:shadow-xl hover:scale-110;
-  @apply focus:outline-none focus:ring-4 focus:ring-blue-500/30;
+  @apply focus:outline-none;
+  background-image: linear-gradient(to right, var(--ui-brand-600), var(--ui-brand-500));
+  color: var(--ui-text-on-brand);
+  box-shadow:
+    0 4px 20px color-mix(in srgb, var(--ui-brand-600) 30%, transparent),
+    0 0 0 0 transparent;
   animation: pulse 4s infinite ease-in-out;
 }
 
@@ -46,10 +50,10 @@ function navigateToHelp() {
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 4px 20px rgba(37, 99, 235, 0.3);
+    box-shadow: 0 4px 20px color-mix(in srgb, var(--ui-brand-600) 30%, transparent);
   }
   50% {
-    box-shadow: 0 4px 28px rgba(37, 99, 235, 0.45);
+    box-shadow: 0 4px 28px color-mix(in srgb, var(--ui-brand-600) 45%, transparent);
   }
 }
 
@@ -68,8 +72,14 @@ function navigateToHelp() {
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .help-button {
-    @apply from-blue-500 to-indigo-500;
+    background-image: linear-gradient(to right, var(--ui-brand-500), var(--ui-brand-400));
   }
+}
+
+.help-button:focus-visible {
+  box-shadow:
+    0 4px 20px color-mix(in srgb, var(--ui-brand-600) 30%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--ui-focus-ring) 48%, transparent);
 }
 
 /* 淡入淡出动画 */

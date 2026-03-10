@@ -380,5 +380,5 @@ curl -X POST \
 ## 联系支持
 
 测试过程中遇到问题，请提交到：
-- GitHub Issues: https://github.com/Penty-d/qq-farm-bot-ui/issues
+- GitHub Issues: https://github.com/smdk000/qq-farm-ui-pro-max/issues
 - 附上测试报告和问题描述

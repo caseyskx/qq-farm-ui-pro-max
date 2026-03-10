@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { CopyInteractionOptions } from '@/composables/use-copy-interaction'
 import type { AccountsActionHistoryItem, AccountsActionHistoryStatus } from '@/utils/view-preferences'
 import { useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
@@ -8,28 +9,34 @@ import api from '@/api'
 import AccountModal from '@/components/AccountModal.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import BaseAccountViewSwitcherLayout from '@/components/ui/BaseAccountViewSwitcherLayout.vue'
+import BaseActionButtons from '@/components/ui/BaseActionButtons.vue'
 import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseBulkActions from '@/components/ui/BaseBulkActions.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseChipList from '@/components/ui/BaseChipList.vue'
 import BaseDataTable from '@/components/ui/BaseDataTable.vue'
 import BaseDataTableHead from '@/components/ui/BaseDataTableHead.vue'
 import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
-import BaseFilterChip from '@/components/ui/BaseFilterChip.vue'
-import BaseFilterChips from '@/components/ui/BaseFilterChips.vue'
-import BaseHistorySummaryPanel from '@/components/ui/BaseHistorySummaryPanel.vue'
+import BaseHeaderNotice from '@/components/ui/BaseHeaderNotice.vue'
+import BaseHeaderSummary from '@/components/ui/BaseHeaderSummary.vue'
+import BaseHistorySectionLayout from '@/components/ui/BaseHistorySectionLayout.vue'
 import BaseIconAction from '@/components/ui/BaseIconAction.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseManagementBar from '@/components/ui/BaseManagementBar.vue'
-import BaseSectionHeader from '@/components/ui/BaseSectionHeader.vue'
+import BasePageHeaderText from '@/components/ui/BasePageHeaderText.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import BaseSelectionSummary from '@/components/ui/BaseSelectionSummary.vue'
 import BaseSortableHeaderCell from '@/components/ui/BaseSortableHeaderCell.vue'
+import BaseTableSectionCard from '@/components/ui/BaseTableSectionCard.vue'
 import BaseTableToolbar from '@/components/ui/BaseTableToolbar.vue'
+import BaseToggleOptionGroup from '@/components/ui/BaseToggleOptionGroup.vue'
+import { useCopyInteraction } from '@/composables/use-copy-interaction'
 import { useViewPreferenceSync } from '@/composables/use-view-preference-sync'
 import { useAccountStore } from '@/stores/account'
 import { useToastStore } from '@/stores/toast'
 import { adminToken } from '@/utils/auth'
 import { useAvatar } from '@/utils/avatar'
+import { createActionButton, createActionButtons, createChip, createChips, createHeaderNotice, createHeaderSummary, createHistoryHighlight, createHistoryMetaItem, createHistoryMetaItems, createHistoryMetric, createHistoryMetrics, createHistoryPanel, createHistoryRecentItem, createHistoryRecentItems, createPageHeaderText, createToggleOption, createToggleOptions } from '@/utils/management-schema'
 import { DEFAULT_ACCOUNTS_VIEW_STATE, fetchViewPreferences, normalizeAccountsActionHistory, normalizeAccountsViewState } from '@/utils/view-preferences'
 
 interface CurrentUser {
@@ -100,6 +107,7 @@ const showBatchDeleteConfirm = ref(false)
 const batchDeleteLoading = ref(false)
 const showColumnSettings = ref(false)
 const actionHistory = ref<ActionHistoryItem[]>([])
+const { copiedHistoryId, copiedControlKey, copyText: copyWithFeedback } = useCopyInteraction()
 const tableColumnVisibility = ref<Record<TableColumnKey, boolean>>({
   owner: true,
   platform: true,
@@ -537,37 +545,23 @@ function buildHistorySummaryText(item: ActionHistoryItem) {
   return lines.join('\n')
 }
 
+type CopyTextOptions = CopyInteractionOptions
+
 async function copyLatestActionSummary() {
   const latestHistory = actionHistory.value[0]
   if (!latestHistory) {
     toast.warning('暂无最近操作记录可复制')
     return
   }
-  await copyText(buildHistorySummaryText(latestHistory), '最近操作摘要已复制')
+  await copyText(buildHistorySummaryText(latestHistory), '最近操作摘要已复制', {
+    controlKey: 'latest-summary',
+    detail: `${latestHistory.actionLabel} · ${formatDateTime(latestHistory.timestamp)}`,
+    historyId: latestHistory.id,
+  })
 }
 
-async function copyText(text: string, successMessage: string) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text)
-    }
-    else {
-      const textarea = document.createElement('textarea')
-      textarea.value = text
-      textarea.style.position = 'fixed'
-      textarea.style.left = '-999999px'
-      document.body.appendChild(textarea)
-      textarea.focus()
-      textarea.select()
-      document.execCommand('copy')
-      textarea.remove()
-    }
-    toast.success(successMessage)
-  }
-  catch (error) {
-    console.error('复制失败:', error)
-    toast.error('复制失败，请手动复制')
-  }
+async function copyText(text: string, successMessage: string, options: CopyTextOptions = {}) {
+  await copyWithFeedback(text, successMessage, options)
 }
 
 async function copyCurrentFilterLink() {
@@ -576,7 +570,23 @@ async function copyCurrentFilterLink() {
     query: buildShareQuery(),
   })
   const absoluteUrl = `${window.location.origin}${resolved.fullPath}`
-  await copyText(absoluteUrl, '当前筛选链接已复制')
+  await copyText(absoluteUrl, '当前筛选链接已复制', {
+    controlKey: 'filter-link',
+    detail: '当前筛选条件链接已写入剪贴板，可直接发送给其他设备打开。',
+  })
+}
+
+async function copyHistorySummaryItem(item: ActionHistoryItem) {
+  await copyText(buildHistorySummaryText(item), '操作摘要已复制', {
+    detail: `${item.actionLabel} · ${formatDateTime(item.timestamp)}`,
+    historyId: item.id,
+  })
+}
+
+function getHistoryCopyLabel(item: ActionHistoryItem) {
+  if (copiedHistoryId.value === item.id)
+    return '已复制到剪贴板'
+  return item.targetLabel || '点击复制本次摘要'
 }
 
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
@@ -616,32 +626,42 @@ const ownershipTransferOptions = computed(() => {
 })
 const visibleTableColumns = computed(() => tableColumnVisibility.value)
 const latestActionHistory = computed(() => actionHistory.value[0] || null)
-const recentActionHistory = computed(() => actionHistory.value.slice(0, 4))
+const recentActionHistory = computed(() => actionHistory.value.slice(1, 5))
 const actionHistoryCount = computed(() => actionHistory.value.length)
 
 function getActionHistoryStatusMeta(status: ActionHistoryStatus) {
   if (status === 'success') {
     return {
       label: '执行成功',
-      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-      accent: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200',
+      badge: 'accounts-badge-history-success',
+      accent: 'accounts-history-card accounts-history-card-success',
       icon: 'i-carbon-checkmark-filled',
     }
   }
   if (status === 'error') {
     return {
       label: '执行失败',
-      badge: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-      accent: 'border-red-500/20 bg-red-500/10 text-red-200',
+      badge: 'accounts-badge-history-error',
+      accent: 'accounts-history-card accounts-history-card-error',
       icon: 'i-carbon-warning-filled',
     }
   }
   return {
     label: '部分完成',
-    badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-    accent: 'border-amber-500/20 bg-amber-500/10 text-amber-200',
+    badge: 'accounts-badge-history-partial',
+    accent: 'accounts-history-card accounts-history-card-partial',
     icon: 'i-carbon-warning-alt-filled',
   }
+}
+
+function getActionHistoryMetricClass(kind: 'total' | 'success' | 'error' | 'skipped') {
+  if (kind === 'success')
+    return 'accounts-history-metric accounts-history-metric-success'
+  if (kind === 'error')
+    return 'accounts-history-metric accounts-history-metric-error'
+  if (kind === 'skipped')
+    return 'accounts-history-metric accounts-history-metric-skipped'
+  return 'accounts-history-metric accounts-history-metric-total'
 }
 
 function resolvePlatformLabel(platform?: string) {
@@ -686,10 +706,8 @@ function resolveOwnerMeta(acc: any) {
     return {
       section: 'unowned' as OwnershipSection,
       label: '未归属 / 系统账号',
-      badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
-      tabActive: 'accounts-tab-active border-slate-300/70 bg-slate-500/15 text-slate-100',
-      tabIdle: 'border-slate-400/20 bg-black/10 text-slate-300/80 hover:bg-slate-500/10',
-      cardGlow: 'hover:border-slate-300/35',
+      badge: 'accounts-badge-owner-unowned',
+      cardGlow: 'accounts-card-glow-unowned',
       shortLabel: '未归属',
       ownerText: '系统公共账号',
     }
@@ -698,10 +716,8 @@ function resolveOwnerMeta(acc: any) {
     return {
       section: 'mine' as OwnershipSection,
       label: '我自己登录的账号',
-      badge: 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300',
-      tabActive: 'accounts-tab-active border-primary-400/50 bg-primary-500/18 text-primary-50',
-      tabIdle: 'border-primary-500/20 bg-black/10 text-primary-200/85 hover:bg-primary-500/10',
-      cardGlow: 'hover:border-primary-400/35',
+      badge: 'accounts-badge-owner-mine',
+      cardGlow: 'accounts-card-glow-mine',
       shortLabel: '我自己',
       ownerText: owner,
     }
@@ -710,10 +726,8 @@ function resolveOwnerMeta(acc: any) {
     return {
       section: 'other_admin' as OwnershipSection,
       label: `其他管理员账号: ${owner}`,
-      badge: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
-      tabActive: 'accounts-tab-active border-violet-400/45 bg-violet-500/16 text-violet-50',
-      tabIdle: 'border-violet-500/20 bg-black/10 text-violet-200/85 hover:bg-violet-500/10',
-      cardGlow: 'hover:border-violet-400/35',
+      badge: 'accounts-badge-owner-admin',
+      cardGlow: 'accounts-card-glow-admin',
       shortLabel: '其他管理员',
       ownerText: owner,
     }
@@ -721,10 +735,8 @@ function resolveOwnerMeta(acc: any) {
   return {
     section: 'other_user' as OwnershipSection,
     label: `普通用户账号: ${owner}`,
-    badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-    tabActive: 'accounts-tab-active border-amber-400/45 bg-amber-500/16 text-amber-50',
-    tabIdle: 'border-amber-500/20 bg-black/10 text-amber-200/85 hover:bg-amber-500/10',
-    cardGlow: 'hover:border-amber-400/35',
+    badge: 'accounts-badge-owner-user',
+    cardGlow: 'accounts-card-glow-user',
     shortLabel: '普通用户',
     ownerText: owner,
   }
@@ -735,23 +747,23 @@ function resolveRuntimeState(acc: any) {
     return {
       section: 'online' as const,
       label: '运行中',
-      dot: 'bg-emerald-400',
-      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+      dot: 'accounts-runtime-dot-online',
+      badge: 'accounts-badge-runtime-online',
     }
   }
   if (acc?.running) {
     return {
       section: 'starting' as const,
       label: '启动中',
-      dot: 'bg-amber-400',
-      badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+      dot: 'accounts-runtime-dot-starting',
+      badge: 'accounts-badge-runtime-starting',
     }
   }
   return {
     section: 'offline' as const,
     label: '已停止',
-    dot: 'bg-slate-300 dark:bg-slate-500',
-    badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+    dot: 'accounts-runtime-dot-offline',
+    badge: 'accounts-badge-runtime-offline',
   }
 }
 
@@ -768,18 +780,18 @@ function resolveModeMeta(mode?: string) {
   if (mode === 'alt') {
     return {
       label: '小号',
-      badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+      badge: 'accounts-badge-mode-alt',
     }
   }
   if (mode === 'safe') {
     return {
       label: '避险',
-      badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+      badge: 'accounts-badge-mode-safe',
     }
   }
   return {
     label: '主号',
-    badge: 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300',
+    badge: 'accounts-badge-mode-main',
   }
 }
 
@@ -818,25 +830,25 @@ function resolveModeExecutionMeta(acc: any) {
       label: `生效:${resolveModeMeta(effectiveMode).label}`,
       badge: resolveModeMeta(effectiveMode).badge,
       note: degradeLabel || '当前已按更保守模式执行',
-      noteClass: 'text-amber-500 dark:text-amber-300',
+      noteClass: 'accounts-mode-note-warning',
     }
   }
 
   if (acc?.collaborationEnabled) {
     return {
       label: '协同命中',
-      badge: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+      badge: 'accounts-badge-execution-hit',
       note: '同区/游戏好友约束已命中',
-      noteClass: 'text-sky-500 dark:text-sky-300',
+      noteClass: 'accounts-mode-note-info',
     }
   }
 
   if (degradeLabel) {
     return {
       label: '独立执行',
-      badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+      badge: 'accounts-badge-execution-independent',
       note: degradeLabel,
-      noteClass: 'glass-text-muted',
+      noteClass: 'accounts-mode-note-muted',
     }
   }
 
@@ -845,19 +857,45 @@ function resolveModeExecutionMeta(acc: any) {
 
 function getModeButtonClasses(acc: any, mode: 'main' | 'alt' | 'safe') {
   const current = resolveAccountMode(acc)
-  if (mode === 'main') {
-    return current === 'main'
-      ? 'bg-primary-500/10 text-primary-600 dark:text-primary-400'
-      : 'text-gray-500 hover:bg-black/5 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'
-  }
-  if (mode === 'alt') {
-    return current === 'alt'
-      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-      : 'text-gray-500 hover:bg-black/5 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'
-  }
-  return current === 'safe'
-    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-    : 'text-gray-500 hover:bg-black/5 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200'
+  if (current !== mode)
+    return 'accounts-mode-toggle accounts-mode-toggle-idle'
+  return `accounts-mode-toggle accounts-mode-toggle-active accounts-mode-toggle-${mode}`
+}
+
+function getOwnershipTabClasses(section: OwnershipSection, active: boolean) {
+  if (!active)
+    return `accounts-ownership-tab accounts-ownership-tab-idle accounts-ownership-tab-${section}`
+  return `accounts-ownership-tab accounts-tab-active accounts-ownership-tab-active accounts-ownership-tab-${section}`
+}
+
+function getOwnershipTabCountClasses(active: boolean) {
+  return active
+    ? 'accounts-ownership-tab-count accounts-ownership-tab-count-active'
+    : 'accounts-ownership-tab-count'
+}
+
+function getViewModeButtonClasses(active: boolean) {
+  return active
+    ? 'accounts-view-switch accounts-mode-active accounts-view-switch-active'
+    : 'accounts-view-switch accounts-view-switch-idle'
+}
+
+function getSelectionBoxClasses(selected: boolean) {
+  return selected
+    ? 'accounts-selection-box accounts-selection-box-active'
+    : 'accounts-selection-box accounts-selection-box-idle'
+}
+
+function getRuntimeActionButtonClasses(acc: any) {
+  return acc.running
+    ? 'accounts-runtime-button accounts-runtime-button-stop'
+    : 'accounts-runtime-button accounts-runtime-button-start'
+}
+
+function getColumnVisibilityBadgeClass(visible: boolean) {
+  return visible
+    ? 'accounts-column-visibility accounts-column-visibility-on'
+    : 'accounts-column-visibility accounts-column-visibility-off'
 }
 
 function getModeRank(acc: any) {
@@ -914,6 +952,18 @@ function getAccountSubline(acc: any) {
   const zone = resolveZoneLabel(acc)
   const accountRef = acc?.uin || '未绑定'
   return `${zone}: ${accountRef}`
+}
+
+function isCurrentAccount(acc: any) {
+  return String(acc?.id || '') === String(accountStore.currentAccountId || '')
+}
+
+function getAccountStatusDetail(acc: any) {
+  if (acc?.wsError?.message)
+    return `最近错误：${acc.wsError.message}`
+  return isCurrentAccount(acc)
+    ? '当前选中账号，可直接进入设置继续调整。'
+    : '暂无异常记录，可继续执行日常管理。'
 }
 
 function compareText(a: any, b: any) {
@@ -1029,27 +1079,25 @@ const ownershipTabs = computed(() => [
   { section: 'unowned' as OwnershipSection, label: '未归属账号', count: ownershipSummary.value.unowned },
 ])
 
-function getOwnershipTabClasses(section: OwnershipSection, active: boolean) {
-  const styles = {
-    mine: {
-      active: 'accounts-tab-active border-primary-400/50 bg-primary-500/18 text-primary-50',
-      idle: 'border-primary-500/20 bg-black/10 text-primary-200/85 hover:bg-primary-500/10',
+const pageHeaderText = createPageHeaderText({
+  key: 'accounts-page-header',
+  title: '账号管理',
+  description: '在一个页面里完成归属区分、搜索筛选、批量处理和账号状态查看。',
+})
+
+const ownershipTabOptions = computed(() => createToggleOptions(
+  ownershipTabs.value.map(tab => createToggleOption({
+    key: `ownership-${tab.section}`,
+    label: tab.label,
+    count: tab.count,
+    active: ownershipFilter.value === tab.section,
+    class: `inline-flex items-center gap-2 border rounded-full px-4 py-2 text-sm font-semibold backdrop-blur-sm transition-all duration-200 ${getOwnershipTabClasses(tab.section, ownershipFilter.value === tab.section)}`,
+    countClass: getOwnershipTabCountClasses(ownershipFilter.value === tab.section),
+    onClick: () => {
+      toggleOwnershipFilter(tab.section)
     },
-    other_user: {
-      active: 'accounts-tab-active border-amber-400/45 bg-amber-500/16 text-amber-50',
-      idle: 'border-amber-500/20 bg-black/10 text-amber-200/85 hover:bg-amber-500/10',
-    },
-    other_admin: {
-      active: 'accounts-tab-active border-violet-400/45 bg-violet-500/16 text-violet-50',
-      idle: 'border-violet-500/20 bg-black/10 text-violet-200/85 hover:bg-violet-500/10',
-    },
-    unowned: {
-      active: 'accounts-tab-active border-slate-300/70 bg-slate-500/15 text-slate-100',
-      idle: 'border-slate-400/20 bg-black/10 text-slate-300/80 hover:bg-slate-500/10',
-    },
-  }
-  return active ? styles[section].active : styles[section].idle
-}
+  })),
+))
 
 const currentOwnershipLabel = computed(() => {
   const active = ownershipTabs.value.find(item => item.section === ownershipFilter.value)
@@ -1059,6 +1107,27 @@ const currentOwnershipLabel = computed(() => {
 const currentViewLabel = computed(() =>
   viewOptions.find(item => item.value === viewMode.value)?.label || '标准卡片',
 )
+
+const pageHeaderNotice = createHeaderNotice({
+  key: 'accounts-page-banner',
+  text: ACCOUNT_VIEW_PREFERENCES_NOTE,
+  class: 'accounts-info-banner',
+})
+
+const viewOptionItems = computed(() => createToggleOptions(
+  viewOptions.map(option => createToggleOption({
+    key: `view-${option.value}`,
+    label: option.label,
+    shortLabel: option.shortLabel,
+    title: option.label,
+    iconClass: `text-sm ${option.icon}`,
+    active: viewMode.value === option.value,
+    class: `inline-flex items-center gap-2 border rounded-full px-3.5 py-2 text-sm font-semibold transition-all duration-200 ${getViewModeButtonClasses(viewMode.value === option.value)}`,
+    onClick: () => {
+      setViewMode(option.value)
+    },
+  })),
+))
 
 const currentTableSortLabel = computed(() => getTableSortLabel(tableSortKey.value))
 
@@ -1108,6 +1177,17 @@ const filteredAccounts = computed(() => {
 
   return result
 })
+
+const pageHeaderSummary = computed(() => createHeaderSummary({
+  key: 'accounts-page-summary',
+  prefix: '当前显示',
+  value: filteredAccounts.value.length,
+  separator: '/',
+  secondaryValue: accounts.value.length,
+  suffix: '个账号',
+  class: 'accounts-page-count',
+  valueClass: 'accounts-page-count-value',
+}))
 
 const tableAccounts = computed(() => {
   const result = [...filteredAccounts.value]
@@ -1185,6 +1265,410 @@ const hasActiveFilters = computed(() =>
   || stateFilter.value !== 'all'
   || sortMode.value !== 'smart',
 )
+
+const pageHeaderActions = computed(() => createActionButtons([
+  createActionButton({
+    key: 'refresh-accounts',
+    label: '刷新账号',
+    iconClass: loading.value ? '' : 'i-carbon-renew mr-1 text-sm',
+    variant: 'ghost',
+    size: 'sm',
+    class: 'accounts-ghost-pill',
+    loading: loading.value,
+    onClick: () => {
+      initializePage()
+    },
+  }),
+  createActionButton({
+    key: 'add-account',
+    label: '添加账号',
+    iconClass: 'i-carbon-add mr-1 text-sm',
+    variant: 'primary',
+    size: 'sm',
+    class: 'accounts-brand-pill',
+    onClick: () => {
+      openAddModal()
+    },
+  }),
+]))
+
+const filterToolbarActions = computed(() => createActionButtons([
+  createActionButton({
+    key: 'copy-filter-link',
+    label: '复制当前筛选链接',
+    active: copiedControlKey.value === 'filter-link',
+    activeLabel: '链接已复制',
+    iconClass: 'i-carbon-link mr-1 text-sm',
+    activeIconClass: 'i-carbon-checkmark-filled mr-1 text-sm',
+    variant: 'ghost',
+    size: 'sm',
+    class: `${copiedControlKey.value === 'filter-link' ? 'accounts-copy-button-active ' : ''}accounts-ghost-pill !px-3`.trim(),
+    onClick: () => {
+      copyCurrentFilterLink()
+    },
+  }),
+  createActionButton({
+    key: 'clear-filters',
+    label: '清空筛选',
+    iconClass: 'i-carbon-clean mr-1',
+    variant: 'ghost',
+    size: 'sm',
+    class: '!px-3',
+    show: hasActiveFilters.value,
+    onClick: () => {
+      clearFilters()
+    },
+  }),
+]))
+
+const filterToolbarChips = computed(() => createChips([
+  createChip({
+    key: 'ownership',
+    text: `归属：${currentOwnershipLabel.value}`,
+  }),
+  createChip({
+    key: 'platform',
+    text: `平台：${platformOptions.find(item => item.value === platformFilter.value)?.label || '全部平台'}`,
+  }),
+  createChip({
+    key: 'state',
+    text: `状态：${stateOptions.find(item => item.value === stateFilter.value)?.label || '全部状态'}`,
+  }),
+  createChip({
+    key: 'view',
+    text: `视图：${currentViewLabel.value}`,
+  }),
+]))
+
+const selectionPrimaryActions = computed(() => createActionButtons([
+  createActionButton({
+    key: 'select-all',
+    label: '全选',
+    iconClass: 'i-carbon-checkmark-outline mr-1.5 text-sm',
+    size: 'sm',
+    class: 'accounts-batch-button accounts-batch-button-brand !px-4 !py-1.5',
+    disabled: filteredAccounts.value.length === 0,
+    onClick: () => {
+      selectAll()
+    },
+  }),
+  createActionButton({
+    key: 'invert-selection',
+    label: '反选',
+    size: 'sm',
+    class: 'accounts-batch-button accounts-batch-button-neutral !px-4 !py-1.5',
+    disabled: filteredAccounts.value.length === 0,
+    onClick: () => {
+      invertSelection()
+    },
+  }),
+  createActionButton({
+    key: 'clear-selection',
+    label: '清空',
+    iconClass: 'i-carbon-close-outline mr-1.5 text-sm',
+    size: 'sm',
+    class: 'accounts-batch-button accounts-batch-button-danger !px-4 !py-1.5',
+    disabled: selectedAccountIds.value.length === 0,
+    onClick: () => {
+      clearSelection()
+    },
+  }),
+]))
+
+const selectionSecondaryActions = computed(() => createActionButtons([
+  createActionButton({
+    key: 'transfer-ownership',
+    label: '转移归属',
+    iconClass: transferLoading.value ? '' : 'i-carbon-user-admin mr-1 text-sm',
+    variant: 'secondary',
+    size: 'sm',
+    loading: transferLoading.value,
+    show: isAdmin.value,
+    disabled: !canBatchTransferOwnership.value || transferLoading.value,
+    class: `accounts-batch-button accounts-batch-button-admin text-xs transition-opacity ${!canBatchTransferOwnership.value ? 'opacity-50' : 'opacity-100'}`,
+    title: transferTargetLabel.value ? `转移到 ${transferTargetLabel.value}` : '请先选择目标归属账号',
+    onClick: () => {
+      batchTransferOwnership()
+    },
+  }),
+  createActionButton({
+    key: 'set-main',
+    label: '批量设为主号',
+    iconClass: batchActionType.value === 'mode:main' ? '' : 'i-carbon-star-filled mr-1 text-sm',
+    variant: 'secondary',
+    size: 'sm',
+    loading: batchActionType.value === 'mode:main',
+    disabled: selectedAccountIds.value.length === 0 || batchLoading.value,
+    class: `accounts-batch-button accounts-batch-button-main text-xs transition-opacity ${selectedAccountIds.value.length === 0 ? 'opacity-50' : 'opacity-100'}`,
+    onClick: () => {
+      bulkSetMode('main')
+    },
+  }),
+  createActionButton({
+    key: 'batch-start',
+    label: '批量启动',
+    iconClass: batchActionType.value === 'start' ? '' : 'i-carbon-play-filled mr-1 text-sm',
+    variant: 'secondary',
+    size: 'sm',
+    loading: batchActionType.value === 'start',
+    disabled: startableSelectedAccounts.value.length === 0 || batchLoading.value,
+    class: `accounts-batch-button accounts-batch-button-start text-xs transition-opacity ${startableSelectedAccounts.value.length === 0 ? 'opacity-50' : 'opacity-100'}`,
+    onClick: () => {
+      batchToggleAccounts('start')
+    },
+  }),
+  createActionButton({
+    key: 'batch-stop',
+    label: '批量停止',
+    iconClass: batchActionType.value === 'stop' ? '' : 'i-carbon-stop-filled mr-1 text-sm',
+    variant: 'secondary',
+    size: 'sm',
+    loading: batchActionType.value === 'stop',
+    disabled: stoppableSelectedAccounts.value.length === 0 || batchLoading.value,
+    class: `accounts-batch-button accounts-batch-button-stop text-xs transition-opacity ${stoppableSelectedAccounts.value.length === 0 ? 'opacity-50' : 'opacity-100'}`,
+    onClick: () => {
+      batchToggleAccounts('stop')
+    },
+  }),
+  createActionButton({
+    key: 'batch-restart',
+    label: '批量重启',
+    iconClass: batchActionType.value === 'restart' ? '' : 'i-carbon-renew mr-1 text-sm',
+    variant: 'secondary',
+    size: 'sm',
+    loading: batchActionType.value === 'restart',
+    disabled: restartableSelectedAccounts.value.length === 0 || batchLoading.value,
+    class: `accounts-batch-button accounts-batch-button-restart text-xs transition-opacity ${restartableSelectedAccounts.value.length === 0 ? 'opacity-50' : 'opacity-100'}`,
+    onClick: () => {
+      batchRestartAccounts()
+    },
+  }),
+  createActionButton({
+    key: 'set-alt',
+    label: '批量设为小号',
+    iconClass: batchActionType.value === 'mode:alt' ? '' : 'i-carbon-copy mr-1 text-sm',
+    variant: 'secondary',
+    size: 'sm',
+    loading: batchActionType.value === 'mode:alt',
+    disabled: selectedAccountIds.value.length === 0 || batchLoading.value,
+    class: `accounts-batch-button accounts-batch-button-alt text-xs transition-opacity ${selectedAccountIds.value.length === 0 ? 'opacity-50' : 'opacity-100'}`,
+    onClick: () => {
+      bulkSetMode('alt')
+    },
+  }),
+  createActionButton({
+    key: 'set-safe',
+    label: '批量设为风险规避',
+    iconClass: batchActionType.value === 'mode:safe' ? '' : 'i-carbon-security mr-1 text-sm',
+    variant: 'secondary',
+    size: 'sm',
+    loading: batchActionType.value === 'mode:safe',
+    disabled: selectedAccountIds.value.length === 0 || batchLoading.value,
+    class: `accounts-batch-button accounts-batch-button-safe text-xs transition-opacity ${selectedAccountIds.value.length === 0 ? 'opacity-50' : 'opacity-100'}`,
+    onClick: () => {
+      bulkSetMode('safe')
+    },
+  }),
+  createActionButton({
+    key: 'export-all',
+    label: '导出当前结果',
+    iconClass: exportLoading.value && exportScope.value === 'all' ? '' : 'i-carbon-document-export mr-1 text-sm',
+    variant: 'ghost',
+    size: 'sm',
+    class: 'accounts-ghost-pill',
+    disabled: displayAccounts.value.length === 0,
+    loading: exportLoading.value && exportScope.value === 'all',
+    onClick: () => {
+      exportAccounts('all')
+    },
+  }),
+  createActionButton({
+    key: 'export-selected',
+    label: '导出已选',
+    iconClass: exportLoading.value && exportScope.value === 'selected' ? '' : 'i-carbon-export mr-1 text-sm',
+    variant: 'ghost',
+    size: 'sm',
+    class: 'accounts-ghost-pill',
+    disabled: selectedAccounts.value.length === 0 || exportLoading.value,
+    loading: exportLoading.value && exportScope.value === 'selected',
+    onClick: () => {
+      exportAccounts('selected')
+    },
+  }),
+  createActionButton({
+    key: 'batch-delete',
+    label: '批量删除',
+    iconClass: 'i-carbon-trash-can mr-1 text-sm',
+    variant: 'ghost',
+    size: 'sm',
+    class: 'accounts-danger-pill',
+    disabled: !canBatchDelete.value || batchDeleteLoading.value,
+    onClick: () => {
+      openBatchDeleteConfirm()
+    },
+  }),
+]))
+
+const historyHeaderActions = computed(() => createActionButtons([
+  createActionButton({
+    key: 'copy-latest-summary',
+    label: '复制最近摘要',
+    active: copiedControlKey.value === 'latest-summary',
+    activeLabel: '最近摘要已复制',
+    iconClass: 'i-carbon-copy-file mr-1 text-sm',
+    activeIconClass: 'i-carbon-checkmark-filled mr-1 text-sm',
+    variant: 'ghost',
+    size: 'sm',
+    class: `${copiedControlKey.value === 'latest-summary' ? 'accounts-copy-button-active ' : ''}accounts-ghost-pill`.trim(),
+    disabled: !latestActionHistory.value,
+    onClick: () => {
+      copyLatestActionSummary()
+    },
+  }),
+  createActionButton({
+    key: 'clear-history',
+    label: '清空记录',
+    iconClass: 'i-carbon-clean mr-1 text-sm',
+    variant: 'ghost',
+    size: 'sm',
+    class: 'accounts-danger-pill',
+    disabled: actionHistoryCount.value === 0,
+    onClick: () => {
+      clearActionHistory()
+    },
+  }),
+]))
+
+const historySummaryChips = computed(() => createChips([
+  createChip({
+    key: 'history-count',
+    text: `最近保留 ${actionHistoryCount.value} 条`,
+  }),
+]))
+
+const latestHistoryMetaChips = computed(() => {
+  if (!latestActionHistory.value)
+    return createChips([])
+
+  return createChips([
+    createChip({
+      key: 'history-relative-time',
+      text: formatActionTime(latestActionHistory.value.timestamp),
+    }),
+    createChip({
+      key: 'history-absolute-time',
+      text: formatDateTime(latestActionHistory.value.timestamp),
+    }),
+  ])
+})
+
+const historyPanel = computed(() => {
+  const latest = latestActionHistory.value
+  const latestStatus = latest ? getActionHistoryStatusMeta(latest.status) : null
+
+  return createHistoryPanel({
+    key: 'accounts-history-panel',
+    title: '最近操作结果',
+    description: '最近操作会跟随当前登录用户同步到服务器，可直接回看目标、结果和最近几次执行记录。',
+    emptyText: '最近操作历史会记录在这里。执行批量启动、重启、导出、转移归属或批量删除后，可以直接回看结果摘要。',
+    titleChips: historySummaryChips.value,
+    titleMeta: latestStatus
+      ? createHistoryMetaItems([
+          createHistoryMetaItem({
+            key: 'latest-history-status',
+            text: latestStatus.label,
+            iconClass: latestStatus.icon,
+            class: `ui-badge ${latestStatus.badge} gap-1.5 font-semibold`,
+          }),
+        ])
+      : createHistoryMetaItems([]),
+  })
+})
+
+const latestHistoryHighlight = computed(() => {
+  const latest = latestActionHistory.value
+  if (!latest)
+    return null
+
+  return createHistoryHighlight({
+    key: `accounts-history-highlight-${latest.id}`,
+    title: latest.actionLabel,
+    description: buildActionResultMessage(latest.actionLabel, latest.successCount, latest.failedNames, latest.skippedCount),
+    note: ACTION_HISTORY_SYNC_NOTE,
+    metaChips: latestHistoryMetaChips.value,
+  })
+})
+
+const latestHistoryMetrics = computed(() => {
+  const latest = latestActionHistory.value
+  if (!latest)
+    return []
+
+  return createHistoryMetrics([
+    createHistoryMetric({
+      key: 'total',
+      label: '涉及账号',
+      value: latest.totalCount,
+      description: latest.affectedNames.join('、') || '暂无名称预览',
+      class: 'accounts-history-stat',
+      labelClass: 'accounts-meta-label',
+      valueClass: 'mt-3 text-2xl font-semibold',
+      descriptionClass: 'glass-text-muted mt-2 text-xs',
+    }),
+    createHistoryMetric({
+      key: 'result',
+      label: '执行结果',
+      metrics: [
+        { text: `成功 ${latest.successCount}`, class: getActionHistoryMetricClass('success') },
+        { text: `失败 ${latest.failedCount}`, class: getActionHistoryMetricClass('error') },
+        { text: `跳过 ${latest.skippedCount}`, class: getActionHistoryMetricClass('skipped') },
+      ],
+      description: latest.failedNames.length > 0 ? `失败账号：${latest.failedNames.join('、')}` : '最近一次执行没有失败账号。',
+      class: 'accounts-history-stat',
+      labelClass: 'accounts-meta-label',
+      metricsClass: 'mt-3 flex flex-wrap gap-2 text-xs',
+      descriptionClass: 'glass-text-muted mt-2 text-xs leading-5',
+    }),
+    createHistoryMetric({
+      key: 'target',
+      label: '附加信息',
+      value: latest.targetLabel || '无附加说明',
+      description: '可用于回看最近一次批量处理的目标、范围和结果摘要。',
+      class: 'accounts-history-stat',
+      labelClass: 'accounts-meta-label',
+      valueClass: 'mt-3 text-sm font-semibold leading-6',
+      descriptionClass: 'glass-text-muted mt-2 text-xs leading-5',
+    }),
+  ])
+})
+
+const recentHistoryCards = computed(() => createHistoryRecentItems(
+  recentActionHistory.value.map(item => createHistoryRecentItem({
+    key: item.id,
+    title: item.actionLabel,
+    subtitle: formatActionTime(item.timestamp),
+    description: buildActionResultMessage(item.actionLabel, item.successCount, item.failedNames, item.skippedCount),
+    metrics: [
+      { text: `总计 ${item.totalCount}`, class: getActionHistoryMetricClass('total') },
+      { text: `成功 ${item.successCount}`, class: getActionHistoryMetricClass('success') },
+      { text: `失败 ${item.failedCount}`, class: getActionHistoryMetricClass('error') },
+    ],
+    copied: copiedHistoryId.value === item.id,
+    iconClass: getActionHistoryStatusMeta(item.status).icon,
+    copiedIconClass: 'i-carbon-checkmark-filled accounts-history-card-copy-icon scale-110',
+    class: `accounts-history-card-button min-h-[166px] flex flex-col border rounded-2xl px-4 py-3 text-left transition-all hover:shadow-lg hover:-translate-y-0.5 ${getActionHistoryStatusMeta(item.status).accent}`,
+    titleClass: 'line-clamp-1 text-sm font-semibold',
+    subtitleClass: 'mt-1 text-xs opacity-80',
+    descriptionClass: 'line-clamp-3 mt-3 text-xs leading-5 opacity-90',
+    metricsClass: 'mt-3 flex flex-wrap gap-2 text-[11px]',
+    footerText: getHistoryCopyLabel(item),
+    footerClass: 'mt-auto pt-3 text-[11px] opacity-75',
+    footerActiveClass: 'accounts-history-card-copy-text',
+    onClick: () => {
+      copyHistorySummaryItem(item)
+    },
+  })),
+))
 
 function clearFilters() {
   searchKeyword.value = ''
@@ -1382,8 +1866,7 @@ async function batchRestartAccounts() {
       if (!id)
         continue
       try {
-        await api.post(`/api/accounts/${id}/stop`)
-        await api.post(`/api/accounts/${id}/start`)
+        await api.post(`/api/accounts/${id}/restart`)
         successCount += 1
       }
       catch (error) {
@@ -1554,6 +2037,15 @@ async function confirmBatchDelete() {
   const failedNames: string[] = []
   try {
     batchDeleteLoading.value = true
+    const deletingCurrentAccount = targetAccounts.some(acc => String(acc?.id || '') === String(accountStore.currentAccountId || ''))
+    if (deletingCurrentAccount) {
+      try {
+        await accountStore.selectAccount('')
+      }
+      catch (error) {
+        console.warn('批量删除前清空当前选中账号失败:', error)
+      }
+    }
     for (const acc of targetAccounts) {
       const id = String(acc.id || '').trim()
       if (!id)
@@ -1688,67 +2180,42 @@ useIntervalFn(() => {
 <template>
   <div class="accounts-page ui-page-shell ui-page-stack ui-page-density-compact w-full">
     <div class="ui-page-header">
-      <BaseAccountViewSwitcherLayout class="w-full">
+      <BaseAccountViewSwitcherLayout class="w-full" :actions="pageHeaderActions">
         <template #main>
           <div class="ui-page-header__main min-w-0 space-y-3">
-            <div>
-              <h1 class="ui-page-title">
-                账号管理
-              </h1>
-              <p class="ui-page-desc">
-                在一个页面里完成归属区分、搜索筛选、批量处理和账号状态查看。
-              </p>
-            </div>
+            <BasePageHeaderText
+              :title="pageHeaderText.title"
+              :description="pageHeaderText.description"
+            />
 
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="tab in ownershipTabs"
-                :key="tab.section"
-                class="inline-flex items-center gap-2 border rounded-full px-4 py-2 text-sm font-semibold backdrop-blur-sm transition-all duration-200"
-                :class="getOwnershipTabClasses(tab.section, ownershipFilter === tab.section)"
-                @click="toggleOwnershipFilter(tab.section)"
-              >
-                <span>{{ tab.label }}</span>
-                <span class="rounded-full bg-white/18 px-2 py-0.5 text-xs text-white">
-                  {{ tab.count }}
-                </span>
-              </button>
-            </div>
+            <BaseToggleOptionGroup :items="ownershipTabOptions" />
           </div>
         </template>
 
         <template #switchers>
-          <button
-            v-for="option in viewOptions"
-            :key="option.value"
-            class="inline-flex items-center gap-2 border rounded-full px-3.5 py-2 text-sm font-semibold transition-all duration-200"
-            :class="viewMode === option.value ? 'accounts-mode-active border-white/20 bg-white/18 text-white' : 'border-white/8 bg-black/10 text-gray-200 hover:bg-white/8'"
-            @click="setViewMode(option.value)"
-          >
-            <div class="text-sm" :class="[option.icon]" />
-            {{ option.shortLabel }}
-          </button>
+          <BaseToggleOptionGroup :items="viewOptionItems" />
         </template>
 
-        <template #note>
-          <div class="border border-sky-200/70 rounded-2xl bg-sky-50/70 px-3 py-2 text-xs text-sky-700 leading-5 dark:border-sky-800/40 dark:bg-sky-900/15 dark:text-sky-200">
-            {{ ACCOUNT_VIEW_PREFERENCES_NOTE }}
-          </div>
+        <template #meta>
+          <BaseHeaderNotice
+            v-if="pageHeaderNotice.show !== false"
+            :text="pageHeaderNotice.text"
+            :class="pageHeaderNotice.class"
+          />
         </template>
 
-        <template #actions>
-          <div class="ui-page-actions">
-            <div class="text-sm text-gray-200">
-              当前显示 <span class="text-white font-semibold">{{ filteredAccounts.length }}</span> / {{ accounts.length }} 个账号
-            </div>
-            <BaseButton
-              variant="primary"
-              @click="openAddModal"
-            >
-              <div class="i-carbon-add mr-2" />
-              添加账号
-            </BaseButton>
-          </div>
+        <template #actions-meta>
+          <BaseHeaderSummary
+            v-if="pageHeaderSummary.show !== false"
+            :prefix="pageHeaderSummary.prefix"
+            :value="pageHeaderSummary.value"
+            :separator="pageHeaderSummary.separator"
+            :secondary-value="pageHeaderSummary.secondaryValue"
+            :suffix="pageHeaderSummary.suffix"
+            :value-class="pageHeaderSummary.valueClass"
+            :secondary-value-class="pageHeaderSummary.secondaryValueClass"
+            :class="pageHeaderSummary.class"
+          />
         </template>
       </BaseAccountViewSwitcherLayout>
     </div>
@@ -1780,34 +2247,11 @@ useIntervalFn(() => {
 
       <BaseTableToolbar>
         <template #left>
-          <BaseFilterChips class="text-xs">
-            <BaseFilterChip>归属：{{ currentOwnershipLabel }}</BaseFilterChip>
-            <BaseFilterChip>平台：{{ platformOptions.find(item => item.value === platformFilter)?.label || '全部平台' }}</BaseFilterChip>
-            <BaseFilterChip>状态：{{ stateOptions.find(item => item.value === stateFilter)?.label || '全部状态' }}</BaseFilterChip>
-            <BaseFilterChip>视图：{{ currentViewLabel }}</BaseFilterChip>
-          </BaseFilterChips>
+          <BaseChipList class="text-xs" :items="filterToolbarChips" />
         </template>
         <template #right>
           <BaseBulkActions class="self-start lg:self-auto">
-            <BaseButton
-              variant="ghost"
-              size="sm"
-              class="border border-white/10 rounded-full bg-black/10 text-xs text-gray-200 hover:bg-white/8 !px-3"
-              @click="copyCurrentFilterLink"
-            >
-              <div class="i-carbon-link mr-1 text-sm" />
-              复制当前筛选链接
-            </BaseButton>
-            <BaseButton
-              v-if="hasActiveFilters"
-              variant="ghost"
-              size="sm"
-              class="!px-3"
-              @click="clearFilters"
-            >
-              <div class="i-carbon-clean mr-1" />
-              清空筛选
-            </BaseButton>
+            <BaseActionButtons :actions="filterToolbarActions" />
           </BaseBulkActions>
         </template>
       </BaseTableToolbar>
@@ -1816,31 +2260,7 @@ useIntervalFn(() => {
     <BaseManagementBar v-if="accounts.length > 0" class="glass-panel mb-4">
       <template #primary>
         <BaseBulkActions>
-          <BaseButton
-            size="sm"
-            class="border-0 from-blue-500 to-blue-600 bg-gradient-to-r text-xs text-white font-bold shadow-blue-500/25 shadow-md transition-all hover:from-blue-600 hover:to-blue-700 !px-4 !py-1.5 dark:shadow-blue-500/40 hover:shadow-blue-500/40 hover:shadow-lg"
-            :disabled="filteredAccounts.length === 0"
-            @click="selectAll"
-          >
-            <div class="i-carbon-checkmark-outline mr-1.5 text-sm" /> 全选
-          </BaseButton>
-          <BaseButton
-            size="sm"
-            class="border border-gray-300/50 bg-black/5 text-xs font-bold transition-all dark:bg-white/5 hover:bg-black/10 !px-4 !py-1.5 dark:hover:bg-white/10"
-            :disabled="filteredAccounts.length === 0"
-            @click="invertSelection"
-          >
-            反选
-          </BaseButton>
-          <BaseButton
-            size="sm"
-            class="border-0 from-red-500 to-red-600 bg-gradient-to-r text-xs text-white font-bold shadow-md shadow-red-500/25 transition-all hover:from-red-600 hover:to-red-700 !px-4 !py-1.5 dark:shadow-red-500/40 hover:shadow-lg hover:shadow-red-500/40"
-            :disabled="selectedAccountIds.length === 0"
-            @click="clearSelection"
-          >
-            <div class="i-carbon-close-outline mr-1.5 text-sm" /> 清空
-          </BaseButton>
-
+          <BaseActionButtons :actions="selectionPrimaryActions" />
           <BaseSelectionSummary
             :selected-count="selectedAccountIds.length"
             :filtered-count="filteredAccounts.length"
@@ -1859,266 +2279,38 @@ useIntervalFn(() => {
               placeholder="选择目标归属账号"
             />
           </div>
-          <BaseButton
-            v-if="isAdmin"
-            variant="secondary"
-            size="sm"
-            :disabled="!canBatchTransferOwnership || transferLoading"
-            class="text-xs transition-opacity !border-violet-500/20 !bg-violet-500/10 !text-violet-200 hover:!bg-violet-500/20"
-            :class="!canBatchTransferOwnership ? 'opacity-50' : 'opacity-100'"
-            :title="transferTargetLabel ? `转移到 ${transferTargetLabel}` : '请先选择目标归属账号'"
-            @click="batchTransferOwnership"
-          >
-            <div v-if="transferLoading" class="i-svg-spinners-ring-resize mr-1 text-sm" />
-            <div v-else class="i-carbon-user-admin mr-1 text-sm" />
-            转移归属
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="selectedAccountIds.length === 0 || batchLoading"
-            class="text-xs transition-opacity !border-primary-500/20 !bg-primary-500/10 !text-primary-100 hover:!bg-primary-500/20"
-            :class="selectedAccountIds.length === 0 ? 'opacity-50' : 'opacity-100'"
-            @click="bulkSetMode('main')"
-          >
-            <div v-if="batchActionType === 'mode:main'" class="i-svg-spinners-ring-resize mr-1 text-sm" />
-            <div v-else class="i-carbon-star-filled mr-1 text-sm" />
-            批量设为主号
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="startableSelectedAccounts.length === 0 || batchLoading"
-            class="text-xs transition-opacity !border-blue-500/20 !bg-blue-500/10 !text-blue-200 hover:!bg-blue-500/20"
-            :class="startableSelectedAccounts.length === 0 ? 'opacity-50' : 'opacity-100'"
-            @click="batchToggleAccounts('start')"
-          >
-            <div v-if="batchActionType === 'start'" class="i-svg-spinners-ring-resize mr-1 text-sm" />
-            <div v-else class="i-carbon-play-filled mr-1 text-sm" />
-            批量启动
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="stoppableSelectedAccounts.length === 0 || batchLoading"
-            class="text-xs transition-opacity !border-orange-500/20 !bg-orange-500/10 !text-orange-200 hover:!bg-orange-500/20"
-            :class="stoppableSelectedAccounts.length === 0 ? 'opacity-50' : 'opacity-100'"
-            @click="batchToggleAccounts('stop')"
-          >
-            <div v-if="batchActionType === 'stop'" class="i-svg-spinners-ring-resize mr-1 text-sm" />
-            <div v-else class="i-carbon-stop-filled mr-1 text-sm" />
-            批量停止
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="restartableSelectedAccounts.length === 0 || batchLoading"
-            class="text-xs transition-opacity !border-cyan-500/20 !bg-cyan-500/10 !text-cyan-200 hover:!bg-cyan-500/20"
-            :class="restartableSelectedAccounts.length === 0 ? 'opacity-50' : 'opacity-100'"
-            @click="batchRestartAccounts"
-          >
-            <div v-if="batchActionType === 'restart'" class="i-svg-spinners-ring-resize mr-1 text-sm" />
-            <div v-else class="i-carbon-renew mr-1 text-sm" />
-            批量重启
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="selectedAccountIds.length === 0 || batchLoading"
-            class="text-xs transition-opacity"
-            :class="selectedAccountIds.length === 0 ? 'opacity-50' : 'opacity-100'"
-            @click="bulkSetMode('alt')"
-          >
-            <div v-if="batchActionType === 'mode:alt'" class="i-svg-spinners-ring-resize mr-1 text-sm" />
-            <div v-else class="i-carbon-copy mr-1 text-sm" />
-            批量设为小号
-          </BaseButton>
-          <BaseButton
-            variant="secondary"
-            size="sm"
-            :disabled="selectedAccountIds.length === 0 || batchLoading"
-            class="text-xs transition-opacity !border-emerald-500/20 !bg-emerald-500/10 !text-emerald-600 hover:!bg-emerald-500/20 dark:!text-emerald-400"
-            :class="selectedAccountIds.length === 0 ? 'opacity-50' : 'opacity-100'"
-            @click="bulkSetMode('safe')"
-          >
-            <div v-if="batchActionType === 'mode:safe'" class="i-svg-spinners-ring-resize mr-1 text-sm" />
-            <div v-else class="i-carbon-security mr-1 text-sm" />
-            批量设为风险规避
-          </BaseButton>
-          <BaseButton
-            variant="ghost"
-            size="sm"
-            class="border border-white/10 rounded-full bg-black/10 text-xs text-gray-200 hover:bg-white/8"
-            :disabled="displayAccounts.length === 0"
-            :loading="exportLoading && exportScope === 'all'"
-            @click="exportAccounts('all')"
-          >
-            <div v-if="!(exportLoading && exportScope === 'all')" class="i-carbon-document-export mr-1 text-sm" />
-            导出当前结果
-          </BaseButton>
-          <BaseButton
-            variant="ghost"
-            size="sm"
-            class="border border-white/10 rounded-full bg-black/10 text-xs text-gray-200 hover:bg-white/8"
-            :disabled="selectedAccounts.length === 0 || exportLoading"
-            :loading="exportLoading && exportScope === 'selected'"
-            @click="exportAccounts('selected')"
-          >
-            <div v-if="!(exportLoading && exportScope === 'selected')" class="i-carbon-export mr-1 text-sm" />
-            导出已选
-          </BaseButton>
-          <BaseButton
-            variant="ghost"
-            size="sm"
-            class="border border-red-500/20 rounded-full bg-red-500/8 text-xs text-red-300 hover:bg-red-500/14"
-            :disabled="!canBatchDelete || batchDeleteLoading"
-            @click="openBatchDeleteConfirm"
-          >
-            <div class="i-carbon-trash-can mr-1 text-sm" />
-            批量删除
-          </BaseButton>
+          <BaseActionButtons :actions="selectionSecondaryActions" />
         </BaseBulkActions>
       </template>
     </BaseManagementBar>
 
-    <BaseHistorySummaryPanel v-if="accounts.length > 0" class="mb-4 rounded-[24px]">
-      <template #title>
-        <div class="flex flex-wrap items-center gap-2">
-          <h3 class="ui-history-panel__title text-base font-semibold">
-            最近操作结果
-          </h3>
-          <BaseFilterChip>最近保留 {{ actionHistoryCount }} 条</BaseFilterChip>
-          <BaseFilterChip
-            v-if="latestActionHistory"
-            class="gap-1.5 font-semibold"
-            :class="getActionHistoryStatusMeta(latestActionHistory.status).badge"
-          >
-            <div :class="getActionHistoryStatusMeta(latestActionHistory.status).icon" />
-            {{ getActionHistoryStatusMeta(latestActionHistory.status).label }}
-          </BaseFilterChip>
-        </div>
-      </template>
-
-      <template #actions>
-        <BaseButton
-          variant="ghost"
-          size="sm"
-          class="border border-white/10 rounded-full bg-black/10 text-xs text-gray-200 hover:bg-white/8"
-          :disabled="!latestActionHistory"
-          @click="copyLatestActionSummary"
-        >
-          <div class="i-carbon-copy-file mr-1 text-sm" />
-          复制最近摘要
-        </BaseButton>
-        <BaseButton
-          variant="ghost"
-          size="sm"
-          class="border border-red-500/20 rounded-full bg-red-500/8 text-xs text-red-300 hover:bg-red-500/14"
-          :disabled="actionHistoryCount === 0"
-          @click="clearActionHistory"
-        >
-          <div class="i-carbon-clean mr-1 text-sm" />
-          清空记录
-        </BaseButton>
-      </template>
-
-      <div v-if="latestActionHistory" class="space-y-3">
-        <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div class="min-w-0">
-            <div class="line-clamp-1 text-lg font-semibold">
-              {{ latestActionHistory.actionLabel }}
-            </div>
-            <p class="glass-text-muted mt-1 text-sm">
-              {{ buildActionResultMessage(latestActionHistory.actionLabel, latestActionHistory.successCount, latestActionHistory.failedNames, latestActionHistory.skippedCount) }}
-            </p>
-            <p class="mt-2 text-xs text-sky-300/90 leading-5">
-              {{ ACTION_HISTORY_SYNC_NOTE }}
-            </p>
-          </div>
-          <BaseFilterChips class="text-xs text-gray-200">
-            <BaseFilterChip>{{ formatActionTime(latestActionHistory.timestamp) }}</BaseFilterChip>
-            <BaseFilterChip>{{ formatDateTime(latestActionHistory.timestamp) }}</BaseFilterChip>
-          </BaseFilterChips>
-        </div>
-
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div class="border border-white/8 rounded-2xl bg-black/10 p-3.5">
-            <div class="text-[11px] text-gray-400 tracking-[0.18em] uppercase">
-              涉及账号
-            </div>
-            <div class="mt-3 text-2xl font-semibold">
-              {{ latestActionHistory.totalCount }}
-            </div>
-            <div class="glass-text-muted mt-2 text-xs">
-              {{ latestActionHistory.affectedNames.join('、') || '暂无名称预览' }}
-            </div>
-          </div>
-          <div class="border border-white/8 rounded-2xl bg-black/10 p-3.5">
-            <div class="text-[11px] text-gray-400 tracking-[0.18em] uppercase">
-              执行结果
-            </div>
-            <div class="mt-3 flex flex-wrap gap-2 text-xs">
-              <span class="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-300">成功 {{ latestActionHistory.successCount }}</span>
-              <span class="rounded-full bg-red-500/10 px-2.5 py-1 text-red-300">失败 {{ latestActionHistory.failedCount }}</span>
-              <span class="rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-300">跳过 {{ latestActionHistory.skippedCount }}</span>
-            </div>
-            <div class="glass-text-muted mt-2 text-xs leading-5">
-              {{ latestActionHistory.failedNames.length > 0 ? `失败账号：${latestActionHistory.failedNames.join('、')}` : '最近一次执行没有失败账号。' }}
-            </div>
-          </div>
-          <div class="border border-white/8 rounded-2xl bg-black/10 p-3.5">
-            <div class="text-[11px] text-gray-400 tracking-[0.18em] uppercase">
-              附加信息
-            </div>
-            <div class="mt-3 text-sm font-semibold leading-6">
-              {{ latestActionHistory.targetLabel || '无附加说明' }}
-            </div>
-            <div class="glass-text-muted mt-2 text-xs leading-5">
-              可用于回看最近一次批量处理的目标、范围和结果摘要。
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-else class="border border-white/10 rounded-2xl border-dashed bg-black/8 px-4 py-5 text-sm text-gray-200">
-        最近操作历史会记录在这里。执行批量启动、重启、导出、转移归属或批量删除后，可以直接回看结果摘要。
-      </div>
-
-      <template #recent>
-        <div v-if="recentActionHistory.length > 0" class="grid grid-cols-1 gap-3 2xl:grid-cols-4 lg:grid-cols-2">
-          <button
-            v-for="item in recentActionHistory"
-            :key="item.id"
-            class="min-h-[166px] flex flex-col border rounded-2xl px-4 py-3 text-left transition-all hover:shadow-lg hover:-translate-y-0.5"
-            :class="getActionHistoryStatusMeta(item.status).accent"
-            @click="copyText(buildHistorySummaryText(item), '操作摘要已复制')"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="line-clamp-1 text-sm font-semibold">
-                  {{ item.actionLabel }}
-                </div>
-                <div class="mt-1 text-xs opacity-80">
-                  {{ formatActionTime(item.timestamp) }}
-                </div>
-              </div>
-              <div class="text-base" :class="getActionHistoryStatusMeta(item.status).icon" />
-            </div>
-            <p class="line-clamp-3 mt-3 text-xs leading-5 opacity-90">
-              {{ buildActionResultMessage(item.actionLabel, item.successCount, item.failedNames, item.skippedCount) }}
-            </p>
-            <div class="mt-3 flex flex-wrap gap-2 text-[11px]">
-              <span class="rounded-full bg-black/15 px-2.5 py-1">总计 {{ item.totalCount }}</span>
-              <span class="rounded-full bg-black/15 px-2.5 py-1">成功 {{ item.successCount }}</span>
-              <span class="rounded-full bg-black/15 px-2.5 py-1">失败 {{ item.failedCount }}</span>
-            </div>
-            <div class="mt-auto pt-3 text-[11px] opacity-75">
-              {{ item.targetLabel || '点击复制本次摘要' }}
-            </div>
-          </button>
-        </div>
-      </template>
-    </BaseHistorySummaryPanel>
+    <BaseHistorySectionLayout
+      v-if="accounts.length > 0"
+      class="mb-4 rounded-[24px]"
+      :title="historyPanel.title"
+      :description="historyPanel.description"
+      :actions="historyHeaderActions"
+      :title-chips="historyPanel.titleChips"
+      :title-meta="historyPanel.titleMeta"
+      :highlight="latestHistoryHighlight"
+      :metrics="latestHistoryMetrics"
+      :recent-items="recentHistoryCards"
+      :empty-text="historyPanel.emptyText"
+      :highlight-meta-chips="latestHistoryHighlight?.metaChips || []"
+      highlight-section-class="space-y-3"
+      highlight-header-class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between"
+      :highlight-card-attrs="{
+        class: 'min-w-0 flex-1',
+        titleClass: 'line-clamp-1 text-lg font-semibold',
+        descriptionClass: 'glass-text-muted mt-1 text-sm',
+        noteClass: 'accounts-history-note mt-2 text-xs leading-5',
+      }"
+      highlight-meta-chips-class="accounts-filter-chip-wrap text-xs"
+      metrics-class="grid grid-cols-1 gap-3 md:grid-cols-3"
+      empty-class="accounts-history-empty"
+      recent-grid-class="grid grid-cols-1 gap-3 2xl:grid-cols-4 lg:grid-cols-2"
+      recent-copied-class="accounts-history-card-copied"
+    />
 
     <div v-if="loading && accounts.length === 0" class="glass-panel min-h-[300px] flex flex-col items-center justify-center rounded-lg py-12 text-center shadow">
       <div class="relative mb-6">
@@ -2167,20 +2359,18 @@ useIntervalFn(() => {
       </BaseButton>
     </BaseEmptyState>
 
-    <div v-else-if="isTableView" class="glass-panel ui-table-card rounded-[26px]">
-      <BaseSectionHeader class="px-4 py-4">
-        <template #title>
-          <h3 class="ui-section-head__title text-base font-semibold">
-            表格视图
-          </h3>
-        </template>
-        <template #description>
-          <p class="ui-section-head__desc glass-text-muted mt-1 text-sm">
-            适合批量盘点账号归属、平台、最近登录时间和操作状态。
-          </p>
-        </template>
+    <BaseTableSectionCard
+      v-else-if="isTableView"
+      title="表格视图"
+      description="适合批量盘点账号归属、平台、最近登录时间和操作状态。"
+      class="rounded-[26px]"
+      header-class="px-4 py-4"
+      title-class="text-base font-semibold"
+      description-class="glass-text-muted mt-1 text-sm"
+    >
+      <template #header-meta>
         <div class="ui-section-meta">
-          <div class="border border-white/8 rounded-full bg-black/10 px-3 py-1.5 text-xs text-gray-200">
+          <div class="accounts-meta-pill">
             当前排序：{{ currentTableSortLabel }}
           </div>
           <BaseSelectionSummary
@@ -2188,14 +2378,14 @@ useIntervalFn(() => {
             :filtered-count="filteredAccounts.length"
             variant="pill"
           />
-          <div class="border border-sky-200/60 rounded-full bg-sky-50/70 px-3 py-1.5 text-xs text-sky-700 dark:border-sky-800/40 dark:bg-sky-900/15 dark:text-sky-200">
+          <div class="accounts-info-pill">
             {{ TABLE_VIEW_SYNC_NOTE }}
           </div>
-          <div class="relative" @click.stop>
+          <div class="relative hidden md:block" @click.stop>
             <BaseButton
               variant="ghost"
               size="sm"
-              class="border border-white/10 rounded-full bg-black/10 text-xs text-gray-200 hover:bg-white/8"
+              class="accounts-ghost-pill"
               @click="showColumnSettings = !showColumnSettings"
             >
               <div class="i-carbon-column mr-1 text-sm" />
@@ -2203,24 +2393,23 @@ useIntervalFn(() => {
             </BaseButton>
             <div
               v-if="showColumnSettings"
-              class="glass-panel absolute right-0 top-[calc(100%+8px)] z-20 min-w-[220px] border border-white/10 rounded-2xl p-3 shadow-2xl"
+              class="accounts-column-popover glass-panel absolute right-0 top-[calc(100%+8px)] z-20 min-w-[220px] p-3 shadow-2xl"
             >
-              <div class="mb-2 text-xs text-gray-400 tracking-[0.18em] uppercase">
+              <div class="accounts-meta-label mb-2">
                 表格列显隐
               </div>
-              <div class="mb-2 rounded-xl bg-sky-50/70 px-3 py-2 text-[11px] text-sky-700 leading-5 dark:bg-sky-900/15 dark:text-sky-200">
+              <div class="accounts-column-note mb-2">
                 {{ TABLE_COLUMN_SYNC_NOTE }}
               </div>
               <button
                 v-for="column in tableColumnOptions"
                 :key="column.key"
-                class="w-full flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors hover:bg-white/6"
+                class="accounts-column-row w-full flex items-center justify-between rounded-xl px-3 py-2 text-sm transition-colors"
                 @click="toggleTableColumn(column.key)"
               >
                 <span>{{ column.label }}</span>
                 <span
-                  class="h-5 w-5 flex items-center justify-center rounded-full text-xs"
-                  :class="visibleTableColumns[column.key] ? 'bg-primary-500/20 text-primary-200' : 'bg-black/20 text-gray-500'"
+                  :class="getColumnVisibilityBadgeClass(visibleTableColumns[column.key])"
                 >
                   <div :class="visibleTableColumns[column.key] ? 'i-carbon-checkmark' : 'i-carbon-subtract'" />
                 </span>
@@ -2228,10 +2417,146 @@ useIntervalFn(() => {
             </div>
           </div>
         </div>
-      </BaseSectionHeader>
+      </template>
 
-      <BaseDataTable class="max-h-[68vh] overflow-auto" table-class="min-w-[1260px] w-full text-sm">
-        <BaseDataTableHead class="accounts-table-head sticky top-0 z-10 text-left text-[11px] text-gray-400 tracking-[0.18em] uppercase backdrop-blur-md">
+      <template #mobile>
+        <div class="ui-mobile-record-list px-4 pb-4 md:hidden">
+          <article
+            v-for="acc in tableAccounts"
+            :key="`mobile-${acc.id}`"
+            class="ui-mobile-record-card"
+            :class="{ 'ui-mobile-record-card--selected': isSelected(acc.id) }"
+            @click="accountStore.selectAccount(String(acc.id || ''))"
+          >
+            <div class="ui-mobile-record-head">
+              <div class="ui-mobile-record-main">
+                <div
+                  class="h-5 w-5 flex cursor-pointer items-center justify-center rounded transition-colors"
+                  :class="getSelectionBoxClasses(isSelected(acc.id))"
+                  @click.stop="toggleSelection(acc.id)"
+                >
+                  <div v-if="isSelected(acc.id)" class="accounts-selection-icon i-carbon-checkmark" />
+                </div>
+                <div class="ui-mobile-record-body">
+                  <div class="ui-mobile-record-badges">
+                    <BaseBadge :class="resolveOwnerMeta(acc).badge">
+                      {{ resolveOwnerMeta(acc).shortLabel }}
+                    </BaseBadge>
+                    <BaseBadge :class="resolveRuntimeState(acc).badge">
+                      {{ resolveRuntimeState(acc).label }}
+                    </BaseBadge>
+                    <BaseBadge :class="resolveModeMeta(resolveAccountMode(acc)).badge">
+                      {{ resolveModeMeta(resolveAccountMode(acc)).label }}
+                    </BaseBadge>
+                  </div>
+                  <h3 class="ui-mobile-record-title">
+                    {{ getAccountDisplayName(acc) }}
+                  </h3>
+                  <p class="ui-mobile-record-subtitle">
+                    {{ getAccountSubline(acc) }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="ui-mobile-record-grid">
+              <div class="ui-mobile-record-field">
+                <div class="ui-mobile-record-label">
+                  归属
+                </div>
+                <div class="ui-mobile-record-value">
+                  {{ resolveOwnerMeta(acc).ownerText }}
+                </div>
+              </div>
+              <div class="ui-mobile-record-field">
+                <div class="ui-mobile-record-label">
+                  平台 / 区服
+                </div>
+                <div class="ui-mobile-record-value">
+                  {{ resolvePlatformLabel(acc.platform) }}
+                </div>
+                <div class="ui-mobile-record-value ui-mobile-record-value--muted">
+                  {{ resolveZoneLabel(acc) }}
+                </div>
+              </div>
+              <div class="ui-mobile-record-field">
+                <div class="ui-mobile-record-label">
+                  最近登录
+                </div>
+                <div class="ui-mobile-record-value">
+                  {{ getLastLoginLabel(acc) }}
+                </div>
+                <div class="ui-mobile-record-value ui-mobile-record-value--muted">
+                  首次录入 {{ formatDateTime(acc.createdAt) }}
+                </div>
+              </div>
+              <div class="ui-mobile-record-field">
+                <div class="ui-mobile-record-label">
+                  当前状态
+                </div>
+                <div class="ui-mobile-record-value">
+                  {{ resolveRuntimeState(acc).label }}
+                </div>
+                <div class="ui-mobile-record-value ui-mobile-record-value--muted">
+                  {{ acc.wsError?.message || '暂无异常记录' }}
+                </div>
+              </div>
+            </div>
+
+            <div class="ui-mobile-record-actions" @click.stop>
+              <BaseButton
+                variant="secondary"
+                size="sm"
+                class="accounts-runtime-button rounded-full transition-all duration-500 ease-in-out active:scale-95"
+                :class="getRuntimeActionButtonClasses(acc)"
+                @click.stop="toggleAccount(acc)"
+              >
+                <div :class="acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled'" class="mr-1" />
+                {{ acc.running ? '停止' : '启动' }}
+              </BaseButton>
+              <BaseButton variant="outline" size="sm" @click.stop="openSettings(acc)">
+                设置
+              </BaseButton>
+              <BaseButton variant="outline" size="sm" @click.stop="openEditModal(acc)">
+                编辑
+              </BaseButton>
+              <BaseButton variant="danger" size="sm" @click.stop="handleDelete(acc)">
+                删除
+              </BaseButton>
+            </div>
+
+            <div class="ui-bulk-actions" @click.stop>
+              <BaseButton
+                variant="ghost"
+                size="sm"
+                :class="getModeButtonClasses(acc, 'main')"
+                @click.stop="handleModeChange(acc, 'main')"
+              >
+                主号
+              </BaseButton>
+              <BaseButton
+                variant="ghost"
+                size="sm"
+                :class="getModeButtonClasses(acc, 'alt')"
+                @click.stop="handleModeChange(acc, 'alt')"
+              >
+                小号
+              </BaseButton>
+              <BaseButton
+                variant="ghost"
+                size="sm"
+                :class="getModeButtonClasses(acc, 'safe')"
+                @click.stop="handleModeChange(acc, 'safe')"
+              >
+                避险
+              </BaseButton>
+            </div>
+          </article>
+        </div>
+      </template>
+
+      <BaseDataTable class="hidden max-h-[68vh] overflow-auto md:block" table-class="min-w-[1260px] w-full text-sm">
+        <BaseDataTableHead class="accounts-table-head accounts-meta-label sticky top-0 z-10 text-left backdrop-blur-md">
           <tr>
             <th class="px-4 py-3 font-medium">
               选择
@@ -2286,22 +2611,22 @@ useIntervalFn(() => {
           <tr
             v-for="acc in tableAccounts"
             :key="acc.id"
-            class="cursor-pointer border-t border-white/8 align-top transition-colors hover:bg-white/[0.03]"
-            :class="String(acc.id || '') === String(accountStore.currentAccountId || '') ? 'bg-primary-500/[0.05]' : ''"
+            class="accounts-table-row cursor-pointer border-t align-top transition-colors"
+            :class="String(acc.id || '') === String(accountStore.currentAccountId || '') ? 'accounts-table-row-current' : ''"
             @click="accountStore.selectAccount(String(acc.id || ''))"
           >
             <td class="px-4 py-4 align-top">
               <div
-                class="h-5 w-5 flex cursor-pointer items-center justify-center border rounded transition-colors"
-                :class="isSelected(acc.id) ? 'bg-primary-500 border-primary-500' : 'border-gray-300/50 bg-black/5 dark:border-gray-600 dark:bg-white/5'"
+                class="h-5 w-5 flex cursor-pointer items-center justify-center rounded transition-colors"
+                :class="getSelectionBoxClasses(isSelected(acc.id))"
                 @click.stop="toggleSelection(acc.id)"
               >
-                <div v-if="isSelected(acc.id)" class="i-carbon-checkmark text-white" />
+                <div v-if="isSelected(acc.id)" class="accounts-selection-icon i-carbon-checkmark" />
               </div>
             </td>
             <td class="px-4 py-4 align-top">
               <div class="min-w-[220px] flex items-start gap-3">
-                <div class="h-11 w-11 flex shrink-0 items-center justify-center overflow-hidden border border-white/10 rounded-xl bg-black/10">
+                <div class="accounts-avatar-shell h-11 w-11 flex shrink-0 items-center justify-center overflow-hidden rounded-xl">
                   <img v-if="getAvatarUrl(acc)" :src="getAvatarUrl(acc)" class="h-full w-full object-cover" @error="(e) => markFailed((e.target as HTMLImageElement).src)" />
                   <div v-else class="i-carbon-user glass-text-muted text-2xl" />
                 </div>
@@ -2361,7 +2686,7 @@ useIntervalFn(() => {
                 <div v-if="resolveModeExecutionMeta(acc)?.note" class="mt-2 text-xs leading-5" :class="resolveModeExecutionMeta(acc)?.noteClass">
                   {{ resolveModeExecutionMeta(acc)?.note }}
                 </div>
-                <div class="mt-3 flex items-center gap-0.5 border border-gray-200/50 rounded-full bg-black/[0.04] p-1 shadow-inner dark:border-gray-700/50 dark:bg-white/[0.03]" @click.stop>
+                <div class="accounts-mode-toggle-group mt-3 flex items-center gap-0.5 p-1 shadow-inner" @click.stop>
                   <button
                     class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
                     :class="getModeButtonClasses(acc, 'main')"
@@ -2394,7 +2719,7 @@ useIntervalFn(() => {
                 <BaseBadge :class="resolveRuntimeState(acc).badge">
                   {{ resolveRuntimeState(acc).label }}
                 </BaseBadge>
-                <div v-if="acc.wsError?.message" class="line-clamp-2 mt-2 border border-red-500/15 rounded-2xl bg-red-500/10 px-3 py-2 text-xs text-red-300 leading-5">
+                <div v-if="acc.wsError?.message" class="accounts-error-banner line-clamp-2 mt-2 px-3 py-2 text-xs leading-5">
                   最近错误：{{ acc.wsError.message }}
                 </div>
                 <div v-else class="glass-text-muted mt-2 text-xs leading-5">
@@ -2408,8 +2733,8 @@ useIntervalFn(() => {
                   <BaseButton
                     variant="secondary"
                     size="sm"
-                    class="min-w-[84px] border rounded-full shadow-sm transition-all duration-500 ease-in-out active:scale-95"
-                    :class="acc.running ? 'border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20 focus:ring-red-500/50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20' : 'border-green-500/20 bg-green-500/10 text-green-600 hover:bg-green-500/20 focus:ring-green-500/50 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400 dark:hover:bg-green-500/20'"
+                    class="accounts-runtime-button min-w-[84px] rounded-full transition-all duration-500 ease-in-out active:scale-95"
+                    :class="getRuntimeActionButtonClasses(acc)"
                     @click.stop="toggleAccount(acc)"
                   >
                     <div :class="acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled'" class="mr-1" />
@@ -2420,7 +2745,7 @@ useIntervalFn(() => {
                     v-if="resolveAccountMode(acc) === 'safe'"
                     variant="ghost"
                     size="sm"
-                    class="rounded-full bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 !px-3 !py-1.5 !text-xs dark:text-emerald-400"
+                    class="accounts-safe-check rounded-full !px-3 !py-1.5 !text-xs"
                     title="一键分析封禁日志并加入黑名单"
                     :loading="safeCheckingId === acc.id"
                     @click.stop="handleSafeCheck(acc)"
@@ -2437,7 +2762,7 @@ useIntervalFn(() => {
                   <BaseIconAction class="!p-2.5" title="编辑" @click.stop="openEditModal(acc)">
                     <div class="i-carbon-edit text-lg" />
                   </BaseIconAction>
-                  <BaseIconAction danger class="!p-2.5 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300" title="删除" @click.stop="handleDelete(acc)">
+                  <BaseIconAction danger class="accounts-icon-danger !p-2.5" title="删除" @click.stop="handleDelete(acc)">
                     <div class="i-carbon-trash-can text-lg" />
                   </BaseIconAction>
                 </div>
@@ -2446,7 +2771,7 @@ useIntervalFn(() => {
           </tr>
         </tbody>
       </BaseDataTable>
-    </div>
+    </BaseTableSectionCard>
 
     <div v-else :class="cardGridClass">
       <div
@@ -2454,163 +2779,193 @@ useIntervalFn(() => {
         :key="acc.id"
         class="accounts-card-shell glass-panel group relative h-full flex flex-col cursor-pointer overflow-hidden border transition-all duration-300"
         :class="[
-          isCompactView ? 'min-h-[392px] rounded-[22px] p-4' : 'min-h-[452px] rounded-[26px] p-5',
-          String(acc.id || '') === String(accountStore.currentAccountId || '') ? 'accounts-card-current border-primary-500/55 bg-primary-500/[0.05] dark:border-primary-400/50' : 'accounts-card-idle border-white/10',
+          isCompactView ? 'min-h-[352px] rounded-[22px] p-4' : 'min-h-[372px] rounded-[26px] p-5',
+          isCurrentAccount(acc) ? 'accounts-card-current' : 'accounts-card-idle',
           resolveOwnerMeta(acc).cardGlow,
         ]"
         @click="accountStore.selectAccount(String(acc.id || ''))"
       >
-        <div class="accounts-card-overlay pointer-events-none absolute inset-x-0 top-0 opacity-80" :class="isCompactView ? 'h-24' : 'h-30'" />
-
-        <div class="relative flex items-start justify-between gap-4 pl-8" :class="isCompactView ? 'min-h-[104px]' : 'min-h-[124px]'">
-          <div
-            class="absolute left-0 top-1 h-5 w-5 flex cursor-pointer items-center justify-center border rounded transition-colors"
-            :class="isSelected(acc.id) ? 'bg-primary-500 border-primary-500' : 'border-gray-300/50 bg-black/5 dark:border-gray-600 dark:bg-white/5'"
-            @click.stop="toggleSelection(acc.id)"
-          >
-            <div v-if="isSelected(acc.id)" class="i-carbon-checkmark text-white" />
-          </div>
-
-          <div class="min-w-0 flex flex-1 items-start gap-4">
-            <div class="flex shrink-0 items-center justify-center overflow-hidden border border-white/10 bg-black/10 shadow-inner dark:bg-white/10" :class="isCompactView ? 'h-12 w-12 rounded-xl' : 'h-14 w-14 rounded-2xl'">
-              <img v-if="getAvatarUrl(acc)" :src="getAvatarUrl(acc)" class="h-full w-full object-cover" @error="(e) => markFailed((e.target as HTMLImageElement).src)" />
-              <div v-else class="i-carbon-user glass-text-muted" :class="isCompactView ? 'text-2xl' : 'text-3xl'" />
-            </div>
-            <div class="min-w-0 flex-1 pt-0.5">
-              <div class="flex flex-wrap items-center gap-2">
-                <BaseBadge class="text-[11px] tracking-[0.12em] uppercase" :class="resolveOwnerMeta(acc).badge">
-                  {{ resolveOwnerMeta(acc).shortLabel }}
-                </BaseBadge>
-                <BaseBadge class="text-[11px] tracking-[0.12em] uppercase" :class="resolveRuntimeState(acc).badge">
-                  {{ resolveRuntimeState(acc).label }}
-                </BaseBadge>
-              </div>
-              <h3 class="line-clamp-1 mt-3 font-semibold leading-tight" :class="isCompactView ? 'text-lg' : 'text-xl'" :title="getAccountDisplayName(acc)">
-                {{ getAccountDisplayName(acc) }}
-              </h3>
-              <div class="glass-text-muted mt-2 text-sm leading-5" :class="isCompactView ? 'min-h-[38px]' : 'min-h-[42px]'">
-                <p class="line-clamp-1">
-                  {{ getAccountSubline(acc) }}
-                </p>
-                <p class="line-clamp-1">
-                  昵称：{{ acc.nick || '暂无昵称' }}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex shrink-0 flex-col items-end gap-2">
-            <BaseButton
-              variant="secondary"
-              size="sm"
-              class="border rounded-full shadow-sm transition-all duration-500 ease-in-out active:scale-95"
-              :class="[
-                isCompactView ? 'w-18' : 'w-21',
-                acc.running ? 'border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20 focus:ring-red-500/50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20' : 'border-green-500/20 bg-green-500/10 text-green-600 hover:bg-green-500/20 focus:ring-green-500/50 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400 dark:hover:bg-green-500/20',
-              ]"
-              @click.stop="toggleAccount(acc)"
+        <div class="accounts-record-toolbar flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <div
+              class="h-5 w-5 flex cursor-pointer items-center justify-center rounded transition-colors"
+              :class="getSelectionBoxClasses(isSelected(acc.id))"
+              @click.stop="toggleSelection(acc.id)"
             >
-              <div :class="acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled'" class="mr-1" />
-              {{ acc.running ? '停止' : '启动' }}
-            </BaseButton>
+              <div v-if="isSelected(acc.id)" class="accounts-selection-icon i-carbon-checkmark" />
+            </div>
+            <BaseBadge :class="resolveOwnerMeta(acc).badge">
+              {{ resolveOwnerMeta(acc).shortLabel }}
+            </BaseBadge>
+            <BaseBadge :class="resolveRuntimeState(acc).badge">
+              {{ resolveRuntimeState(acc).label }}
+            </BaseBadge>
+            <BaseBadge v-if="isCurrentAccount(acc)" class="accounts-badge-current">
+              当前选中
+            </BaseBadge>
+          </div>
+          <div class="glass-text-muted text-xs leading-5">
+            {{ getAccountSubline(acc) }}
           </div>
         </div>
 
-        <div class="grid mt-5 gap-3 border-y border-white/8 py-4" :class="isCompactView ? 'grid-cols-2' : 'md:grid-cols-3'">
-          <div class="border border-white/8 rounded-2xl bg-black/12 p-3.5 backdrop-blur-sm" :class="isCompactView ? 'min-h-[110px]' : 'min-h-[132px]'">
-            <div class="flex items-center gap-2 text-[11px] text-gray-400 tracking-[0.18em] uppercase">
-              <div class="i-carbon-user-avatar text-sm" />
-              归属账号
+        <div class="accounts-record-grid grid mt-4 gap-3" :class="isCompactView ? 'grid-cols-1 sm:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-6'">
+          <div class="accounts-meta-card accounts-record-hero" :class="isCompactView ? 'sm:col-span-2' : 'md:col-span-2 xl:col-span-6'">
+            <div class="accounts-record-hero-grid grid gap-4">
+              <div class="min-w-0">
+                <div class="accounts-meta-label flex items-center gap-2">
+                  <div class="i-carbon-user-avatar text-sm" />
+                  账号信息
+                </div>
+                <div class="mt-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div class="min-w-0 flex flex-1 items-start gap-3">
+                    <div class="accounts-avatar-shell h-12 w-12 flex shrink-0 items-center justify-center overflow-hidden rounded-xl shadow-inner">
+                      <img v-if="getAvatarUrl(acc)" :src="getAvatarUrl(acc)" class="h-full w-full object-cover" @error="(e) => markFailed((e.target as HTMLImageElement).src)" />
+                      <div v-else class="i-carbon-user glass-text-muted text-2xl" />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <h3 class="line-clamp-1 text-lg font-semibold leading-tight" :title="getAccountDisplayName(acc)">
+                        {{ getAccountDisplayName(acc) }}
+                      </h3>
+                      <p class="glass-text-muted mt-1.5 text-sm leading-5">
+                        {{ getAccountSubline(acc) }}
+                      </p>
+                      <p class="glass-text-muted mt-1 text-sm leading-5">
+                        昵称：{{ acc.nick || '暂无昵称' }}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="accounts-record-inline-meta min-w-0 lg:w-[150px] lg:shrink-0">
+                    <div class="accounts-meta-label flex items-center gap-2">
+                      <div class="i-carbon-mobile text-sm" />
+                      平台 / 区服
+                    </div>
+                    <div class="mt-2 text-sm font-semibold leading-6">
+                      {{ resolvePlatformLabel(acc.platform) }}
+                    </div>
+                    <div class="glass-text-muted mt-1 text-xs leading-5">
+                      {{ resolveZoneLabel(acc) }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="accounts-record-hero-actions min-w-0" @click.stop>
+                <div class="accounts-meta-label flex items-center gap-2">
+                  <div class="i-carbon-flash text-sm" />
+                  快捷操作
+                </div>
+                <div class="accounts-record-action-grid grid grid-cols-2 mt-3 gap-2">
+                  <BaseButton
+                    variant="secondary"
+                    size="sm"
+                    block
+                    class="accounts-runtime-button col-span-2 rounded-xl transition-all duration-500 ease-in-out active:scale-95"
+                    :class="getRuntimeActionButtonClasses(acc)"
+                    @click.stop="toggleAccount(acc)"
+                  >
+                    <div :class="acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled'" class="mr-1" />
+                    {{ acc.running ? '停止' : '启动' }}
+                  </BaseButton>
+                  <BaseButton variant="outline" size="sm" block class="rounded-xl" @click.stop="openSettings(acc)">
+                    设置
+                  </BaseButton>
+                  <BaseButton variant="outline" size="sm" block class="rounded-xl" @click.stop="openEditModal(acc)">
+                    编辑
+                  </BaseButton>
+                  <BaseButton
+                    variant="danger"
+                    size="sm"
+                    block
+                    class="rounded-xl"
+                    :class="resolveAccountMode(acc) === 'safe' ? '' : 'col-span-2'"
+                    @click.stop="handleDelete(acc)"
+                  >
+                    删除
+                  </BaseButton>
+                  <BaseButton
+                    v-if="resolveAccountMode(acc) === 'safe'"
+                    variant="ghost"
+                    size="sm"
+                    block
+                    class="accounts-safe-check rounded-xl !px-3 !py-1.5 !text-xs"
+                    title="一键分析封禁日志并加入黑名单"
+                    :loading="safeCheckingId === acc.id"
+                    @click.stop="handleSafeCheck(acc)"
+                  >
+                    <div class="i-carbon-security mr-1" />
+                    防封扫描
+                  </BaseButton>
+                </div>
+                <p class="glass-text-muted mt-2 text-xs leading-5">
+                  {{ isCurrentAccount(acc) ? '当前账号已选中，可直接进入设置继续调整。' : '点击卡片任意空白处可切换为当前账号。' }}
+                </p>
+              </div>
             </div>
-            <div class="mt-3 flex items-center gap-2">
+          </div>
+
+          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? '' : 'xl:col-span-2'">
+            <div class="accounts-meta-label flex items-center gap-2">
+              <div class="i-carbon-user-multiple text-sm" />
+              归属
+            </div>
+            <div class="mt-2.5 flex items-center gap-2">
               <BaseBadge :class="resolveOwnerMeta(acc).badge">
                 {{ resolveOwnerMeta(acc).shortLabel }}
               </BaseBadge>
             </div>
-            <div class="line-clamp-2 mt-3 text-sm font-semibold leading-6">
+            <div class="mt-2.5 text-sm font-semibold leading-6">
               {{ resolveOwnerMeta(acc).ownerText }}
             </div>
           </div>
 
-          <div class="border border-white/8 rounded-2xl bg-black/12 p-3.5 backdrop-blur-sm" :class="isCompactView ? 'min-h-[110px]' : 'min-h-[132px]'">
-            <div class="flex items-center gap-2 text-[11px] text-gray-400 tracking-[0.18em] uppercase">
-              <div class="i-carbon-mobile text-sm" />
-              登录平台
-            </div>
-            <div class="mt-3 text-base font-semibold">
-              {{ resolvePlatformLabel(acc.platform) }}
-            </div>
-            <div class="mt-2 text-xs text-gray-400 leading-5">
-              {{ resolveZoneLabel(acc) }}
-            </div>
-          </div>
-
-          <div class="border border-white/8 rounded-2xl bg-black/12 p-3.5 backdrop-blur-sm" :class="isCompactView ? 'col-span-2 min-h-[104px]' : 'min-h-[132px]'">
-            <div class="flex items-center gap-2 text-[11px] text-gray-400 tracking-[0.18em] uppercase">
+          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? '' : 'xl:col-span-4'">
+            <div class="accounts-meta-label flex items-center gap-2">
               <div class="i-carbon-time text-sm" />
-              最后登录
+              最近登录
             </div>
-            <div class="mt-3 text-base font-semibold leading-6">
+            <div class="mt-2.5 text-base font-semibold leading-6">
               {{ getLastLoginLabel(acc) }}
             </div>
-            <div class="mt-2 text-xs text-gray-400 leading-5">
+            <div class="glass-text-muted mt-2 text-xs leading-5">
               首次录入 {{ formatDateTime(acc.createdAt) }}
             </div>
           </div>
-        </div>
 
-        <div class="mt-auto" :class="isCompactView ? 'pt-3' : 'pt-4'">
-          <div class="min-h-[54px] flex flex-col gap-3" :class="isCompactView ? '' : 'xl:flex-row xl:items-start xl:justify-between'">
-            <div class="min-w-0 flex-1">
-              <div class="glass-text-muted flex flex-wrap items-center gap-2 text-sm">
-                <span class="flex items-center gap-1.5 font-medium">
-                  <div class="h-2 w-2 rounded-full" :class="resolveRuntimeState(acc).dot" />
-                  {{ resolveRuntimeState(acc).label }}
-                </span>
-                <span class="border border-white/8 rounded-full bg-black/10 px-2.5 py-1 text-xs text-gray-200">
-                  平台：{{ resolvePlatformLabel(acc.platform) }}
-                </span>
-              </div>
-              <div class="mt-2 flex flex-wrap items-center gap-2">
-                <BaseBadge :class="resolveModeMeta(resolveAccountMode(acc)).badge">
-                  配置: {{ resolveModeMeta(resolveAccountMode(acc)).label }}
-                </BaseBadge>
-                <BaseBadge v-if="resolveModeExecutionMeta(acc)" :class="resolveModeExecutionMeta(acc)?.badge">
-                  {{ resolveModeExecutionMeta(acc)?.label }}
-                </BaseBadge>
-              </div>
-              <p v-if="resolveModeExecutionMeta(acc)?.note" class="mt-2 text-xs leading-5" :class="resolveModeExecutionMeta(acc)?.noteClass">
-                {{ resolveModeExecutionMeta(acc)?.note }}
-              </p>
-              <p v-if="!isCompactView && !acc.wsError?.message" class="mt-2 text-xs text-gray-400 leading-5">
-                {{ String(acc.id || '') === String(accountStore.currentAccountId || '') ? '当前选中账号，可直接继续进入设置和策略调整。' : '最近没有异常记录，可继续执行批量操作或单账号管理。' }}
-              </p>
+          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? '' : 'xl:col-span-3'">
+            <div class="accounts-meta-label flex items-center gap-2">
+              <div class="i-carbon-pulse text-sm" />
+              当前状态
             </div>
-            <span
-              v-if="acc.wsError?.message"
-              class="max-w-full truncate border border-red-500/15 rounded-full bg-red-500/10 px-2.5 py-1 text-xs text-red-300 xl:max-w-[260px]"
-              :title="acc.wsError.message"
+            <div class="mt-2.5 flex items-center gap-2 text-sm font-semibold">
+              <div class="h-2 w-2 rounded-full" :class="resolveRuntimeState(acc).dot" />
+              {{ resolveRuntimeState(acc).label }}
+            </div>
+            <div
+              class="mt-2.5 text-xs leading-5"
+              :class="acc.wsError?.message ? 'accounts-error-banner px-3 py-2' : 'glass-text-muted'"
             >
-              最近错误：{{ acc.wsError.message }}
-            </span>
-            <transition name="fade">
-              <BaseButton
-                v-if="resolveAccountMode(acc) === 'safe'"
-                variant="ghost"
-                size="sm"
-                class="shrink-0 rounded-full bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 !px-3 !py-1.5 !text-xs dark:text-emerald-400"
-                title="一键分析封禁日志并加入黑名单"
-                :loading="safeCheckingId === acc.id"
-                @click.stop="handleSafeCheck(acc)"
-              >
-                <div class="i-carbon-security mr-1" />
-                防封扫描
-              </BaseButton>
-            </transition>
+              {{ getAccountStatusDetail(acc) }}
+            </div>
           </div>
 
-          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-0.5 border border-gray-200/50 rounded-full bg-black/[0.04] p-1 shadow-inner dark:border-gray-700/50 dark:bg-white/[0.03]" @click.stop>
+          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? 'sm:col-span-2' : 'xl:col-span-3'" @click.stop>
+            <div class="accounts-meta-label flex items-center gap-2">
+              <div class="i-carbon-model-alt text-sm" />
+              模式设置
+            </div>
+            <div class="mt-2.5 flex flex-wrap items-center gap-2">
+              <BaseBadge :class="resolveModeMeta(resolveAccountMode(acc)).badge">
+                配置：{{ resolveModeMeta(resolveAccountMode(acc)).label }}
+              </BaseBadge>
+              <BaseBadge v-if="resolveModeExecutionMeta(acc)" :class="resolveModeExecutionMeta(acc)?.badge">
+                {{ resolveModeExecutionMeta(acc)?.label }}
+              </BaseBadge>
+            </div>
+            <p v-if="resolveModeExecutionMeta(acc)?.note" class="mt-2 text-xs leading-5" :class="resolveModeExecutionMeta(acc)?.noteClass">
+              {{ resolveModeExecutionMeta(acc)?.note }}
+            </p>
+            <div class="accounts-mode-toggle-group mt-3 inline-flex flex-wrap items-center gap-0.5 p-1 shadow-inner">
               <button
                 class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
                 :class="getModeButtonClasses(acc, 'main')"
@@ -2635,18 +2990,6 @@ useIntervalFn(() => {
               >
                 避险
               </button>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <BaseIconAction class="!p-2.5" title="设置" @click.stop="openSettings(acc)">
-                <div class="i-carbon-settings text-lg" />
-              </BaseIconAction>
-              <BaseIconAction class="!p-2.5" title="编辑" @click.stop="openEditModal(acc)">
-                <div class="i-carbon-edit text-lg" />
-              </BaseIconAction>
-              <BaseIconAction danger class="!p-2.5 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300" title="删除" @click.stop="handleDelete(acc)">
-                <div class="i-carbon-trash-can text-lg" />
-              </BaseIconAction>
             </div>
           </div>
         </div>
@@ -2690,15 +3033,33 @@ useIntervalFn(() => {
   color: var(--ui-text-1);
 }
 
-.accounts-page :is(.text-gray-300, .text-gray-400, .text-gray-500, .glass-text-muted) {
+.accounts-page
+  :is(
+    [class*='text-'][class*='gray-300'],
+    [class*='text-'][class*='gray-400'],
+    [class*='text-'][class*='gray-500'],
+    .glass-text-muted
+  ) {
   color: var(--ui-text-2) !important;
 }
 
-.accounts-page :is(.text-gray-200, .text-gray-100, .text-slate-300, .text-slate-200) {
+.accounts-page
+  :is(
+    [class*='text-'][class*='gray-200'],
+    [class*='text-'][class*='gray-100'],
+    [class*='text-'][class*='slate-300'],
+    [class*='text-'][class*='slate-200']
+  ) {
   color: var(--ui-text-1) !important;
 }
 
-.accounts-page :is(.text-white\/95, .text-white\/90, .text-white\/85, .text-white\/80) {
+.accounts-page
+  :is(
+    [class*='text-'][class*='white/95'],
+    [class*='text-'][class*='white/90'],
+    [class*='text-'][class*='white/85'],
+    [class*='text-'][class*='white/80']
+  ) {
   color: color-mix(in srgb, var(--ui-text-1) 92%, var(--ui-text-on-brand) 8%) !important;
 }
 
@@ -2710,24 +3071,710 @@ useIntervalFn(() => {
   box-shadow: 0 10px 26px var(--ui-shadow-panel) !important;
 }
 
-.accounts-page [class*='border-white/8'],
-.accounts-page [class*='border-white/10'],
-.accounts-page [class*='border-gray-200/50'],
-.accounts-page [class*='border-gray-700/50'] {
+.accounts-page-count {
+  color: var(--ui-text-2);
+  font-size: 0.9375rem;
+}
+
+.accounts-page-count-value {
+  color: var(--ui-text-1);
+  font-weight: 700;
+}
+
+.accounts-info-banner {
+  border: 1px solid color-mix(in srgb, var(--ui-status-info) 20%, var(--ui-border-subtle)) !important;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-status-info) 7%, var(--ui-bg-surface-raised) 93%) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 72%, var(--ui-text-1)) !important;
+  padding: 0.5rem 0.75rem;
+  line-height: 1.5;
+}
+
+.accounts-ownership-tab {
+  border-color: var(--ui-border-subtle) !important;
+  color: var(--ui-text-2) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent) !important;
+}
+
+.accounts-ownership-tab-idle:hover {
+  color: var(--ui-text-1) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
+}
+
+.accounts-ownership-tab-active {
+  color: var(--ui-text-on-brand) !important;
+}
+
+.accounts-ownership-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent);
+  color: var(--ui-text-2);
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.1;
+}
+
+.accounts-ownership-tab-count-active {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ui-text-on-brand) 18%, transparent);
+  color: var(--ui-text-on-brand);
+}
+
+.accounts-ownership-tab-mine.accounts-ownership-tab-active {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 48%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-brand-500) 24%, var(--ui-bg-surface-raised) 76%) !important;
+}
+
+.accounts-ownership-tab-mine.accounts-ownership-tab-idle:hover {
+  background: color-mix(in srgb, var(--ui-brand-500) 10%, var(--ui-bg-surface-raised) 90%) !important;
+}
+
+.accounts-ownership-tab-other_user.accounts-ownership-tab-active {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 40%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-warning) 22%, var(--ui-bg-surface-raised) 78%) !important;
+}
+
+.accounts-ownership-tab-other_user.accounts-ownership-tab-idle:hover {
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, var(--ui-bg-surface-raised) 90%) !important;
+}
+
+.accounts-ownership-tab-other_admin.accounts-ownership-tab-active {
+  border-color: color-mix(in srgb, var(--ui-status-info) 40%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-info) 22%, var(--ui-bg-surface-raised) 78%) !important;
+}
+
+.accounts-ownership-tab-other_admin.accounts-ownership-tab-idle:hover {
+  background: color-mix(in srgb, var(--ui-status-info) 10%, var(--ui-bg-surface-raised) 90%) !important;
+}
+
+.accounts-ownership-tab-unowned.accounts-ownership-tab-active {
+  border-color: color-mix(in srgb, var(--ui-text-2) 26%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-text-2) 14%, var(--ui-bg-surface-raised) 86%) !important;
+}
+
+.accounts-ownership-tab-unowned.accounts-ownership-tab-idle:hover {
+  background: color-mix(in srgb, var(--ui-text-2) 8%, var(--ui-bg-surface-raised) 92%) !important;
+}
+
+.accounts-view-switch {
   border-color: var(--ui-border-subtle) !important;
 }
 
-.accounts-page [class*='bg-black/10'],
-.accounts-page [class*='bg-black/8'],
-.accounts-page [class*='bg-black/[0.04]'],
-.accounts-page [class*='bg-white/12'],
-.accounts-page [class*='bg-white/10'] {
+.accounts-view-switch-active {
+  background: color-mix(in srgb, var(--ui-brand-500) 22%, var(--ui-bg-surface-raised) 78%) !important;
+  border-color: color-mix(in srgb, var(--ui-brand-500) 42%, transparent) !important;
+  color: var(--ui-text-on-brand) !important;
+}
+
+.accounts-view-switch-idle {
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent) !important;
+  color: var(--ui-text-2) !important;
+}
+
+.accounts-view-switch-idle:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
+  color: var(--ui-text-1) !important;
+}
+
+.accounts-ghost-pill {
+  border: 1px solid var(--ui-border-subtle) !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent) !important;
+  color: var(--ui-text-1) !important;
+}
+
+.accounts-ghost-pill:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
+}
+
+.accounts-danger-pill {
+  border: 1px solid color-mix(in srgb, var(--ui-status-danger) 24%, transparent) !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent) !important;
+  color: var(--ui-status-danger) !important;
+}
+
+.accounts-danger-pill:hover {
+  background: color-mix(in srgb, var(--ui-status-danger) 16%, transparent) !important;
+}
+
+.accounts-batch-button {
+  border: 1px solid transparent !important;
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 10px 24px var(--ui-shadow-panel) !important;
+}
+
+.accounts-batch-button-brand {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ui-brand-500) 94%, white 6%),
+    var(--ui-brand-600)
+  ) !important;
+  color: var(--ui-text-on-brand) !important;
+}
+
+.accounts-batch-button-danger {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ui-status-danger) 90%, white 10%),
+    color-mix(in srgb, var(--ui-status-danger) 78%, black 22%)
+  ) !important;
+  color: var(--ui-text-on-brand) !important;
+}
+
+.accounts-batch-button-neutral {
+  border-color: var(--ui-border-subtle) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent) !important;
+  color: var(--ui-text-1) !important;
+}
+
+.accounts-batch-button-neutral:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 96%, transparent) !important;
+}
+
+.accounts-batch-button-admin {
+  border-color: color-mix(in srgb, var(--ui-status-info) 22%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 75%, var(--ui-text-1)) !important;
+}
+
+.accounts-batch-button-main {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 24%, transparent) !important;
+  background: var(--ui-brand-soft-12) !important;
+  color: color-mix(in srgb, var(--ui-brand-700) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-batch-button-alt {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 24%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-batch-button-safe {
+  border-color: color-mix(in srgb, var(--ui-status-success) 24%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-batch-button-start {
+  border-color: color-mix(in srgb, var(--ui-status-success) 24%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-batch-button-stop {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 24%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-batch-button-restart {
+  border-color: color-mix(in srgb, var(--ui-status-info) 24%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-filter-chip-wrap {
+  color: var(--ui-text-1);
+}
+
+.accounts-copy-button-active {
+  border-color: color-mix(in srgb, var(--ui-status-success) 24%, transparent) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ui-status-success) 9%, var(--ui-bg-surface-raised) 91%),
+    color-mix(in srgb, var(--ui-brand-soft-12) 44%, var(--ui-bg-surface) 56%)
+  ) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 80%, var(--ui-text-1)) !important;
+  box-shadow:
+    0 14px 30px color-mix(in srgb, var(--ui-status-success) 16%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--ui-status-success) 12%, transparent) !important;
+}
+
+.accounts-history-note {
+  color: color-mix(in srgb, var(--ui-status-info) 72%, var(--ui-text-1)) !important;
+}
+
+.accounts-history-stat,
+.accounts-meta-card,
+.accounts-column-popover {
+  border: 1px solid var(--ui-border-subtle) !important;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent) !important;
+}
+
+.accounts-history-stat,
+.accounts-meta-card {
+  padding: 0.875rem;
+}
+
+.accounts-record-hero {
+  padding: 0.9375rem;
+}
+
+.accounts-record-hero-grid {
+  align-items: stretch;
+  gap: 0.875rem;
+}
+
+.accounts-record-inline-meta {
+  border: 1px solid var(--ui-border-subtle) !important;
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--ui-bg-surface) 56%, transparent) !important;
+  padding: 0.75rem 0.875rem;
+}
+
+.accounts-record-hero-actions {
+  border-top: 1px solid var(--ui-border-subtle);
+  padding-top: 0.875rem;
+}
+
+.accounts-record-action-grid {
+  align-content: start;
+}
+
+.accounts-record-action-grid > * {
+  min-height: 2.625rem;
+}
+
+.accounts-record-field {
+  min-height: 6.75rem;
+}
+
+.accounts-card-meta-grid {
+  border-top: 1px solid var(--ui-border-subtle) !important;
+  border-bottom: 1px solid var(--ui-border-subtle) !important;
+}
+
+.accounts-meta-label {
+  color: var(--ui-text-3) !important;
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.accounts-history-empty {
+  border: 1px dashed var(--ui-border-subtle) !important;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-bg-surface) 56%, transparent) !important;
+  color: var(--ui-text-1) !important;
+  padding: 1.25rem 1rem;
+}
+
+.accounts-history-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent) !important;
+}
+
+.accounts-history-card-button::before,
+.accounts-history-card-button::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+
+.accounts-history-card-button::before {
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle at top right,
+    color-mix(in srgb, var(--ui-text-on-brand) 12%, transparent),
+    transparent 48%
+  );
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+
+.accounts-history-card-button::after {
+  top: -30%;
+  bottom: -30%;
+  left: -42%;
+  width: 36%;
+  transform: rotate(18deg) translateX(-180%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--ui-text-on-brand) 30%, transparent),
+    transparent
+  );
+  opacity: 0;
+}
+
+.accounts-history-card-button:hover::before {
+  opacity: 1;
+}
+
+.accounts-history-card-button:hover::after {
+  opacity: 0.4;
+  transform: rotate(18deg) translateX(265%);
+  transition:
+    transform 0.82s ease,
+    opacity 0.24s ease;
+}
+
+.accounts-history-card-success {
+  border-color: color-mix(in srgb, var(--ui-status-success) 24%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 76%, var(--ui-text-1)) !important;
+}
+
+.accounts-history-card-error {
+  border-color: color-mix(in srgb, var(--ui-status-danger) 24%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 76%, var(--ui-text-1)) !important;
+}
+
+.accounts-history-card-partial {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 24%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-warning) 76%, var(--ui-text-1)) !important;
+}
+
+.accounts-history-card-copied {
+  border-color: color-mix(in srgb, var(--ui-status-success) 28%, transparent) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ui-status-success) 8%, var(--ui-bg-surface-raised) 92%),
+    color-mix(in srgb, var(--ui-brand-soft-12) 36%, var(--ui-bg-surface) 64%)
+  ) !important;
+  box-shadow:
+    0 20px 40px color-mix(in srgb, var(--ui-status-success) 16%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  animation: accounts-history-card-copied 0.82s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.accounts-history-card-copied::before {
+  opacity: 1;
+}
+
+.accounts-history-card-copy-icon,
+.accounts-history-card-copy-text {
+  color: color-mix(in srgb, var(--ui-status-success) 80%, var(--ui-text-1)) !important;
+}
+
+.accounts-history-card-copy-text {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.accounts-history-metric {
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem;
+}
+
+.accounts-history-metric-total {
+  background: color-mix(in srgb, var(--ui-bg-surface) 64%, transparent);
+  color: var(--ui-text-1);
+}
+
+.accounts-history-metric-success {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-status-success) 76%, var(--ui-text-1));
+}
+
+.accounts-history-metric-error {
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1));
+}
+
+.accounts-history-metric-skipped {
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1));
+}
+
+@keyframes accounts-history-card-copied {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  38% {
+    transform: translateY(-4px) scale(1.015);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.accounts-meta-pill,
+.accounts-info-pill {
+  border-radius: 999px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.accounts-meta-pill {
+  border: 1px solid var(--ui-border-subtle) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent) !important;
+  color: var(--ui-text-1) !important;
+}
+
+.accounts-info-pill,
+.accounts-column-note {
+  border: 1px solid color-mix(in srgb, var(--ui-status-info) 20%, transparent) !important;
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--ui-status-info) 7%, var(--ui-bg-surface-raised) 93%) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 72%, var(--ui-text-1)) !important;
+  line-height: 1.5;
+}
+
+.accounts-column-note {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.6875rem;
+}
+
+.accounts-column-row {
+  color: var(--ui-text-1);
+}
+
+.accounts-column-row:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent) !important;
+}
+
+.accounts-column-visibility {
+  display: inline-flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 0.75rem;
+}
+
+.accounts-column-visibility-on {
+  background: var(--ui-brand-soft-15);
+  color: color-mix(in srgb, var(--ui-brand-700) 72%, var(--ui-text-1));
+}
+
+.accounts-column-visibility-off {
+  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent);
+  color: var(--ui-text-3);
+}
+
+.accounts-selection-box {
+  border: 1px solid var(--ui-border-subtle);
+}
+
+.accounts-selection-box-active {
+  border-color: var(--ui-brand-500) !important;
+  background: var(--ui-brand-500) !important;
+}
+
+.accounts-selection-box-idle {
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent) !important;
+}
+
+.accounts-selection-icon {
+  color: var(--ui-text-on-brand) !important;
+}
+
+.accounts-avatar-shell {
+  border: 1px solid var(--ui-border-subtle) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent) !important;
+}
+
+.accounts-mode-toggle-group {
+  border: 1px solid var(--ui-border-subtle) !important;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-bg-surface) 54%, transparent) !important;
+}
+
+.accounts-mode-toggle {
+  color: var(--ui-text-2) !important;
+}
+
+.accounts-mode-toggle-idle:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent) !important;
+  color: var(--ui-text-1) !important;
+}
+
+.accounts-mode-toggle-active {
+  box-shadow: 0 8px 16px color-mix(in srgb, var(--ui-shadow-panel) 70%, transparent) !important;
+}
+
+.accounts-mode-toggle-main {
+  background: var(--ui-brand-soft-15) !important;
+  color: color-mix(in srgb, var(--ui-brand-700) 76%, var(--ui-text-1)) !important;
+}
+
+.accounts-mode-toggle-alt {
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-warning) 76%, var(--ui-text-1)) !important;
+}
+
+.accounts-mode-toggle-safe {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 76%, var(--ui-text-1)) !important;
+}
+
+.accounts-runtime-dot-online {
+  background: var(--ui-status-success) !important;
+}
+
+.accounts-runtime-dot-starting {
+  background: var(--ui-status-warning) !important;
+}
+
+.accounts-runtime-dot-offline {
+  background: color-mix(in srgb, var(--ui-text-2) 40%, transparent) !important;
+}
+
+.accounts-runtime-button {
+  border: 1px solid transparent !important;
+  box-shadow: 0 10px 18px color-mix(in srgb, var(--ui-shadow-panel) 65%, transparent) !important;
+}
+
+.accounts-runtime-button-start {
+  border-color: color-mix(in srgb, var(--ui-status-success) 22%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 80%, var(--ui-text-1)) !important;
+}
+
+.accounts-runtime-button-stop {
+  border-color: color-mix(in srgb, var(--ui-status-danger) 22%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 80%, var(--ui-text-1)) !important;
+}
+
+.accounts-safe-check {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-safe-check:hover {
+  background: color-mix(in srgb, var(--ui-status-success) 16%, transparent) !important;
+}
+
+.accounts-icon-danger {
+  color: var(--ui-status-danger) !important;
+}
+
+.accounts-icon-danger:hover {
+  color: color-mix(in srgb, var(--ui-status-danger) 82%, white 18%) !important;
+}
+
+.accounts-table-row {
+  border-color: var(--ui-border-subtle) !important;
+}
+
+.accounts-table-row:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface) 54%, transparent) !important;
+}
+
+.accounts-table-row-current {
+  background: var(--ui-brand-soft-05) !important;
+}
+
+.accounts-error-banner,
+.accounts-error-pill {
+  border: 1px solid color-mix(in srgb, var(--ui-status-danger) 18%, transparent) !important;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-status-danger) 8%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 82%, var(--ui-text-1)) !important;
+}
+
+.accounts-error-pill {
+  border-radius: 999px;
+}
+
+.accounts-card-current {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 42%, transparent) !important;
+  background: var(--ui-brand-soft-05) !important;
+}
+
+.accounts-card-glow-mine:hover {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 30%, transparent) !important;
+}
+
+.accounts-card-glow-user:hover {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 28%, transparent) !important;
+}
+
+.accounts-card-glow-admin:hover {
+  border-color: color-mix(in srgb, var(--ui-status-info) 28%, transparent) !important;
+}
+
+.accounts-card-glow-unowned:hover {
+  border-color: color-mix(in srgb, var(--ui-text-2) 22%, transparent) !important;
+}
+
+.accounts-badge-owner-mine,
+.accounts-badge-mode-main {
+  background: var(--ui-brand-soft-12) !important;
+  color: color-mix(in srgb, var(--ui-brand-700) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-badge-owner-user,
+.accounts-badge-mode-alt,
+.accounts-badge-history-partial,
+.accounts-badge-runtime-starting {
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-warning) 80%, var(--ui-text-1)) !important;
+}
+
+.accounts-badge-owner-admin,
+.accounts-badge-execution-hit {
+  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 80%, var(--ui-text-1)) !important;
+}
+
+.accounts-badge-owner-unowned,
+.accounts-badge-runtime-offline,
+.accounts-badge-execution-independent {
+  background: color-mix(in srgb, var(--ui-text-2) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-text-2) 82%, var(--ui-text-1)) !important;
+}
+
+.accounts-badge-current {
+  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-brand-700) 82%, var(--ui-text-1)) !important;
+}
+
+.accounts-badge-mode-safe,
+.accounts-badge-history-success,
+.accounts-badge-runtime-online {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 80%, var(--ui-text-1)) !important;
+}
+
+.accounts-badge-history-error {
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 80%, var(--ui-text-1)) !important;
+}
+
+.accounts-mode-note-warning {
+  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1)) !important;
+}
+
+.accounts-mode-note-info {
+  color: color-mix(in srgb, var(--ui-status-info) 74%, var(--ui-text-1)) !important;
+}
+
+.accounts-mode-note-muted {
+  color: var(--ui-text-2) !important;
+}
+
+.accounts-page [class*='border-'][class*='white/8'],
+.accounts-page [class*='border-'][class*='white/10'],
+.accounts-page [class*='border-'][class*='gray-200/50'],
+.accounts-page [class*='border-'][class*='gray-700/50'] {
+  border-color: var(--ui-border-subtle) !important;
+}
+
+.accounts-page [class*='bg-'][class*='black/10'],
+.accounts-page [class*='bg-'][class*='black/8'],
+.accounts-page [class*='bg-'][class*='black/[0.04]'],
+.accounts-page [class*='bg-'][class*='white/12'],
+.accounts-page [class*='bg-'][class*='white/10'] {
   background: color-mix(in srgb, var(--ui-bg-surface) 58%, transparent) !important;
 }
 
-.accounts-page [class*='hover:bg-white/8']:hover,
-.accounts-page [class*='hover:bg-black/10']:hover,
-.accounts-page [class*='hover:bg-black/5']:hover {
+.accounts-page [class*='hover:bg-'][class*='white/8']:hover,
+.accounts-page [class*='hover:bg-'][class*='black/10']:hover,
+.accounts-page [class*='hover:bg-'][class*='black/5']:hover {
   background: color-mix(in srgb, var(--ui-bg-surface-raised) 72%, transparent) !important;
 }
 
@@ -2763,8 +3810,23 @@ useIntervalFn(() => {
 .accounts-page .accounts-card-overlay {
   background: radial-gradient(
     circle at top left,
-    color-mix(in srgb, var(--ui-brand-500) 12%, transparent),
+    color-mix(in srgb, var(--ui-text-on-brand) 16%, transparent),
     transparent 62%
   ) !important;
+}
+
+.accounts-page [class*='text-red-300'] {
+  color: var(--ui-status-danger) !important;
+}
+
+.accounts-page [class*='bg-red-500/8'],
+.accounts-page [class*='bg-red-500/10'],
+.accounts-page [class*='bg-red-500/14'] {
+  background: var(--ui-status-danger-soft) !important;
+}
+
+.accounts-page .sticky.top-0 {
+  background: color-mix(in srgb, var(--ui-bg-canvas) 88%, transparent) !important;
+  color: var(--ui-text-1) !important;
 }
 </style>

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import api from '@/api'
 import { currentAccountId } from '@/utils/auth'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 export interface Account {
   id: string
@@ -53,6 +54,47 @@ export const useAccountStore = defineStore('account', () => {
   const loading = ref(false)
   const logs = ref<AccountLog[]>([])
 
+  async function syncCurrentAccountSelection(id: string) {
+    try {
+      await api.post('/api/account-selection', {
+        currentAccountId: String(id || '').trim(),
+      })
+    }
+    catch (e) {
+      console.warn('同步当前账号选择失败', e)
+    }
+  }
+
+  async function applyCurrentAccountSelection(id: string, options: { syncServer?: boolean } = {}) {
+    const normalizedId = String(id || '').trim()
+    currentAccountId.value = normalizedId
+    if (options.syncServer !== false) {
+      await syncCurrentAccountSelection(normalizedId)
+    }
+  }
+
+  function normalizeAccountEntry(entry: any): Account {
+    const next = (entry && typeof entry === 'object') ? { ...entry } : {}
+    return {
+      ...next,
+      wsError: next.wsError
+        ? {
+            ...next.wsError,
+            message: localizeRuntimeText(next.wsError.message || ''),
+          }
+        : null,
+    }
+  }
+
+  function normalizeAccountLogEntry(entry: any): AccountLog {
+    const next = (entry && typeof entry === 'object') ? { ...entry } : {}
+    return {
+      ...next,
+      msg: localizeRuntimeText(next.msg || ''),
+      reason: localizeRuntimeText(next.reason || ''),
+    }
+  }
+
   const currentAccount = computed(() =>
     accounts.value.find(a => String(a.id || '') === String(currentAccountId.value || '')),
   )
@@ -63,14 +105,16 @@ export const useAccountStore = defineStore('account', () => {
       // credentials sent via HttpOnly cookies
       const res = await api.get(`/api/accounts?_t=${Date.now()}`)
       if (res.data.ok && res.data.data && res.data.data.accounts) {
-        accounts.value = res.data.data.accounts
+        accounts.value = res.data.data.accounts.map((item: any) => normalizeAccountEntry(item))
 
-        // Auto-select first account if none selected or selected not found
         if (accounts.value.length > 0) {
           const found = accounts.value.find(a => String(a.id || '') === String(currentAccountId.value || ''))
           if (!found && accounts.value[0]) {
-            currentAccountId.value = String(accounts.value[0].id)
+            await applyCurrentAccountSelection(String(accounts.value[0].id))
           }
+        }
+        else if (currentAccountId.value) {
+          await applyCurrentAccountSelection('')
         }
       }
     }
@@ -82,12 +126,12 @@ export const useAccountStore = defineStore('account', () => {
     }
   }
 
-  function selectAccount(id: string) {
-    currentAccountId.value = String(id || '').trim()
+  async function selectAccount(id: string) {
+    await applyCurrentAccountSelection(id)
   }
 
-  function setCurrentAccount(acc: Account) {
-    selectAccount(String(acc?.id || ''))
+  async function setCurrentAccount(acc: Account) {
+    await selectAccount(String(acc?.id || ''))
   }
 
   async function startAccount(id: string) {
@@ -104,7 +148,7 @@ export const useAccountStore = defineStore('account', () => {
     const normalizedId = String(id || '').trim()
     await api.delete(`/api/accounts/${normalizedId}`)
     if (String(currentAccountId.value || '') === normalizedId) {
-      currentAccountId.value = ''
+      await applyCurrentAccountSelection('')
     }
     await fetchAccounts()
   }
@@ -113,7 +157,7 @@ export const useAccountStore = defineStore('account', () => {
     try {
       const res = await api.get('/api/account-logs?limit=100')
       if (Array.isArray(res.data)) {
-        logs.value = res.data
+        logs.value = res.data.map((item: any) => normalizeAccountLogEntry(item))
       }
     }
     catch (e) {

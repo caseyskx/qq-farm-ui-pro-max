@@ -14,7 +14,7 @@ const model = defineModel<boolean>()
       <div class="relative inline-flex items-center">
         <input v-model="model" type="checkbox" class="peer sr-only">
         <div
-          class="rounded-full bg-gray-200/50 transition-colors after:absolute after:border after:border-gray-300/50 after:rounded-full after:bg-white dark:bg-white/20 peer-checked:bg-primary-500 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500/20 after:transition-all after:content-[''] peer-checked:after:translate-x-full dark:after:border-white/10 peer-checked:after:border-white"
+          class="ui-switch-track rounded-full transition-colors after:absolute after:rounded-full after:transition-all peer-checked:after:translate-x-full"
           :class="{
             'h-4 w-7 after:left-[1px] after:top-[1px] after:h-3 after:w-3': size === 'sm',
             'h-6 w-11 after:left-[2px] after:top-[2px] after:h-5 after:w-5': !size || size === 'md',
@@ -48,29 +48,39 @@ const model = defineModel<boolean>()
 }
 
 .recommend-badge.recommend-on {
-  background-color: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-}
-.dark .recommend-badge.recommend-on {
-  background-color: rgba(34, 197, 94, 0.25);
-  color: #4ade80;
+  background-color: var(--ui-status-success-soft);
+  color: var(--ui-status-success);
 }
 
 .recommend-badge.recommend-off {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-.dark .recommend-badge.recommend-off {
-  background-color: rgba(239, 68, 68, 0.25);
-  color: #f87171;
+  background-color: var(--ui-status-danger-soft);
+  color: var(--ui-status-danger);
 }
 
 .recommend-badge.recommend-conditional {
-  background-color: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  background-color: var(--ui-status-warning-soft);
+  color: var(--ui-status-warning);
 }
-.dark .recommend-badge.recommend-conditional {
-  background-color: rgba(245, 158, 11, 0.25);
-  color: #fbbf24;
+
+.ui-switch-track {
+  background: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent);
+}
+
+.ui-switch-track::after {
+  content: '';
+  border: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-surface-raised);
+}
+
+.peer:focus-visible + .ui-switch-track {
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.peer:checked + .ui-switch-track {
+  background: var(--ui-brand-500);
+}
+
+.peer:checked + .ui-switch-track::after {
+  border-color: color-mix(in srgb, var(--ui-text-on-brand) 85%, transparent);
 }
 </style>

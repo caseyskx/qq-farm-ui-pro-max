@@ -3,6 +3,15 @@ const process = require('node:process');
  * 统计工具 - 重构版
  * 基于状态变化累加收益，而非依赖初始值快照
  */
+const { createModuleLogger } = require('./logger');
+
+const statsLogger = createModuleLogger('stats');
+const verboseStatsDeltaLogsEnabled = String(process.env.FARM_VERBOSE_STATS_DELTA || '') === '1';
+
+function logStatsDelta(message, meta = {}) {
+    if (!verboseStatsDeltaLogsEnabled) return;
+    statsLogger.info(message, meta);
+}
 
 // 账号 worker 启动时间（每个 worker 独立）
 const workerBootAtMs = Date.now();
@@ -97,11 +106,17 @@ function updateStats(currentGold, currentExp) {
         // 防抖: 如果 1秒内 增加了完全相同的 delta，视为重复包忽略
         const now = Date.now();
         if (delta === session.lastExpGain && (now - (session.lastExpTime || 0) < 1000)) {
-            console.warn(`[系统] 忽略重复经验增量 +${delta}`);
+            logStatsDelta('忽略重复经验增量', {
+                delta,
+                currentExp,
+            });
         } else {
             session.lastExpGain = delta;
             session.lastExpTime = now;
-            console.warn(`[系统] 经验 +${delta} (总计: ${currentExp})`);
+            logStatsDelta('经验增量记录', {
+                delta,
+                currentExp,
+            });
         }
     } else {
         session.lastExpGain = 0;

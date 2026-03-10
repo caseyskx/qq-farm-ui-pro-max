@@ -104,17 +104,24 @@ const router = createRouter({
           component: route.component,
           meta: {
             adminOnly: !!route.adminOnly,
+            layoutMode: route.layoutMode ?? 'fluid',
           },
         })),
         {
           path: 'help',
           name: 'help',
           component: () => import('@/views/HelpCenter.vue'),
+          meta: {
+            layoutMode: 'fluid',
+          },
         },
         {
           path: 'farm-tools',
           name: 'farm-tools',
           component: () => import('@/views/FarmTools.vue'),
+          meta: {
+            layoutMode: 'fluid',
+          },
         },
       ],
     },
@@ -171,7 +178,7 @@ router.afterEach(() => {
 
 router.onError((error, to) => {
   if (error.message.includes('Failed to fetch dynamically imported module') || error.message.includes('Importing a module script failed')) {
-    console.warn('捕获到动态模块加载错误，准备重新加载目标路由:', to.fullPath)
+    console.warn('捕获到动态模块加载异常，准备重新加载目标路由:', to.fullPath)
     window.location.href = to.fullPath
   }
 })

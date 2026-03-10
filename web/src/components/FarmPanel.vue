@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import LandCard from '@/components/LandCard.vue'
+import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
 import { useAccountStore } from '@/stores/account'
 import { useFarmStore } from '@/stores/farm'
 import { useStatusStore } from '@/stores/status'
@@ -16,6 +18,7 @@ const { currentAccountId, currentAccount } = storeToRefs(accountStore)
 const { status, loading: statusLoading, realtimeConnected } = storeToRefs(statusStore)
 
 const operating = ref(false)
+const currentOperatingType = ref('')
 const confirmVisible = ref(false)
 const confirmConfig = ref({
   title: '',
@@ -28,11 +31,13 @@ async function executeOperate() {
     return
   confirmVisible.value = false
   operating.value = true
+  currentOperatingType.value = confirmConfig.value.opType
   try {
     await farmStore.operate(currentAccountId.value, confirmConfig.value.opType)
   }
   finally {
     operating.value = false
+    currentOperatingType.value = ''
   }
 }
 
@@ -57,12 +62,53 @@ function handleOperate(opType: string) {
 }
 
 const operations = [
-  { type: 'harvest', label: '收获', icon: 'i-carbon-wheat', color: 'bg-blue-600 hover:bg-blue-700' },
-  { type: 'clear', label: '除草/虫', icon: 'i-carbon-clean', color: 'bg-teal-600 hover:bg-teal-700' },
-  { type: 'plant', label: '种植', icon: 'i-carbon-sprout', color: 'bg-primary-600 hover:bg-primary-700' },
-  { type: 'upgrade', label: '升级土地', icon: 'i-carbon-upgrade', color: 'bg-purple-600 hover:bg-purple-700' },
-  { type: 'all', label: '一键全收', icon: 'i-carbon-flash', color: 'bg-orange-600 hover:bg-orange-700' },
+  { type: 'harvest', label: '收获', icon: 'i-carbon-wheat', color: 'farm-op-harvest' },
+  { type: 'clear', label: '除草/虫', icon: 'i-carbon-clean', color: 'farm-op-clear' },
+  { type: 'plant', label: '种植', icon: 'i-carbon-sprout', color: 'farm-op-plant' },
+  { type: 'upgrade', label: '升级土地', icon: 'i-carbon-upgrade', color: 'farm-op-upgrade' },
+  { type: 'all', label: '一键全收', icon: 'i-carbon-flash', color: 'farm-op-all' },
 ]
+
+const farmConnectionState = computed(() => {
+  if (!currentAccountId.value) {
+    return {
+      label: '未选择账号',
+      badgeClass: 'farm-panel-state-badge--neutral',
+      note: '先选择账号，再查看土地和一键操作。',
+    }
+  }
+
+  if (loading.value || statusLoading.value) {
+    return {
+      label: '同步中',
+      badgeClass: 'farm-panel-state-badge--info',
+      note: '正在刷新连接状态和土地数据。',
+    }
+  }
+
+  if (!status.value?.connection?.connected) {
+    return {
+      label: '账号离线',
+      badgeClass: 'farm-panel-state-badge--warning',
+      note: '请先运行账号或检查网络连接。',
+    }
+  }
+
+  return {
+    label: realtimeConnected.value ? '实时在线' : '在线快照',
+    badgeClass: 'farm-panel-state-badge--success',
+    note: `当前已载入 ${lands.value?.length || 0} 块土地，可直接查看成熟与空闲分布。`,
+  }
+})
+
+const farmSummaryCards = computed(() => [
+  { key: 'harvestable', icon: 'i-carbon-clean', label: '可收', value: summary.value?.harvestable || 0, tone: 'farm-summary-pill--warning' },
+  { key: 'growing', icon: 'i-carbon-sprout', label: '生长', value: summary.value?.growing || 0, tone: 'farm-summary-pill--brand' },
+  { key: 'empty', icon: 'i-carbon-checkbox', label: '空闲', value: summary.value?.empty || 0, tone: 'farm-summary-pill--neutral' },
+  { key: 'dead', icon: 'i-carbon-warning', label: '枯萎', value: summary.value?.dead || 0, tone: 'farm-summary-pill--danger' },
+])
+
+const activeOperationMeta = computed(() => operations.find(op => op.type === currentOperatingType.value) ?? null)
 
 async function refresh() {
   if (currentAccountId.value) {
@@ -107,70 +153,80 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="glass-panel border border-white/20 rounded-lg shadow-sm dark:border-white/10">
-      <!-- Header with Title and Actions -->
-      <div class="flex flex-col items-center justify-between gap-4 border-b border-gray-200/50 p-4 sm:flex-row dark:border-white/10">
-        <h3 class="glass-text-main flex items-center gap-2 text-lg font-bold">
-          <div class="i-carbon-grid text-xl" />
-          土地详情
-        </h3>
-        <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          <button
+  <div class="farm-panel space-y-4">
+    <div class="farm-panel-shell glass-panel rounded-lg shadow-sm">
+      <div class="farm-panel-toolbar ui-mobile-sticky-panel">
+        <div class="farm-panel-toolbar__head">
+          <div class="farm-panel-toolbar__copy">
+            <h3 class="glass-text-main flex items-center gap-2 text-lg font-bold">
+              <div class="i-carbon-grid text-xl" />
+              土地详情
+            </h3>
+            <p class="farm-panel-toolbar__desc">
+              {{ farmConnectionState.note }}
+            </p>
+          </div>
+          <span class="farm-panel-state-badge" :class="farmConnectionState.badgeClass">
+            {{ farmConnectionState.label }}
+          </span>
+        </div>
+
+        <div class="farm-panel-summary ui-bulk-actions">
+          <div
+            v-for="item in farmSummaryCards"
+            :key="item.key"
+            class="farm-summary-pill flex items-center gap-1.5 rounded-full px-3 py-1"
+            :class="item.tone"
+          >
+            <div :class="item.icon" />
+            <span class="font-medium">{{ item.label }}: {{ item.value }}</span>
+          </div>
+        </div>
+
+        <div class="farm-panel-actions ui-bulk-actions">
+          <BaseButton
             v-for="op in operations"
             :key="op.type"
-            class="flex items-center justify-center gap-1.5 rounded px-3 py-2 text-sm text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+            variant="primary"
+            class="farm-panel-op-button"
             :class="op.color"
             :disabled="operating"
+            :loading="operating && currentOperatingType === op.type"
+            :loading-label="`${op.label}中`"
+            :icon-class="op.icon"
             @click="handleOperate(op.type)"
           >
-            <div :class="op.icon" />
             {{ op.label }}
-          </button>
+          </BaseButton>
         </div>
-      </div>
 
-      <!-- Summary -->
-      <div class="flex flex-wrap gap-4 border-b border-gray-200/50 bg-black/5 p-4 text-sm dark:border-white/10 dark:bg-black/20">
-        <div class="flex items-center gap-1.5 rounded-full bg-orange-100 px-3 py-1 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-          <div class="i-carbon-clean" />
-          <span class="font-medium">可收: {{ summary?.harvestable || 0 }}</span>
-        </div>
-        <div class="flex items-center gap-1.5 rounded-full bg-primary-100 px-3 py-1 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">
-          <div class="i-carbon-sprout" />
-          <span class="font-medium">生长: {{ summary?.growing || 0 }}</span>
-        </div>
-        <div class="glass-text-muted flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1 dark:bg-white/10">
-          <div class="i-carbon-checkbox" />
-          <span class="font-medium">空闲: {{ summary?.empty || 0 }}</span>
-        </div>
-        <div class="flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-          <div class="i-carbon-warning" />
-          <span class="font-medium">枯萎: {{ summary?.dead || 0 }}</span>
+        <div v-if="operating && activeOperationMeta" class="farm-panel-operating-note">
+          正在执行 {{ activeOperationMeta.label }}，请稍候...
         </div>
       </div>
 
       <!-- Grid -->
       <div class="p-4">
         <div v-if="loading || statusLoading" class="flex justify-center py-12">
-          <div class="i-svg-spinners-90-ring-with-bg text-4xl text-blue-500" />
+          <div class="farm-panel-loading ui-state-spinner i-svg-spinners-90-ring-with-bg text-4xl" />
         </div>
 
-        <div v-else-if="!status?.connection?.connected" class="glass-text-muted flex flex-col items-center justify-center gap-4 border border-white/20 rounded-lg bg-black/5 p-12 text-center shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-black/20">
-          <div class="i-carbon-connection-signal-off text-4xl text-gray-400" />
-          <div>
-            <div class="glass-text-main text-lg font-medium">
-              账号未登录
-            </div>
-            <div class="glass-text-muted mt-1 text-sm">
-              请先运行账号或检查网络连接
-            </div>
-          </div>
-        </div>
+        <BaseEmptyState
+          v-else-if="!status?.connection?.connected"
+          class="farm-panel-empty-state glass-text-muted rounded-lg p-12 text-center shadow-sm"
+          icon="i-carbon-connection-signal-off"
+          title="账号未登录"
+          description="请先运行账号或检查网络连接"
+        />
 
-        <div v-else-if="!lands || lands.length === 0" class="flex justify-center py-12 text-gray-500">
-          暂无土地数据
-        </div>
+        <BaseEmptyState
+          v-else-if="!lands || lands.length === 0"
+          compact
+          class="farm-panel-empty-state glass-text-muted rounded-lg px-6 py-10 text-center"
+          icon="i-carbon-grid"
+          title="暂无土地数据"
+          description="请稍后刷新，或先确认当前账号已经进入农场首页。"
+        />
 
         <div v-else class="grid grid-cols-2 gap-4 lg:grid-cols-6 md:grid-cols-4 sm:grid-cols-3">
           <LandCard
@@ -191,3 +247,236 @@ onUnmounted(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.farm-panel {
+  color: var(--ui-text-1);
+}
+
+.farm-panel-shell,
+.farm-panel-toolbar,
+.farm-panel-summary,
+.farm-panel-summary-neutral,
+.farm-panel-empty-state {
+  border: 1px solid var(--ui-border-subtle) !important;
+}
+
+.farm-panel-shell,
+.farm-panel-summary,
+.farm-panel-empty-state {
+  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent) !important;
+}
+
+.farm-panel-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+}
+
+.farm-panel-toolbar__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.875rem;
+}
+
+.farm-panel-toolbar__copy {
+  min-width: 0;
+}
+
+.farm-panel-toolbar__desc {
+  margin-top: 0.45rem;
+  color: var(--ui-text-2);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.farm-panel-state-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.85rem;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.farm-panel-state-badge--neutral {
+  border-color: var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent);
+  color: var(--ui-text-2);
+}
+
+.farm-panel-state-badge--info {
+  border-color: color-mix(in srgb, var(--ui-status-info) 24%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent);
+  color: var(--ui-status-info);
+}
+
+.farm-panel-state-badge--warning {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 24%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent);
+  color: var(--ui-status-warning);
+}
+
+.farm-panel-state-badge--success {
+  border-color: color-mix(in srgb, var(--ui-status-success) 24%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent);
+  color: var(--ui-status-success);
+}
+
+.farm-panel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0;
+  border: none !important;
+}
+
+.farm-panel-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ui-btn.farm-panel-op-button {
+  color: var(--ui-text-on-brand) !important;
+  box-shadow:
+    0 10px 22px -18px color-mix(in srgb, var(--ui-shadow-panel) 86%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--ui-text-on-brand) 22%, transparent);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    filter 180ms ease,
+    background-color 180ms ease;
+}
+
+.ui-btn.farm-panel-op-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 16px 26px -18px color-mix(in srgb, var(--ui-shadow-panel) 92%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--ui-text-on-brand) 26%, transparent);
+}
+
+.ui-btn.farm-panel-op-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+.ui-btn.farm-panel-op-button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--ui-focus-ring),
+    0 12px 22px -18px color-mix(in srgb, var(--ui-shadow-panel) 86%, transparent);
+}
+
+.farm-op-harvest {
+  background: var(--ui-status-info);
+}
+
+.farm-op-harvest:hover {
+  background: color-mix(in srgb, var(--ui-status-info) 88%, black 12%);
+}
+
+.farm-op-clear {
+  background: color-mix(in srgb, var(--ui-status-success) 76%, var(--ui-status-info) 24%);
+}
+
+.farm-op-clear:hover {
+  background: color-mix(in srgb, var(--ui-status-success) 82%, black 18%);
+}
+
+.farm-op-plant {
+  background: var(--ui-brand-600);
+}
+
+.farm-op-plant:hover {
+  background: var(--ui-brand-700);
+}
+
+.farm-op-upgrade {
+  background: color-mix(in srgb, var(--ui-status-info) 42%, var(--ui-brand-600) 58%);
+}
+
+.farm-op-upgrade:hover {
+  background: color-mix(in srgb, var(--ui-status-info) 40%, var(--ui-brand-700) 60%);
+}
+
+.farm-op-all {
+  background: var(--ui-status-warning);
+}
+
+.farm-op-all:hover {
+  background: color-mix(in srgb, var(--ui-status-warning) 88%, black 12%);
+}
+
+.farm-summary-pill--brand {
+  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-brand-700) 72%, var(--ui-text-1) 28%) !important;
+}
+
+.farm-summary-pill--warning {
+  background: color-mix(in srgb, var(--ui-status-warning) 14%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1) 22%) !important;
+}
+
+.farm-summary-pill--danger {
+  background: color-mix(in srgb, var(--ui-status-danger) 14%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1) 22%) !important;
+}
+
+.farm-panel-summary-neutral {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
+}
+
+.farm-panel-empty-state {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
+}
+
+.farm-panel-empty-icon,
+.farm-panel-empty-copy {
+  color: var(--ui-text-2) !important;
+}
+
+.farm-panel-loading {
+  color: var(--ui-status-info) !important;
+}
+
+.farm-panel-operating-note {
+  color: var(--ui-text-2);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.farm-summary-pill--neutral {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
+  color: var(--ui-text-2) !important;
+}
+
+@media (max-width: 767px) {
+  .farm-panel-toolbar {
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-bg-surface-raised) 90%, transparent) 0%,
+      color-mix(in srgb, var(--ui-bg-surface) 82%, transparent) 100%
+    ) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 11;
+  }
+
+  .farm-panel-toolbar__head {
+    flex-direction: column;
+  }
+
+  .farm-panel-actions {
+    margin-inline: -0.1rem;
+    padding-inline: 0.1rem;
+  }
+}
+</style>

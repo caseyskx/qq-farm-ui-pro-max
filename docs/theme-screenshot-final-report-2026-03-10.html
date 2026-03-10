@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>主题统一截图版最终验收报告 - 2026-03-10</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #10192c;
+      --panel-2: #15233c;
+      --line: #29415e;
+      --text: #e7eefc;
+      --muted: #9db0d1;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --accent: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(180deg, #09101d, #0b1220 28%, #0b1220);
+      color: var(--text);
+      font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { max-width: 1380px; margin: 0 auto; }
+    h1, h2, h3 { margin: 0 0 12px; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 19px; margin-top: 24px; }
+    p { margin: 0 0 10px; color: var(--muted); }
+    code {
+      background: #0d1a31;
+      color: #d4e4ff;
+      border-radius: 6px;
+      padding: 1px 6px;
+    }
+    .card {
+      margin-top: 14px;
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    }
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .kpi > div {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(8, 15, 28, 0.45);
+    }
+    .label { color: var(--accent); font-weight: 700; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .danger { color: var(--danger); font-weight: 700; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 14px;
+    }
+    .shot {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      background: rgba(7, 13, 24, 0.5);
+    }
+    .shot header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(13, 22, 39, 0.85);
+    }
+    .shot header strong { font-size: 14px; }
+    .shot header span { color: var(--muted); font-size: 12px; }
+    .shot img {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #08111f;
+    }
+    .list { margin: 8px 0 0 18px; color: var(--muted); }
+    .list li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: #0d1a31; }
+    .foot { margin-top: 18px; font-size: 12px; color: #8ca1c6; }
+    @media (max-width: 960px) {
+      .kpi, .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>主题统一截图版最终验收报告</h1>
+    <p>生成时间：2026-03-10（Asia/Shanghai）</p>
+
+    <div class="card">
+      <h2>结论</h2>
+      <div class="kpi">
+        <div><div class="label">业务页硬编码色</div><div class="ok">0</div></div>
+        <div><div class="label">白名单残留</div><div class="ok">FarmTools iframe 主题桥接</div></div>
+        <div><div class="label">必要语义色</div><div class="ok">UserInfoCard 报错红色</div></div>
+        <div><div class="label">构建校验</div><div class="ok">`build` / `vue-tsc` / `check:ui-appearance` 通过</div></div>
+      </div>
+      <p style="margin-top: 12px;">当前可确认：主题系统、深浅模式、品牌色和业务语义色已经收口到统一 token 体系。截图验收已覆盖登录、概览、设置、账号、好友、偷菜设置、帮助中心和农场工具 8 个关键入口页的深浅双模式。</p>
+    </div>
+
+    <div class="card">
+      <h2>已验收截图</h2>
+      <div class="grid">
+        <div class="shot">
+          <header><strong>登录页 · 深色</strong><span>login-audit.png</span></header>
+          <img src="theme-audit-screenshots/login-audit.png" alt="登录页深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>登录页 · 浅色</strong><span>login-light.png</span></header>
+          <img src="theme-audit-screenshots/login-light.png" alt="登录页浅色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>概览页 · 深色</strong><span>dashboard-dark.png</span></header>
+          <img src="theme-audit-screenshots/dashboard-dark.png" alt="概览页深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>概览页 · 浅色</strong><span>dashboard-light.png</span></header>
+          <img src="theme-audit-screenshots/dashboard-light.png" alt="概览页浅色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>设置页 · 深色</strong><span>settings-dark.png</span></header>
+          <img src="theme-audit-screenshots/settings-dark.png" alt="设置页深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>设置页 · 浅色</strong><span>settings-light.png</span></header>
+          <img src="theme-audit-screenshots/settings-light.png" alt="设置页浅色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>账号页 · 深色</strong><span>accounts-dark.png</span></header>
+          <img src="theme-audit-screenshots/accounts-dark.png" alt="账号页深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>账号页 · 浅色</strong><span>accounts-light.png</span></header>
+          <img src="theme-audit-screenshots/accounts-light.png" alt="账号页浅色截图" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>辅助截图</h2>
+      <div class="grid">
+        <div class="shot">
+          <header><strong>农场工具 · 深色</strong><span>farm-tools-dark.png</span></header>
+          <img src="theme-audit-screenshots/farm-tools-dark.png" alt="农场工具深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>农场工具 · 浅色</strong><span>farm-tools-light.png</span></header>
+          <img src="theme-audit-screenshots/farm-tools-light.png" alt="农场工具浅色截图" />
+        </div>
+      </div>
+      <p style="margin-top: 12px;">农场工具页属于 iframe 主题桥接白名单页面，已验证桥接策略与深浅模式联动正常。其内部类覆盖属于必要保留，不计入杂色。</p>
+    </div>
+
+    <div class="card">
+      <h2>静态预览 + Mock 验收截图</h2>
+      <p>由于真实后端被 MySQL 依赖阻断，本组页面通过本地静态预览 + 最小 API mock 完成主题截图验收。该方式只验证 UI 结构、文本对比、面板层级和主题 token，不验证业务接口正确性。</p>
+      <div class="grid">
+        <div class="shot">
+          <header><strong>好友页 · 深色</strong><span>friends-dark.png</span></header>
+          <img src="theme-audit-screenshots/friends-dark.png" alt="好友页深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>好友页 · 浅色</strong><span>friends-light.png</span></header>
+          <img src="theme-audit-screenshots/friends-light.png" alt="好友页浅色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>偷菜设置 · 深色</strong><span>steal-settings-dark.png</span></header>
+          <img src="theme-audit-screenshots/steal-settings-dark.png" alt="偷菜设置深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>偷菜设置 · 浅色</strong><span>steal-settings-light.png</span></header>
+          <img src="theme-audit-screenshots/steal-settings-light.png" alt="偷菜设置浅色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>帮助中心 · 深色</strong><span>help-center-dark.png</span></header>
+          <img src="theme-audit-screenshots/help-center-dark.png" alt="帮助中心深色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>帮助中心 · 浅色</strong><span>help-center-light.png</span></header>
+          <img src="theme-audit-screenshots/help-center-light.png" alt="帮助中心浅色截图" />
+        </div>
+        <div class="shot">
+          <header><strong>农场工具 · 深色（Mock）</strong><span>farm-tools-dark.png</span></header>
+          <img src="theme-audit-screenshots/farm-tools-dark.png" alt="农场工具深色 mock 截图" />
+        </div>
+        <div class="shot">
+          <header><strong>农场工具 · 浅色（Mock）</strong><span>farm-tools-light.png</span></header>
+          <img src="theme-audit-screenshots/farm-tools-light.png" alt="农场工具浅色 mock 截图" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>本轮新增确认</h2>
+      <ul class="list">
+        <li>登录页底部灰带已修复：根容器按路由切换为登录态 <code>min-height + overflow-visible</code>、工作台态 <code>h-screen + overflow-hidden</code>。</li>
+        <li><code>StealSettings</code> 的紫色“时经” badge 已替换为 <code>steal-metric-pill-info</code>，统一使用信息语义色。</li>
+        <li><code>HelpCenter</code> 的页标题和作者头像外环渐变已替换为 <code>help-page-title</code>、<code>help-author-orb-shell</code>。</li>
+        <li><code>FarmTools</code> 的页标题渐变已替换为 <code>farm-tools-page-title</code>。</li>
+        <li><code>AdminOperationLogs.vue</code> 当前已恢复可读，复扫未再发现零散直接颜色类。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>补充页面状态</h2>
+      <table>
+        <thead>
+          <tr><th>页面</th><th>当前状态</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Friends</td><td class="ok">截图通过</td><td>已补深浅双模式 mock 截图；空态、批量模式入口、顶部搜索和侧栏激活态对比正常。</td></tr>
+          <tr><td>StealSettings</td><td class="ok">截图通过</td><td>已补深浅双模式 mock 截图；“时经” badge 已改为信息语义色，顶部筛选和底部保存区对比正常。</td></tr>
+          <tr><td>HelpCenter</td><td class="ok">截图通过</td><td>已补深浅双模式 mock 截图；页标题和作者头像外环渐变已 token 化，目录侧栏和正文卡片对比正常。</td></tr>
+          <tr><td>FarmTools</td><td class="ok">截图通过</td><td>已补深浅双模式 mock 截图；保留 iframe 主题桥接覆盖，这是必要主题同步策略，不属于杂色残留。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>环境阻塞</h2>
+      <p>真实后端仍被数据库依赖阻断，但不再影响 UI 主题验收结论：</p>
+      <ul class="list">
+        <li><code>3000</code> 端口一度未监听，浏览器脚本访问 <code>http://10.211.55.2:3000/login</code> 返回连接拒绝。</li>
+        <li>前端产物已重新构建成功，但后端 <code>core</code> 启动时被 MySQL 拦截，报错：<code>connect ECONNREFUSED 127.0.0.1:4409</code>。</li>
+        <li>为避免数据库阻塞，本轮补充页面改为 <code>vite preview + API mock</code> 方式完成主题截图归档；主题视觉结论有效，业务接口结论不在本报告范围内。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>关联报告</h2>
+      <ul class="list">
+        <li>最终白名单与验收清单：<code>docs/theme-final-whitelist-checklist-2026-03-10.html</code></li>
+        <li>截图目录：<code>docs/theme-audit-screenshots/</code></li>
+      </ul>
+    </div>
+
+    <p class="foot">说明：本报告只记录 UI 主题统一、截图验收和环境阻塞，不涉及业务逻辑变更。</p>
+  </div>
+</body>
+</html>

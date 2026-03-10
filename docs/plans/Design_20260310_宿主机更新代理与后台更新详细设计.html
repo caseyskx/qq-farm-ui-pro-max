@@ -1,0 +1,817 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>宿主机更新代理与后台更新详细设计 - 2026-03-10</title>
+  <style>
+    :root {
+      --bg: #06111a;
+      --panel: #0d1c2a;
+      --panel-2: #132535;
+      --text: #e8eef5;
+      --muted: #9eb3c7;
+      --line: #29435b;
+      --brand: #4ecdc4;
+      --brand-2: #9ff3ee;
+      --ok: #5cc98b;
+      --warn: #ffbf69;
+      --danger: #ff7b7b;
+      --ink: #08131d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background:
+        radial-gradient(circle at top left, rgba(78, 205, 196, 0.16), transparent 26%),
+        radial-gradient(circle at top right, rgba(159, 243, 238, 0.09), transparent 22%),
+        linear-gradient(180deg, #06111a 0%, #08121b 100%);
+      color: var(--text);
+      font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { max-width: 1220px; margin: 0 auto; }
+    .hero, .card {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(13, 28, 42, 0.98), rgba(19, 37, 53, 0.96));
+      border-radius: 20px;
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.24);
+    }
+    .hero { padding: 24px 26px; }
+    .card { margin-top: 16px; padding: 18px 20px; }
+    h1, h2, h3 { margin: 0 0 12px; line-height: 1.32; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 20px; margin-top: 24px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      background: var(--ink);
+      color: var(--brand-2);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .metric {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(8, 19, 29, 0.72);
+    }
+    .metric .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .metric .value {
+      margin-top: 7px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .brand { color: var(--brand); font-weight: 700; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .danger { color: var(--danger); font-weight: 700; }
+    code {
+      font-size: 13px;
+      border: 1px solid rgba(78, 205, 196, 0.18);
+      background: #08131d;
+      color: #cdf8f5;
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
+    ul, ol { margin: 8px 0 0 20px; color: var(--muted); }
+    li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: rgba(8, 19, 29, 0.9);
+      color: var(--brand-2);
+      font-weight: 700;
+    }
+    .callout {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: rgba(8, 19, 29, 0.92);
+      border-left: 4px solid var(--brand);
+      color: var(--muted);
+    }
+    .flow {
+      margin-top: 12px;
+      padding: 14px 16px;
+      border: 1px dashed var(--line);
+      border-radius: 16px;
+      background: rgba(8, 19, 29, 0.68);
+    }
+    .flow-line {
+      margin: 6px 0;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+    .footer {
+      margin-top: 26px;
+      color: #8ba2b8;
+      font-size: 12px;
+    }
+    @media (max-width: 980px) {
+      body { padding: 16px; }
+      .hero, .card { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>宿主机更新代理与后台更新详细设计</h1>
+      <p>这份设计在 2026 年 3 月 10 日的仓库状态上继续下钻，目标是把“管理员看到新版本提醒，点击确认后自动更新”拆成可实施的架构，而不直接进入编码。</p>
+      <div class="meta">
+        <span class="chip">基线版本：v4.5.17</span>
+        <span class="chip">部署栈：App + MySQL 8 + Redis 7 + ipad860</span>
+        <span class="chip">后台入口：设置页管理员系统区</span>
+        <span class="chip">推荐执行器：宿主机更新代理</span>
+      </div>
+      <div class="grid">
+        <div class="metric">
+          <div class="label">版本源</div>
+          <div class="value">GitHub Releases / Manifest</div>
+        </div>
+        <div class="metric">
+          <div class="label">任务触发</div>
+          <div class="value">管理员在 Web 后台确认</div>
+        </div>
+        <div class="metric">
+          <div class="label">真正执行</div>
+          <div class="value">宿主机代理，不在容器内执行</div>
+        </div>
+        <div class="metric">
+          <div class="label">状态承载</div>
+          <div class="value">MySQL 任务表 + 系统配置缓存</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>一、最终推荐架构</h2>
+      <div class="flow">
+        <div class="flow-line">GitHub Release / latest manifest</div>
+        <div class="flow-line">        -&gt; 应用后台定时检查最新版本</div>
+        <div class="flow-line">        -&gt; system_settings 记录 latest_release 缓存</div>
+        <div class="flow-line">        -&gt; 管理员设置页出现“新版本可更新”提示</div>
+        <div class="flow-line">        -&gt; 管理员点击确认更新</div>
+        <div class="flow-line">        -&gt; 应用后台写入 update_jobs 队列</div>
+        <div class="flow-line">        -&gt; 宿主机更新代理轮询并认领任务</div>
+        <div class="flow-line">        -&gt; 执行 repair-deploy / repair-mysql / update-app</div>
+        <div class="flow-line">        -&gt; 写回任务状态和验证结果</div>
+        <div class="flow-line">        -&gt; 前端轮询看到成功 / 失败 / 回滚结果</div>
+      </div>
+      <div class="callout">
+        <span class="brand">核心原则：</span>
+        Web 负责“发现、提醒、授权、展示”；宿主机代理负责“更新、回滚、写日志”。这样可以避免把 Docker 控制权限直接暴露给应用容器。
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>二、为什么推荐“数据库轮询型宿主机代理”</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>备选方案</th>
+            <th>问题</th>
+            <th>结论</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>前端按钮直接调 shell</td>
+            <td>浏览器没有宿主机权限</td>
+            <td>不可行</td>
+          </tr>
+          <tr>
+            <td>应用容器直连 Docker</td>
+            <td>通常要挂 <code>/var/run/docker.sock</code>，安全边界很差</td>
+            <td><span class="danger">不推荐</span></td>
+          </tr>
+          <tr>
+            <td>宿主机开放 HTTP 更新接口给容器调用</td>
+            <td>要解决容器到宿主机连通、鉴权、端口暴露、防误触发</td>
+            <td>可做，但不是第一期最简方案</td>
+          </tr>
+          <tr>
+            <td>宿主机代理轮询 MySQL 中的更新任务</td>
+            <td>实现简单，权限边界清晰，和当前 Docker 部署结构兼容</td>
+            <td><span class="ok">第一期推荐</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p>当前标准部署下，MySQL 本来就在 Docker 栈里。应用后台可以轻松写入任务，宿主机代理也可以通过 <code>docker exec</code> 或一次性 MySQL 客户端容器读取和回写任务状态，不需要再引入新的网络控制面。</p>
+    </section>
+
+    <section class="card">
+      <h2>三、统一安装器继续怎么细化</h2>
+      <h3>推荐新增入口</h3>
+      <p>建议新增统一入口脚本，例如 <code>scripts/deploy/install-or-update.sh</code>，它只负责状态识别和流程编排，底层继续复用现有脚本。</p>
+
+      <h3>建议的参数</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>参数</th>
+            <th>含义</th>
+            <th>默认</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>--mode auto|install|upgrade|repair</code></td>
+            <td>自动识别 / 强制全新安装 / 强制升级 / 进入修复</td>
+            <td><code>auto</code></td>
+          </tr>
+          <tr>
+            <td><code>--upgrade-strategy preserve|overwrite</code></td>
+            <td>保留旧目录或覆盖当前目录</td>
+            <td><code>preserve</code></td>
+          </tr>
+          <tr>
+            <td><code>--manifest-url</code></td>
+            <td>版本清单地址</td>
+            <td>GitHub 原始地址</td>
+          </tr>
+          <tr>
+            <td><code>--channel stable|beta</code></td>
+            <td>更新通道</td>
+            <td><code>stable</code></td>
+          </tr>
+          <tr>
+            <td><code>--offline-bundle /path</code></td>
+            <td>优先从离线包安装</td>
+            <td>空</td>
+          </tr>
+          <tr>
+            <td><code>--expose-infra-ports</code></td>
+            <td>是否暴露 MySQL/Redis/ipad860 到宿主机</td>
+            <td>关闭</td>
+          </tr>
+          <tr>
+            <td><code>--non-interactive</code></td>
+            <td>无人值守部署</td>
+            <td>关闭</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>建议额外生成的文件</h3>
+      <ul>
+        <li><code>install.meta.json</code>：记录版本、镜像、架构、安装模式、部署时间。</li>
+        <li><code>install-report.json</code>：记录验证结果和失败原因分类。</li>
+        <li><code>docker-compose.override.yml</code>：只有在需要暴露 MySQL / Redis / ipad860 端口时才生成。</li>
+        <li><code>current</code> 与 <code>previous</code> 链接或元数据：用于回滚。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>四、更新版本源建议做成统一 Manifest</h2>
+      <p>不要让安装脚本、后台版本检查和发布文档各自猜版本。建议发布时生成一份统一版本清单，例如 <code>latest.json</code>。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>示例</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>version</code></td>
+            <td><code>4.5.18</code></td>
+            <td>前后端判断是否有新版本</td>
+          </tr>
+          <tr>
+            <td><code>channel</code></td>
+            <td><code>stable</code></td>
+            <td>支持稳定版 / 测试版通道</td>
+          </tr>
+          <tr>
+            <td><code>releasedAt</code></td>
+            <td><code>2026-03-12T09:30:00Z</code></td>
+            <td>展示时间与排序</td>
+          </tr>
+          <tr>
+            <td><code>appImage</code></td>
+            <td><code>smdk000/qq-farm-bot-ui:4.5.18</code></td>
+            <td>更新主程序镜像</td>
+          </tr>
+          <tr>
+            <td><code>ipad860Image</code></td>
+            <td><code>smdk000/ipad860:20260312</code></td>
+            <td>仅当协议服务也要升级时使用</td>
+          </tr>
+          <tr>
+            <td><code>offlineBundleUrl</code></td>
+            <td>离线包地址</td>
+            <td>国内网络和离线部署兜底</td>
+          </tr>
+          <tr>
+            <td><code>sourceArchiveUrl</code></td>
+            <td>GitHub 源码包</td>
+            <td>镜像构建兜底</td>
+          </tr>
+          <tr>
+            <td><code>notes</code></td>
+            <td>文本或 URL</td>
+            <td>在后台直接显示更新说明</td>
+          </tr>
+          <tr>
+            <td><code>requiresDbRepair</code></td>
+            <td><code>true</code></td>
+            <td>提示代理更新前先执行数据库修复</td>
+          </tr>
+          <tr>
+            <td><code>minInstallerVersion</code></td>
+            <td><code>1.0.0</code></td>
+            <td>防止旧安装脚本执行新包失败</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <span class="brand">建议：</span>
+        第一阶段可以把这份 Manifest 放到 GitHub Release 资产或仓库固定地址。以后如果要换自建更新服务器，只需要替换这份 Manifest 的来源，不必重写 UI 和代理流程。
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>五、宿主机更新代理详细方案</h2>
+      <h3>推荐运行方式</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>组件</th>
+            <th>建议</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>代理脚本</td>
+            <td><code>scripts/deploy/update-agent.sh</code></td>
+            <td>和现有部署脚本同目录，便于打包与修复</td>
+          </tr>
+          <tr>
+            <td>服务托管</td>
+            <td>systemd service</td>
+            <td>自动重启、日志可控、适合 Linux 服务器</td>
+          </tr>
+          <tr>
+            <td>执行模式</td>
+            <td>常驻循环或短间隔轮询</td>
+            <td>第一期实现简单，延迟可接受</td>
+          </tr>
+          <tr>
+            <td>互斥锁</td>
+            <td><code>flock</code> 或锁文件</td>
+            <td>确保同一时间只跑一个更新任务</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>代理职责</h3>
+      <ol>
+        <li>读取部署目录和 <code>.env</code>。</li>
+        <li>轮询 <code>update_jobs</code>，认领待执行任务。</li>
+        <li>执行预检、备份、部署修复、数据库修复、主程序更新、健康验证。</li>
+        <li>把每个阶段的状态和摘要回写到任务表。</li>
+        <li>必要时执行回滚。</li>
+      </ol>
+
+      <h3>代理为什么不建议直接写成 Node 服务</h3>
+      <p>当前目标环境未必有宿主机 Node 运行时，但安装 Docker 是必选的。因此第一期代理建议优先采用 shell + Docker 辅助命令的方式。以后如果需要更复杂的并发控制、签名校验或灰度分流，再考虑演进为 Go 或 Node 常驻服务。</p>
+    </section>
+
+    <section class="card">
+      <h2>六、更新任务表建议</h2>
+      <p>建议新增 <code>update_jobs</code> 表，而不是把所有过程都塞进 <code>system_settings</code>。原因很简单：更新任务天然是日志型、历史型、多次发生的对象。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型建议</th>
+            <th>含义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>id</code></td>
+            <td>BIGINT</td>
+            <td>任务主键</td>
+          </tr>
+          <tr>
+            <td><code>requested_by</code></td>
+            <td>VARCHAR(100)</td>
+            <td>触发更新的管理员用户名</td>
+          </tr>
+          <tr>
+            <td><code>current_version</code></td>
+            <td>VARCHAR(64)</td>
+            <td>点击确认时的当前版本</td>
+          </tr>
+          <tr>
+            <td><code>target_version</code></td>
+            <td>VARCHAR(64)</td>
+            <td>目标版本</td>
+          </tr>
+          <tr>
+            <td><code>channel</code></td>
+            <td>VARCHAR(32)</td>
+            <td>stable / beta</td>
+          </tr>
+          <tr>
+            <td><code>strategy</code></td>
+            <td>VARCHAR(32)</td>
+            <td>preserve / overwrite</td>
+          </tr>
+          <tr>
+            <td><code>status</code></td>
+            <td>VARCHAR(32)</td>
+            <td>见下面状态机</td>
+          </tr>
+          <tr>
+            <td><code>step</code></td>
+            <td>VARCHAR(64)</td>
+            <td>当前执行步骤</td>
+          </tr>
+          <tr>
+            <td><code>progress</code></td>
+            <td>INT</td>
+            <td>0-100 的粗粒度进度</td>
+          </tr>
+          <tr>
+            <td><code>agent_host</code></td>
+            <td>VARCHAR(128)</td>
+            <td>认领任务的机器</td>
+          </tr>
+          <tr>
+            <td><code>log_path</code></td>
+            <td>VARCHAR(255)</td>
+            <td>宿主机日志文件路径</td>
+          </tr>
+          <tr>
+            <td><code>summary</code></td>
+            <td>TEXT</td>
+            <td>简短结果说明</td>
+          </tr>
+          <tr>
+            <td><code>details_json</code></td>
+            <td>JSON</td>
+            <td>阶段结果、镜像、端口、校验细节</td>
+          </tr>
+          <tr>
+            <td><code>created_at</code> / <code>started_at</code> / <code>finished_at</code></td>
+            <td>DATETIME</td>
+            <td>生命周期时间戳</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>状态建议</h3>
+      <p><code>queued</code> → <code>claimed</code> → <code>precheck</code> → <code>backup</code> → <code>repair</code> → <code>pull_or_build</code> → <code>deploy</code> → <code>verify</code> → <code>succeeded</code></p>
+      <p>失败链路：<code>failed</code> 或 <code>rollback_running</code> → <code>rolled_back</code> / <code>rollback_failed</code></p>
+    </section>
+
+    <section class="card">
+      <h2>七、哪些信息放到 system_settings 更合适</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>键</th>
+            <th>建议内容</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>update_config</code></td>
+            <td>版本源、Manifest URL、通道、是否允许后台更新、检查周期</td>
+            <td>是系统级固定配置</td>
+          </tr>
+          <tr>
+            <td><code>update_release_cache</code></td>
+            <td>最近一次检查到的最新版本快照</td>
+            <td>避免每次打开页面都请求 GitHub</td>
+          </tr>
+          <tr>
+            <td><code>update_runtime</code></td>
+            <td>最后检查时间、最后成功更新时间、当前活跃任务 ID</td>
+            <td>快速展示全局状态</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>这些内容和当前的 <code>global_config</code> 一样，天然属于系统级配置，而不是单次任务历史。</p>
+    </section>
+
+    <section class="card">
+      <h2>八、后台 API 建议</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>接口</th>
+            <th>方法</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/api/admin/system-update/overview</code></td>
+            <td>GET</td>
+            <td>返回当前版本、最新版本、是否可升级、最近任务摘要</td>
+          </tr>
+          <tr>
+            <td><code>/api/admin/system-update/check</code></td>
+            <td>POST</td>
+            <td>管理员手动检查一次新版本</td>
+          </tr>
+          <tr>
+            <td><code>/api/admin/system-update/config</code></td>
+            <td>GET / POST</td>
+            <td>读取或保存更新配置</td>
+          </tr>
+          <tr>
+            <td><code>/api/admin/system-update/jobs</code></td>
+            <td>POST</td>
+            <td>创建更新任务</td>
+          </tr>
+          <tr>
+            <td><code>/api/admin/system-update/jobs/latest</code></td>
+            <td>GET</td>
+            <td>获取最近一条任务状态</td>
+          </tr>
+          <tr>
+            <td><code>/api/admin/system-update/jobs/:id</code></td>
+            <td>GET</td>
+            <td>查看某条更新任务详情</td>
+          </tr>
+          <tr>
+            <td><code>/api/admin/system-update/jobs/:id/retry</code></td>
+            <td>POST</td>
+            <td>失败后重试</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>接口权限</h3>
+      <ul>
+        <li>只允许超级管理员使用。</li>
+        <li>写操作必须记录操作人用户名、IP 和时间。</li>
+        <li>创建更新任务时必须带当前版本和目标版本，后台再做一次比对，防止页面过期误触发。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>九、前端页面建议怎么挂</h2>
+      <h3>推荐挂点</h3>
+      <p>基于当前代码结构，最合适的入口不是新页面，而是现有 [Settings.vue] 同类管理员系统卡片区域。</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>位置</th>
+            <th>建议内容</th>
+            <th>理由</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>设置页管理员系统区</td>
+            <td>“系统更新”卡片</td>
+            <td>现有第三方 API、自检、集群配置都在这里，用户心智一致</td>
+          </tr>
+          <tr>
+            <td>管理员顶部提醒</td>
+            <td>新版本可更新 badge</td>
+            <td>让超级管理员一进后台就能看到</td>
+          </tr>
+          <tr>
+            <td>通知/公告体系</td>
+            <td>只同步更新说明，不直接执行更新</td>
+            <td>普通用户可以看公告，但不应看到更新按钮</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>为什么更新状态展示建议先用 HTTP 轮询，不先用 Socket</h3>
+      <ul>
+        <li>更新过程中应用本身会重启，WebSocket 会断。</li>
+        <li>轮询更简单，掉线后自动恢复更自然。</li>
+        <li>当前更新状态变更频率不高，5 秒轮询完全足够。</li>
+      </ul>
+
+      <h3>管理员卡片最少应展示</h3>
+      <ul>
+        <li>当前版本</li>
+        <li>最新版本</li>
+        <li>发布日期</li>
+        <li>更新摘要</li>
+        <li>更新通道</li>
+        <li>最近检查时间</li>
+        <li>是否存在进行中的任务</li>
+        <li>“保留旧版本更新” / “覆盖更新” 两种确认按钮</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>十、管理员提醒逻辑建议</h2>
+      <p>当前数据库里已经有 <code>user_preferences.app_seen_version</code>。这非常适合用来记录“管理员已看过哪个版本的更新提醒”。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>条件</th>
+            <th>行为</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>当前用户不是管理员</td>
+            <td>不展示更新按钮，只展示普通公告</td>
+          </tr>
+          <tr>
+            <td>管理员且 <code>latest.version &gt; current.version</code></td>
+            <td>展示“新版本可更新”提示</td>
+          </tr>
+          <tr>
+            <td>管理员已关闭本次提醒</td>
+            <td>把 <code>app_seen_version</code> 记为最新版本</td>
+          </tr>
+          <tr>
+            <td>管理员点击确认更新</td>
+            <td>创建更新任务，不再只算“已读”</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <span class="brand">建议：</span>
+        把“是否已经看过这次更新提醒”与“是否执行过更新”分开。前者用 <code>app_seen_version</code>，后者用 <code>update_jobs</code>。
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>十一、回滚策略必须提前定清楚</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>对象</th>
+            <th>回滚建议</th>
+            <th>风险说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>部署文件</td>
+            <td>保留上一版部署目录或备份包</td>
+            <td>低风险，可回滚</td>
+          </tr>
+          <tr>
+            <td>主程序镜像</td>
+            <td>记录旧镜像 ID 或旧标签，失败时重新起旧镜像</td>
+            <td>低风险，可回滚</td>
+          </tr>
+          <tr>
+            <td>MySQL 结构</td>
+            <td>第一阶段仅允许加表、加列、加索引这类向前兼容修复</td>
+            <td><span class="warn">如果将来出现破坏性迁移，必须先全量备份再更新</span></td>
+          </tr>
+          <tr>
+            <td>Redis</td>
+            <td>通常不需要特殊回滚</td>
+            <td>主风险较低</td>
+          </tr>
+          <tr>
+            <td>ipad860</td>
+            <td>若单独升级，则保留旧镜像可回滚</td>
+            <td>ARM 兼容性需先预检</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>当前仓库里的数据库修复基本是补表、补列、补索引，天然更适合“可回退应用，不强求回退 schema”的模式。这一点在第一期是可接受的，但必须在文档里写明。</p>
+    </section>
+
+    <section class="card">
+      <h2>十二、端口与手动救援模式的详细建议</h2>
+      <h3>推荐做法</h3>
+      <ul>
+        <li>默认仍然保持 MySQL / Redis / ipad860 不暴露宿主机端口。</li>
+        <li>如果用户选择“需要手动外接调试”或“需要远程 DBA/运维协助”，再自动生成 <code>docker-compose.override.yml</code> 暴露端口。</li>
+        <li>这份 override 文件只在明确需要时生成，避免默认暴露数据库和 Redis。</li>
+      </ul>
+
+      <h3>建议支持的可选变量</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>变量</th>
+            <th>默认</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>MYSQL_HOST_PORT</code></td>
+            <td>空</td>
+            <td>为空表示不暴露 MySQL</td>
+          </tr>
+          <tr>
+            <td><code>REDIS_HOST_PORT</code></td>
+            <td>空</td>
+            <td>为空表示不暴露 Redis</td>
+          </tr>
+          <tr>
+            <td><code>IPAD860_HOST_PORT</code></td>
+            <td>空</td>
+            <td>为空表示不暴露协议服务</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>十三、安全边界建议</h2>
+      <ol>
+        <li>应用容器不直接拥有 Docker 管理权限。</li>
+        <li>更新任务只能由超级管理员发起。</li>
+        <li>宿主机代理只执行来自白名单 Manifest 域名和允许镜像仓库的版本。</li>
+        <li>若未来支持离线包，必须校验 SHA256。</li>
+        <li>更新时必须打锁，禁止并发更新和重复点击。</li>
+        <li>所有操作都要审计：谁点的、何时点的、更新到哪个版本、结果如何。</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>十四、我给你的最终实施建议</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>优先级</th>
+            <th>现在该做什么</th>
+            <th>不要急着做什么</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>P0</td>
+            <td>把统一安装器和手动救援模式做完整</td>
+            <td>不要先做复杂的更新服务器</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>生成 Manifest、补 <code>update_jobs</code> 表、设计管理员更新卡片</td>
+            <td>不要先上 WebSocket 更新推送</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>做宿主机更新代理 + 后台更新按钮 + 轮询状态页</td>
+            <td>不要给容器直接 Docker 权限</td>
+          </tr>
+          <tr>
+            <td>P3</td>
+            <td>按业务规模决定是否上更新镜像站或专用更新服务器</td>
+            <td>不要在没有渠道控制需求时过度设计</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <span class="brand">一句话结论：</span>
+        你这个需求完全可以先基于 GitHub 做起来，不需要先搭专用更新服务器；但“后台点一下就自动更新”这件事，必须交给宿主机更新代理，而不是交给 Web 容器自己去改自己。
+      </div>
+    </section>
+
+    <p class="footer">
+      说明：本设计结合当前仓库中的部署脚本、设置页管理员入口、system_settings 全局配置机制、user_preferences 版本字段和现有 MySQL/Redis/ipad860 容器模型整理而成。
+    </p>
+  </div>
+</body>
+</html>

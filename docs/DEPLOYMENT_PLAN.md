@@ -1,103 +1,126 @@
 # QQ 农场助手 - 部署执行计划
 
-> 基于 [DEPLOYMENT_SOP.md](./DEPLOYMENT_SOP.md) 整理的可执行步骤清单
->
-> 注：`github-sync` 自 2026-03-07 起已退役，当前以根目录主仓与 `docs/guides/REPO_ROOT_WORKFLOW_GUIDE.md` 为准。
+> 基于 [DEPLOYMENT_SOP.md](./DEPLOYMENT_SOP.md) 整理的可执行步骤清单。
 
-**当前版本**：v4.0.0  
-**执行日期**：2026-03-03
+**当前版本**：v4.5.17（Git tag 示例）
+**镜像版本示例**：4.5.17
+**执行日期**：2026-03-10
 
 ---
 
-## 阶段一：代码与配置修正
+## 阶段一：公告与文档预检
 
-### 1.1 修正 Dockerfile 中 Update.log 路径
+### 1.1 同步本次发版记录
 
-**文件**：`core/Dockerfile` 第 21 行
+- 检查 `logs/development/Update.log`
+- 检查 `CHANGELOG.md`
+- 检查 `CHANGELOG.DEVELOPMENT.md`
+- 检查 `README.md`
+- 检查 `deploy/README.md`
+- 检查 `deploy/README.cn.md`
 
-**修改**：
-```dockerfile
-# 原
-COPY Update.log ./Update.log
+### 1.2 执行公告检查
 
-# 改
-COPY logs/development/Update.log ./Update.log
+```bash
+pnpm check:announcements
 ```
 
-### 1.2 更新 Update.log（如需要）
+无 `pnpm` 时：
 
-- 确认 `logs/development/Update.log` 已包含最新 v4.0.0 变更
-- 如有新增部署相关说明，可追加一条记录
+```bash
+node scripts/utils/check-announcements.js
+```
+
+### 1.3 执行文档链接检查
+
+```bash
+pnpm check:doc-links
+```
+
+无 `pnpm` 时：
+
+```bash
+node scripts/utils/check-doc-links.js
+```
+
+通过标准：
+
+- `0 error(s), 0 warning(s)`
 
 ---
 
 ## 阶段二：Docker 镜像构建与推送
 
-### 2.1 执行构建脚本
+### 2.1 本地构建
 
 ```bash
-cd /Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本
-./scripts/docker/docker-build-multiarch.sh v4.0.0
+cd /path/to/qq-farm-ui-pro-max
+./scripts/docker/docker-build-multiarch.sh 4.5.17
 ```
 
-**说明**：
-- 选择推送目标（Docker Hub / GHCR / 两者）
-- 构建 `linux/amd64` 和 `linux/arm64`
-- 镜像：`smdk000/qq-farm-bot-ui:latest`、`smdk000/qq-farm-bot-ui:v4.0.0`
+### 2.2 镜像口径复核
+
+- Docker Hub：`smdk000/qq-farm-bot-ui:latest`、`smdk000/qq-farm-bot-ui:4.5.17`
+- GHCR：`ghcr.io/smdk000/qq-farm-ui-pro-max:latest`、`ghcr.io/smdk000/qq-farm-ui-pro-max:4.5.17`
 
 ---
 
-## 阶段三：部署脚本与 README 更新
+## 阶段三：部署包与说明文档同步
 
-### 3.1 统一部署脚本
+### 3.1 确认部署包文件
 
-- 确认 `scripts/deploy/deploy-arm.sh`、`deploy-x86.sh` 存在且可用
-- 确认脚本内镜像拉取地址：`smdk000/qq-farm-bot-ui:latest`
-- 确认 GitHub 仓库 URL 与 README 一致
+- `deploy/docker-compose.yml`
+- `deploy/.env.example`
+- `deploy/init-db/01-init.sql`
 
-### 3.2 更新 README 部署教程
+### 3.2 确认部署脚本
 
-**需包含**：
+- `scripts/deploy/fresh-install.sh`
+- `scripts/deploy/update-app.sh`
+- `scripts/deploy/repair-deploy.sh`
+- `scripts/deploy/repair-mysql.sh`
+- `scripts/deploy/quick-deploy.sh`
+- `scripts/deploy/deploy-arm.sh`
+- `scripts/deploy/deploy-x86.sh`
 
-1. **单独部署**：Docker Compose 完整栈
-   - 使用 `docker-compose.prod.yml`
-   - 包含 qq-farm-bot-ui、ipad860、Redis
-   - 端口映射：3080 → 3000
+### 3.3 核对 README 部署入口
 
-2. **一键部署**：ARM / x86 脚本
-   ```bash
-   # ARM
-   curl -O https://raw.githubusercontent.com/smdk000/qq-farm-bot-ui/main/scripts/deploy-arm.sh
-   chmod +x deploy-arm.sh && ./deploy-arm.sh
+全新服务器：
 
-   # x86
-   curl -O https://raw.githubusercontent.com/smdk000/qq-farm-bot-ui/main/scripts/deploy-x86.sh
-   chmod +x deploy-x86.sh && ./deploy-x86.sh
-   ```
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
+```
 
-3. **本地部署**：开发环境
-   - `./dev.sh` 一键启动
-   - 微信扫码登录说明：Ipad860 服务配置、扫码流程
+已部署服务器更新：
 
-4. **更新日志**：引用 `logs/development/Update.log`  
-   - 可增加「更新日志」章节，说明最新版本变更
+```bash
+/opt/qq-farm-bot-current/update-app.sh
+```
 
-### 3.3 根目录主仓推送准备
+如保留架构包装器示例：
+
+```bash
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-arm.sh
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-x86.sh
+```
+
+---
+
+## 阶段四：Git 主仓提交
+
+### 4.1 提交前检查
 
 ```bash
 bash scripts/github/check-sensitive-info.sh .
+git status
 ```
 
----
-
-## 阶段四：Git 主仓推送
-
-### 4.1 增量提交
+### 4.2 增量提交
 
 ```bash
 git add -A
 git status
-git commit -m "chore: v4.0.0 部署脚本与文档更新"
+git commit -m "chore: v4.5.17 部署文档与发布链路收口"
 git push origin <branch>
 ```
 
@@ -105,14 +128,15 @@ git push origin <branch>
 
 ## 阶段五：检查清单
 
-- [ ] Dockerfile 中 Update.log 路径已修正
-- [ ] Docker 镜像构建成功（amd64 + arm64）
-- [ ] 镜像已推送到 Docker Hub / GHCR
-- [ ] README 部署教程已更新
-- [ ] 一键脚本 URL 正确
-- [ ] 本地部署与微信扫码说明已补充
-- [ ] Update.log 引用已添加
-- [ ] 部署脚本已在根目录主仓推送
+- [ ] `check:announcements` 已通过
+- [ ] `check:doc-links` 已通过
+- [ ] `README.md`、`deploy/README.md`、`deploy/README.cn.md` 已同步
+- [ ] `docs/DEPLOYMENT_SOP.md`、`docs/DEPLOYMENT_PLAN.md` 已同步
+- [ ] 部署包文件路径为 `deploy/docker-compose.yml` / `deploy/.env.example` / `deploy/init-db/01-init.sql`
+- [ ] 一键部署入口为 `fresh-install.sh`
+- [ ] 已部署更新入口为 `update-app.sh`
+- [ ] Docker Hub / GHCR 镜像名无混用
+- [ ] 敏感信息检查已通过
 - [ ] 代码已推送到 GitHub
 
 ---
@@ -121,15 +145,16 @@ git push origin <branch>
 
 | 项目 | 路径 |
 |------|------|
-| 工作目录 | `/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本` |
-| Dockerfile | `core/Dockerfile` |
+| 工作目录 | `/path/to/qq-farm-ui-pro-max` |
 | Update.log | `logs/development/Update.log` |
-| 生产 Compose | `docker/docker-compose.prod.yml` |
+| 根 README | `README.md` |
+| 标准部署说明 | `deploy/README.md` |
+| 国内部署说明 | `deploy/README.cn.md` |
+| 生产 Compose | `deploy/docker-compose.yml` |
 | 构建脚本 | `scripts/docker/docker-build-multiarch.sh` |
-| 部署脚本 | `scripts/deploy/deploy-arm.sh`、`deploy-x86.sh` |
-| 开发启动 | `dev.sh` |
+| 部署脚本 | `scripts/deploy/` |
 | 部署 SOP | `docs/DEPLOYMENT_SOP.md` |
 
 ---
 
-*最后更新：2026-03-03*
+*最后更新：2026-03-10*

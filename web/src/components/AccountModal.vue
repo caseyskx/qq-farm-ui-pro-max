@@ -5,6 +5,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import BaseTextarea from '@/components/ui/BaseTextarea.vue'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 const props = defineProps<{
   show: boolean
@@ -22,11 +23,33 @@ const errorMessage = ref('')
 const form = reactive({
   name: '',
   code: '',
+  uin: '',
   platform: 'wx_car',
 })
 
 const qrPlatform = ref('wx_car') // qr tab platform（默认车机微信）
 const qrUin = ref('') // 新增: 为第三方 QQ 扫码提供前置 QQ 号输入
+
+function normalizeQrPlatform(platform?: string) {
+  return platform === 'qq' || platform === 'wx_ipad' || platform === 'wx_car'
+    ? platform
+    : 'wx_car'
+}
+
+function getTabClass(tab: 'qr' | 'manual') {
+  return activeTab.value === tab
+    ? 'account-modal-tab account-modal-tab--active'
+    : 'account-modal-tab account-modal-tab--idle'
+}
+
+function getQrPlatformButtonClass(platform: 'qq' | 'wx_ipad' | 'wx_car') {
+  const active = qrPlatform.value === platform
+  if (!active)
+    return 'account-modal-platform account-modal-platform--idle'
+  return platform === 'qq'
+    ? 'account-modal-platform account-modal-platform--active account-modal-platform--qq'
+    : 'account-modal-platform account-modal-platform--active account-modal-platform--wechat'
+}
 
 // ========== 串行轮询（彻底杜绝竞态条件） ==========
 // 用 setTimeout 而非 setInterval，确保前一个请求完成后才发下一个
@@ -80,6 +103,7 @@ async function doQRCheck() {
         await addAccount({
           id: props.editData?.id,
           uin: resolvedUin,
+          qq: qrPlatform.value === 'qq' ? resolvedUin : '',
           code: authCode,
           loginType: 'qr',
           name: props.editData ? (props.editData.name || accName) : accName,
@@ -135,7 +159,7 @@ async function loadQRCode() {
       startQRCheck()
     }
     else {
-      qrStatus.value = `获取失败: ${res.data.error}`
+      qrStatus.value = `获取失败: ${localizeRuntimeText(res.data.error || '未知错误')}`
     }
   }
   catch (e) {
@@ -200,11 +224,11 @@ async function addAccount(data: any) {
       close()
     }
     else {
-      errorMessage.value = `保存失败: ${res.data.error}`
+      errorMessage.value = `保存失败: ${localizeRuntimeText(res.data.error || '未知错误')}`
     }
   }
   catch (e: any) {
-    errorMessage.value = `保存失败: ${e.response?.data?.error || e.message}`
+    errorMessage.value = `保存失败: ${localizeRuntimeText(e.response?.data?.error || e.message || '未知错误')}`
   }
   finally {
     loading.value = false
@@ -237,12 +261,21 @@ async function submitManual() {
     return
   }
 
+  const normalizedUin = String(form.uin || '').trim()
+  if (form.platform !== 'qq' && !normalizedUin) {
+    errorMessage.value = '请输入微信ID / OpenID，避免继续沿用旧账号标识'
+    return
+  }
+
   const payload = {
     id: props.editData?.id, // If editing
     name: form.name,
     code,
+    uin: normalizedUin,
+    qq: form.platform === 'qq' ? normalizedUin : '',
     platform: form.platform,
     loginType: 'manual',
+    authTicket: '',
   }
 
   await addAccount(payload)
@@ -261,8 +294,9 @@ watch(() => props.show, (newVal) => {
       activeTab.value = 'qr'
       form.name = props.editData.name
       form.code = props.editData.code || ''
+      form.uin = String(props.editData.uin || props.editData.qq || '')
       form.platform = props.editData.platform || 'wx_car'
-      qrPlatform.value = 'wx_car' // 扫码平台强制默认车机微信（最稳定可用通道）
+      qrPlatform.value = normalizeQrPlatform(props.editData.platform)
       loadQRCode()
     }
     else {
@@ -270,6 +304,7 @@ watch(() => props.show, (newVal) => {
       activeTab.value = 'qr'
       form.name = ''
       form.code = ''
+      form.uin = ''
       form.platform = 'wx_car'
       qrPlatform.value = 'wx_car'
       loadQRCode()
@@ -281,14 +316,15 @@ watch(() => props.show, (newVal) => {
     qrData.value = null
     qrStatus.value = ''
     qrUin.value = ''
+    form.uin = ''
   }
 })
 </script>
 
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" @click="close">
-    <div class="glass-panel max-w-md w-full overflow-hidden border border-white/20 rounded-lg shadow-xl dark:border-white/10" @click.stop>
-      <div class="flex items-center justify-between border-b border-gray-200/50 p-4 dark:border-white/10">
+  <div v-if="show" class="account-modal-root fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm" @click="close">
+    <div class="account-modal-panel glass-panel max-w-md w-full overflow-hidden rounded-lg shadow-xl" @click.stop>
+      <div class="account-modal-header flex items-center justify-between p-4">
         <h3 class="glass-text-main text-lg font-semibold">
           {{ editData ? '编辑账号' : '添加账号' }}
         </h3>
@@ -298,21 +334,21 @@ watch(() => props.show, (newVal) => {
       </div>
 
       <div class="p-4">
-        <div v-if="errorMessage" class="mb-4 rounded bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
+        <div v-if="errorMessage" class="account-modal-error mb-4 rounded p-3 text-sm">
           {{ errorMessage }}
         </div>
         <!-- Tabs -->
-        <div class="mb-4 flex border-b border-gray-200/50 dark:border-white/10">
+        <div class="account-modal-tab-bar mb-4 flex">
           <button
             class="flex-1 py-2 text-center font-medium transition-colors"
-            :class="activeTab === 'qr' ? 'text-blue-600 border-b-2 border-blue-600' : 'glass-text-muted hover:text-gray-700 dark:hover:text-gray-300'"
+            :class="getTabClass('qr')"
             @click="activeTab = 'qr'; loadQRCode()"
           >
             {{ editData ? '扫码更新' : '扫码登录' }}
           </button>
           <button
             class="flex-1 py-2 text-center font-medium transition-colors"
-            :class="activeTab === 'manual' ? 'text-blue-600 border-b-2 border-blue-600' : 'glass-text-muted hover:text-gray-700 dark:hover:text-gray-300'"
+            :class="getTabClass('manual')"
             @click="activeTab = 'manual'; stopQRCheck()"
           >
             手动填码
@@ -322,11 +358,11 @@ watch(() => props.show, (newVal) => {
         <!-- QR Tab -->
         <div v-if="activeTab === 'qr'" class="flex flex-col items-center justify-center py-4 space-y-4">
           <div class="w-full flex justify-center pb-2">
-            <div class="flex flex-wrap self-center gap-2 rounded-xl bg-gray-100/50 p-2 backdrop-blur-sm dark:bg-white/5">
+            <div class="account-modal-platform-bar flex flex-wrap self-center gap-2 rounded-xl p-2 backdrop-blur-sm">
               <!-- QQ 企鹅图标 -->
               <button
                 class="min-w-[100px] flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-3 text-sm font-medium transition-all duration-200"
-                :class="qrPlatform === 'qq' ? 'bg-white dark:bg-white/10 shadow-md text-[#0099FF] ring-1 ring-[#0099FF]/30' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-white/5'"
+                :class="getQrPlatformButtonClass('qq')"
                 @click="qrPlatform = 'qq'; loadQRCode()"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="h-7 w-7" fill="currentColor">
@@ -337,7 +373,7 @@ watch(() => props.show, (newVal) => {
               <!-- iPad 平板图标 -->
               <button
                 class="min-w-[100px] flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-3 text-sm font-medium transition-all duration-200"
-                :class="qrPlatform === 'wx_ipad' ? 'bg-white dark:bg-white/10 shadow-md text-[#07C160] ring-1 ring-[#07C160]/30' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-white/5'"
+                :class="getQrPlatformButtonClass('wx_ipad')"
                 @click="qrPlatform = 'wx_ipad'; loadQRCode()"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-7 w-7" fill="currentColor">
@@ -348,7 +384,7 @@ watch(() => props.show, (newVal) => {
               <!-- 劳斯莱斯小汽车图标 -->
               <button
                 class="min-w-[100px] flex flex-1 flex-col items-center gap-1.5 whitespace-nowrap rounded-lg px-4 py-3 text-sm font-medium transition-all duration-200"
-                :class="qrPlatform === 'wx_car' ? 'bg-white dark:bg-white/10 shadow-md text-[#07C160] ring-1 ring-[#07C160]/30' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-white/5'"
+                :class="getQrPlatformButtonClass('wx_car')"
                 @click="qrPlatform = 'wx_car'; loadQRCode()"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="h-7 w-7" fill="currentColor">
@@ -383,10 +419,16 @@ watch(() => props.show, (newVal) => {
             </BaseButton>
           </div>
 
-          <div v-if="qrData && (qrData.image || qrData.qrcode)" class="flex items-center justify-center border border-gray-200 rounded-lg bg-white p-2 dark:border-white/20">
-            <img :src="qrData.image || qrData.qrcode" class="h-48 w-48 object-contain">
+          <div v-if="qrData && (qrData.image || qrData.qrcode)" class="account-modal-qr-shell flex items-center justify-center rounded-xl">
+            <div class="account-modal-qr-frame">
+              <img
+                :src="qrData.image || qrData.qrcode"
+                alt="登录二维码"
+                class="account-modal-qr-image"
+              >
+            </div>
           </div>
-          <div v-else class="h-48 w-48 flex items-center justify-center rounded bg-gray-100/50 text-gray-500 backdrop-blur-sm dark:bg-black/20 dark:text-gray-400">
+          <div v-else class="account-modal-qr-placeholder glass-text-muted flex items-center justify-center rounded-xl backdrop-blur-sm">
             <div v-if="loading" i-svg-spinners-90-ring-with-bg class="text-3xl" />
             <span v-else>二维码已过期</span>
           </div>
@@ -395,14 +437,14 @@ watch(() => props.show, (newVal) => {
           </p>
           <div class="mt-2 max-w-[200px] w-full flex flex-col gap-3">
             <button
-              class="w-full rounded-lg bg-primary-500 py-2.5 text-sm text-white font-medium shadow-primary-500/30 shadow-sm transition-all active:scale-95 hover:bg-primary-600"
+              class="account-modal-primary-btn w-full rounded-lg py-2.5 text-sm font-medium transition-all active:scale-95"
               @click="loadQRCode"
             >
               更新二维码
             </button>
             <button
               v-if="qrData?.url && qrPlatform === 'qq'"
-              class="w-full flex items-center justify-center gap-2 rounded-lg bg-[#0099FF] py-2.5 text-sm text-white font-medium shadow-[#0099FF]/30 shadow-sm transition-all md:hidden active:scale-95 hover:bg-[#0088EE]"
+              class="account-modal-primary-btn w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-all md:hidden active:scale-95"
               @click="openQRCodeLoginUrl"
             >
               跳转QQ登录
@@ -416,6 +458,13 @@ watch(() => props.show, (newVal) => {
             v-model="form.name"
             label="备注名称"
             placeholder="留空默认账号X"
+          />
+
+          <BaseInput
+            v-model="form.uin"
+            :label="form.platform === 'qq' ? '账号标识（可选 QQ 号）' : '账号标识（微信ID / OpenID）'"
+            :placeholder="form.platform === 'qq' ? '可选：不填则保留当前 QQ 号' : '请输入当前登录码对应的微信ID / OpenID'"
+            :hint="form.platform === 'qq' ? '手动填 QQ code 时会清空旧扫码 ticket，避免继续换回旧码' : '手动填微信 code 时请同步更新微信ID / OpenID，否则会继续使用旧账号标识'"
           />
 
           <BaseTextarea
@@ -456,3 +505,139 @@ watch(() => props.show, (newVal) => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.account-modal-root {
+  background: var(--ui-overlay-backdrop) !important;
+}
+
+.account-modal-panel,
+.account-modal-header,
+.account-modal-tab-bar,
+.account-modal-platform-bar,
+.account-modal-platform,
+.account-modal-qr-shell,
+.account-modal-qr-placeholder,
+.account-modal-error {
+  border: 1px solid var(--ui-border-subtle) !important;
+}
+
+.account-modal-panel,
+.account-modal-header,
+.account-modal-platform-bar,
+.account-modal-qr-shell,
+.account-modal-qr-placeholder {
+  background: color-mix(in srgb, var(--ui-bg-surface) 74%, transparent) !important;
+}
+
+.account-modal-header,
+.account-modal-tab-bar {
+  border-left: none !important;
+  border-right: none !important;
+  border-top: none !important;
+}
+
+.account-modal-error {
+  background: color-mix(in srgb, var(--ui-status-danger) 8%, var(--ui-bg-surface)) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1)) !important;
+}
+
+.account-modal-tab {
+  border-bottom: 2px solid transparent;
+}
+
+.account-modal-tab--active {
+  color: var(--ui-brand-600) !important;
+  border-bottom-color: var(--ui-brand-500) !important;
+}
+
+.account-modal-tab--idle {
+  color: var(--ui-text-2) !important;
+}
+
+.account-modal-tab--idle:hover {
+  color: var(--ui-text-1) !important;
+}
+
+.account-modal-platform-bar {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
+}
+
+.account-modal-platform {
+  border: 1px solid transparent !important;
+  color: var(--ui-text-2) !important;
+}
+
+.account-modal-platform--idle:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface) 90%, transparent) !important;
+  color: var(--ui-text-1) !important;
+}
+
+.account-modal-platform--active {
+  background: color-mix(in srgb, var(--ui-bg-surface) 94%, transparent) !important;
+  box-shadow: 0 10px 18px var(--ui-shadow-panel) !important;
+}
+
+.account-modal-platform--qq {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 28%, var(--ui-border-subtle)) !important;
+  color: var(--ui-brand-600) !important;
+}
+
+.account-modal-platform--wechat {
+  border-color: color-mix(in srgb, var(--ui-status-success) 24%, var(--ui-border-subtle)) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1)) !important;
+}
+
+.account-modal-qr-shell,
+.account-modal-qr-placeholder {
+  width: 13rem;
+  min-width: 13rem;
+  min-height: 13rem;
+}
+
+.account-modal-qr-shell {
+  padding: 0.75rem;
+  background: #fff !important;
+  border-color: color-mix(in srgb, #ffffff 72%, var(--ui-border-strong)) !important;
+  box-shadow:
+    0 16px 30px color-mix(in srgb, #000000 16%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, #ffffff 84%, transparent) !important;
+}
+
+.account-modal-qr-frame {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  background: #fff;
+}
+
+.account-modal-qr-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  background: #fff;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.account-modal-qr-placeholder {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
+}
+
+.account-modal-primary-btn {
+  background: linear-gradient(to right, var(--ui-brand-500), var(--ui-brand-600)) !important;
+  color: var(--ui-text-on-brand) !important;
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--ui-brand-500) 24%, transparent) !important;
+}
+
+.account-modal-primary-btn:hover {
+  filter: brightness(0.98);
+}
+</style>

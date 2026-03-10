@@ -22,35 +22,35 @@ function getLandStatusClass(land: any) {
   const level = Number(land.level) || 0
 
   if (status === 'locked')
-    return 'bg-gray-100/50 dark:bg-black/20 opacity-60 border-dashed border-gray-200/50 dark:border-white/10'
+    return 'land-card-state-locked'
 
-  let baseClass = 'glass-panel border-gray-200/50 dark:border-white/10'
+  let baseClass = 'glass-panel land-card-level-default'
 
   // 土地等级样式
   switch (level) {
     case 1: // 黄土地
-      baseClass = 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200/50 dark:border-yellow-800'
+      baseClass = 'land-card-level-1'
       break
     case 2: // 红土地
-      baseClass = 'bg-red-50/50 dark:bg-red-900/10 border-red-200/50 dark:border-red-800'
+      baseClass = 'land-card-level-2'
       break
     case 3: // 黑土地
-      baseClass = 'bg-slate-100/50 dark:bg-slate-800/50 border-slate-300/50 dark:border-slate-600'
+      baseClass = 'land-card-level-3'
       break
     case 4: // 金土地
-      baseClass = 'bg-amber-100/50 dark:bg-amber-900/20 border-amber-300/50 dark:border-amber-600'
+      baseClass = 'land-card-level-4'
       break
   }
 
   // 状态叠加
   if (status === 'dead')
-    return 'bg-gray-200/50 dark:bg-black/40 border-gray-300/50 dark:border-gray-600 grayscale'
+    return 'land-card-state-dead'
 
   if (status === 'harvestable')
-    return `${baseClass} ring-2 ring-yellow-500 ring-offset-1 dark:ring-offset-gray-900`
+    return `${baseClass} land-card-state-harvestable`
 
   if (status === 'stealable')
-    return `${baseClass} ring-2 ring-purple-500 ring-offset-1 dark:ring-offset-gray-900`
+    return `${baseClass} land-card-state-stealable`
 
   if (status === 'growing')
     return baseClass
@@ -89,30 +89,30 @@ function getLandTypeName(level: number) {
 
 <template>
   <div
-    class="relative min-h-[140px] flex flex-col items-center border rounded-lg p-2 transition dark:border-white/10 hover:shadow-md"
+    class="land-card-theme relative min-h-[140px] flex flex-col items-center border rounded-lg p-2 transition hover:shadow-md"
     :class="getLandStatusClass(land)"
   >
     <div class="absolute right-1 top-1 flex gap-1 text-[9px]">
       <span
         v-if="isMultiPlant"
-        class="rounded bg-emerald-100 px-1 text-emerald-700 font-semibold dark:bg-emerald-900/35 dark:text-emerald-300"
+        class="land-chip ui-meta-chip--success"
       >
         合种{{ plantSize }}x{{ plantSize }}
       </span>
       <span
         v-if="occupiedByMaster"
-        class="rounded bg-cyan-100 px-1 text-cyan-700 font-semibold dark:bg-cyan-900/35 dark:text-cyan-300"
+        class="land-chip ui-meta-chip--info"
         :title="`由主地块 #${land.masterLandId || '-'} 占用`"
       >
         副地块
       </span>
     </div>
 
-    <div class="absolute left-1 top-1 text-[10px] text-gray-400 font-mono">
+    <div class="land-card-index absolute left-1 top-1 text-[10px] font-mono">
       #{{ land.id }}
     </div>
 
-    <div class="mb-1 mt-4 h-10 w-10 flex items-center justify-center">
+    <div class="land-card-figure mb-1 mt-4 h-10 w-10 flex items-center justify-center">
       <img
         v-if="land.seedImage"
         :src="getSafeImageUrl(land.seedImage)"
@@ -120,7 +120,7 @@ function getLandTypeName(level: number) {
         loading="lazy"
         referrerpolicy="no-referrer"
       >
-      <div v-else class="i-carbon-sprout text-xl text-gray-300" />
+      <div v-else class="land-card-empty-icon i-carbon-sprout text-xl" />
     </div>
 
     <div class="glass-text-main w-full truncate px-1 text-center text-xs font-bold" :title="land.plantName">
@@ -128,7 +128,7 @@ function getLandTypeName(level: number) {
     </div>
 
     <div class="glass-text-muted mb-0.5 mt-0.5 w-full text-center text-[10px]">
-      <span v-if="land.matureInSec > 0" class="text-orange-500">
+      <span v-if="land.matureInSec > 0" class="land-card-timer">
         预计 {{ formatTime(land.matureInSec) }} 后成熟
       </span>
       <span v-else>
@@ -140,17 +140,130 @@ function getLandTypeName(level: number) {
       {{ getLandTypeName(land.level) }}
     </div>
 
-    <div v-if="seasonText" class="glass-text-muted mb-1 rounded bg-black/5 px-1.5 py-0.5 text-[10px] dark:bg-white/10">
+    <div v-if="seasonText" class="land-card-season mb-1 rounded px-1.5 py-0.5 text-[10px]">
       {{ seasonText }}
     </div>
 
     <!-- Status Badges -->
     <div class="mt-auto flex origin-bottom scale-90 gap-0.5 text-[10px]">
-      <span v-if="land.needWater" class="rounded bg-blue-100 px-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">水</span>
-      <span v-if="land.needWeed" class="rounded bg-primary-100 px-0.5 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400">草</span>
-      <span v-if="land.needBug" class="rounded bg-red-100 px-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">虫</span>
+      <span v-if="land.needWater" class="land-chip ui-meta-chip--info">水</span>
+      <span v-if="land.needWeed" class="land-chip ui-meta-chip--brand">草</span>
+      <span v-if="land.needBug" class="land-chip ui-meta-chip--danger">虫</span>
       <!-- For friends view -->
-      <span v-if="land.status === 'harvestable'" class="rounded bg-orange-100 px-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">可偷</span>
+      <span v-if="land.status === 'harvestable'" class="land-chip ui-meta-chip--warning">可偷</span>
     </div>
   </div>
 </template>
+
+<style scoped>
+.land-card-theme {
+  color: var(--ui-text-1);
+  border-color: var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent);
+}
+
+.land-card-index,
+.land-card-empty-icon {
+  color: var(--ui-text-3);
+}
+
+.land-card-season {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 76%, transparent);
+  color: var(--ui-text-2);
+}
+
+.land-card-timer {
+  color: var(--ui-status-warning);
+}
+
+.land-card-level-default {
+  background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent);
+  border-color: var(--ui-border-subtle);
+}
+
+.land-card-level-1 {
+  background: color-mix(in srgb, #facc15 10%, var(--ui-bg-surface));
+  border-color: color-mix(in srgb, #facc15 24%, var(--ui-border-subtle));
+}
+
+.land-card-level-2 {
+  background: color-mix(in srgb, #ef4444 10%, var(--ui-bg-surface));
+  border-color: color-mix(in srgb, #ef4444 24%, var(--ui-border-subtle));
+}
+
+.land-card-level-3 {
+  background: color-mix(in srgb, #475569 14%, var(--ui-bg-surface));
+  border-color: color-mix(in srgb, #475569 24%, var(--ui-border-subtle));
+}
+
+.land-card-level-4 {
+  background: color-mix(in srgb, #f59e0b 12%, var(--ui-bg-surface));
+  border-color: color-mix(in srgb, #f59e0b 26%, var(--ui-border-subtle));
+}
+
+.land-card-state-locked {
+  background: color-mix(in srgb, var(--ui-bg-surface) 54%, transparent);
+  border-color: var(--ui-border-subtle);
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.land-card-state-dead {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 42%, transparent);
+  border-color: var(--ui-border-subtle);
+  filter: grayscale(1);
+}
+
+.land-card-state-harvestable {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-status-warning) 40%, transparent);
+}
+
+.land-card-state-stealable {
+  box-shadow: 0 0 0 2px color-mix(in srgb, #7c3aed 38%, transparent);
+}
+
+.land-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1rem;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 0.25rem;
+  padding: 0 0.125rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+@media (max-width: 767px) {
+  .land-card-theme {
+    min-height: 156px;
+    padding: 0.7rem;
+    border-radius: 0.9rem;
+  }
+
+  .land-card-figure {
+    width: 3rem;
+    height: 3rem;
+    margin-top: 1.5rem;
+  }
+
+  .land-card-index {
+    font-size: 0.68rem;
+  }
+
+  .land-card-theme .glass-text-main {
+    font-size: 0.8rem;
+  }
+
+  .land-card-theme .glass-text-muted {
+    font-size: 0.68rem;
+    line-height: 1.35;
+  }
+
+  .land-chip {
+    padding: 0.05rem 0.2rem;
+    font-size: 0.62rem;
+  }
+}
+</style>

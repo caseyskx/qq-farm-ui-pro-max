@@ -27,6 +27,7 @@ SKIP_DOCKER_PULL="${SKIP_DOCKER_PULL:-0}"
 SKIP_DB_REPAIR="${SKIP_DB_REPAIR:-0}"
 SOURCE_CACHE_DIR="${SOURCE_CACHE_DIR:-${DEPLOY_BASE_DIR}/.qq-farm-build-src/${REPO_REF}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd || pwd)"
 ADMIN_PASSWORD_EXPLICIT=0
 ADMIN_PASSWORD_OVERRIDE=""
 
@@ -271,6 +272,30 @@ pull_image_or_build() {
     return 1
 }
 
+run_announcement_check_if_available() {
+    local checker=""
+
+    if [ -f "${SCRIPT_DIR}/../utils/check-announcements.js" ]; then
+        checker="${SCRIPT_DIR}/../utils/check-announcements.js"
+    elif [ -f "${REPO_ROOT}/scripts/utils/check-announcements.js" ]; then
+        checker="${REPO_ROOT}/scripts/utils/check-announcements.js"
+    fi
+
+    if [ -z "${checker}" ]; then
+        print_info "未检测到公告自检脚本，跳过公告预检。"
+        return 0
+    fi
+
+    if ! command -v node >/dev/null 2>&1; then
+        print_warning "检测到公告自检脚本但系统缺少 node，已跳过公告预检。"
+        return 0
+    fi
+
+    print_info "执行公告预检..."
+    node "${checker}"
+    print_success "公告预检通过。"
+}
+
 resolve_deploy_dir() {
     if [ -f "${DEPLOY_DIR}/docker-compose.yml" ]; then
         return 0
@@ -470,7 +495,7 @@ compose_pull_with_retry() {
         return 0
     fi
 
-    local app_image="${APP_IMAGE:-smdk000/qq-farm-bot-ui:4.5.17}"
+    local app_image="${APP_IMAGE:-smdk000/qq-farm-bot-ui:4.5.18}"
     if ! pull_image_or_build "${app_image}"; then
         print_error "主程序镜像拉取最终失败: ${app_image}"
         print_error "请检查 GitHub / Docker Hub 官方网络连通性，或在 .env 中覆盖 APP_IMAGE。"
@@ -480,6 +505,7 @@ compose_pull_with_retry() {
 
 main() {
     parse_args "$@"
+    run_announcement_check_if_available
     ensure_docker
     resolve_deploy_dir
 

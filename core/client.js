@@ -8,36 +8,17 @@ const { loadProjectEnv } = require('./src/config/load-env');
 
 loadProjectEnv();
 
-const { startAdminServer, emitRealtimeStatus, emitRealtimeLog, emitRealtimeAccountLog } = require('./src/controllers/admin');
+const { startAdminServer, stopAdminServer, emitRealtimeStatus, emitRealtimeLog, emitRealtimeAccountLog, getIO } = require('./src/controllers/admin');
+const { initMasterRuntimeDispatcher, disposeMasterRuntimeDispatcher } = require('./src/cluster/master-runtime');
 const { createRuntimeEngine } = require('./src/runtime/runtime-engine');
+const { registerRuntimeShutdownHandlers } = require('./src/runtime/graceful-shutdown');
+const { createAiServiceRuntime, createMainShutdownRuntime } = require('./src/runtime/main-process-runtime');
 const { createModuleLogger } = require('./src/services/logger');
 const { initJobs } = require('./src/jobs/index');
-const { initDatabase } = require('./src/services/database');
+const { initDatabase, closeDatabase } = require('./src/services/database');
+const { inspectSystemSettingsHealth } = require('./src/services/system-settings');
 
 const mainLogger = createModuleLogger('main');
-
-// 自动启动 AI 服务
-async function startAIServices() {
-    try {
-        const aiAutostart = require('../scripts/service/ai-autostart');
-        mainLogger.info('[AI 服务] 正在自动启动 AI 编程助手服务...');
-
-        // 静默启动，不阻塞主程序
-        setImmediate(() => {
-            aiAutostart.start().catch((err) => {
-                mainLogger.warn('[AI 服务] 启动失败，但不影响主程序运行', {
-                    error: err && err.message ? err.message : String(err)
-                });
-            });
-        });
-
-        mainLogger.info('[AI 服务] AI 服务启动指令已发送（后台运行）');
-    } catch (error) {
-        mainLogger.warn('[AI 服务] 自动启动模块未找到，跳过 AI 服务启动', {
-            error: error && error.message ? error.message : String(error)
-        });
-    }
-}
 
 function buildStartupBlockMessage(err) {
     const message = String(err && err.message ? err.message : err || 'unknown');
@@ -79,27 +60,72 @@ if (isWorkerProcess) {
     (async () => {
         const { WorkerClient } = require('./src/cluster/worker-client');
         const workerClient = new WorkerClient(process.env.MASTER_URL, process.env.WORKER_TOKEN);
-        await workerClient.init();
+        try {
+            await workerClient.init();
+        } catch (err) {
+            try {
+                await workerClient.stop();
+            } catch (shutdownErr) {
+                mainLogger.warn('worker shutdown after bootstrap failure failed', {
+                    error: shutdownErr && shutdownErr.message ? shutdownErr.message : String(shutdownErr),
+                });
+            }
+            mainLogger.error('worker bootstrap failed', { error: err && err.message ? err.message : String(err) });
+            process.exit(1);
+        }
     })();
 } else {
     // standalone 普通模式 或 master 模式
     (async () => {
+        const aiServiceRuntime = createAiServiceRuntime({
+            logger: mainLogger,
+            loadAutostartModule: () => require('../scripts/service/ai-autostart'),
+        });
+
         // 启动 AI 服务（无感知自动启动）
-        startAIServices();
+        aiServiceRuntime.start();
 
         try {
             await initDatabase();
+
+            const store = require('./src/models/store');
+            if (store.initStoreRuntime) {
+                await store.initStoreRuntime();
+            }
 
             const userStore = require('./src/models/user-store');
             if (userStore.loadAllFromDB) {
                 await userStore.loadAllFromDB();
             }
 
-            const store = require('./src/models/store');
             if (store.loadAllFromDB) {
-                await store.loadAllFromDB();
+                await store.loadAllFromDB({ refreshGlobalConfig: false });
+            }
+
+            const settingsHealth = await inspectSystemSettingsHealth();
+            if (settingsHealth.ok) {
+                mainLogger.info(`system_settings self-check passed (${settingsHealth.items.length} keys ready)`);
+            } else {
+                mainLogger.warn('system_settings self-check found missing keys', {
+                    missingRequiredKeys: settingsHealth.missingRequiredKeys,
+                    fallbackWouldActivateKeys: settingsHealth.fallbackWouldActivateKeys,
+                });
             }
         } catch (err) {
+            try {
+                await closeDatabase();
+            } catch (closeErr) {
+                mainLogger.warn('database cleanup after startup block failed', {
+                    error: closeErr && closeErr.message ? closeErr.message : String(closeErr),
+                });
+            }
+            try {
+                await aiServiceRuntime.stop();
+            } catch (stopErr) {
+                mainLogger.warn('ai service cleanup after startup block failed', {
+                    error: stopErr && stopErr.message ? stopErr.message : String(stopErr),
+                });
+            }
             console.error(`\n${  '='.repeat(70)}`);
             console.error('🚨 【致命启动拦截】数据库环境未就绪或表结构损坏！');
             console.error('='.repeat(70));
@@ -113,6 +139,7 @@ if (isWorkerProcess) {
             processRef: process,
             mainEntryPath: __filename,
             startAdminServer,
+            stopAdminServer,
             onStatusSync: (accountId, status) => {
                 emitRealtimeStatus(accountId, status);
             },
@@ -123,9 +150,30 @@ if (isWorkerProcess) {
                 emitRealtimeAccountLog(entry);
             },
         });
-
-        // 包含每日日志清理与统计汇总的 Cron jobs 必然只应当在 master 或者 standalone 下运行
-        initJobs();
+        const jobRuntime = initJobs();
+        const shutdownRuntime = createMainShutdownRuntime({
+            logger: mainLogger,
+            stopJobs: () => {
+                if (jobRuntime && typeof jobRuntime.stop === 'function') {
+                    jobRuntime.stop();
+                }
+            },
+            disposeMasterDispatcher: () => {
+                disposeMasterRuntimeDispatcher({
+                    currentRole,
+                    disposeDispatcher: require('./src/cluster/master-dispatcher').disposeDispatcher,
+                    logger: mainLogger,
+                });
+            },
+            stopRuntimeEngine: () => runtimeEngine.stop(),
+            closeDatabase,
+            stopAiServices: () => aiServiceRuntime.stop(),
+        });
+        registerRuntimeShutdownHandlers({
+            processRef: process,
+            runtimeEngine: shutdownRuntime,
+            logger: mainLogger,
+        });
 
         try {
             await runtimeEngine.start({
@@ -134,22 +182,23 @@ if (isWorkerProcess) {
             });
             mainLogger.info(`系统启动完成 (模式: ${currentRole})`);
 
-            if (currentRole === 'master') {
-                // 如果定义了 master 模式，再额外启动调度分配器给连进来的 worker 分发任务
-                const { initDispatcher } = require('./src/cluster/master-dispatcher');
-                // 因为 startAdminServer 中赋值了 io 对象，我们需要直接获取对应的 io。为了无缝接入，
-                // 由于 `startAdminServer` 目前没有对外返回 io 实例，稍后我们需要在 admin.js 输出一下 io，
-                // 这里我们挂在一个全局延迟函数等待 admin.js 的 io 暴露出。
-                setTimeout(() => {
-                    const adminControllers = require('./src/controllers/admin');
-                    if (adminControllers.getIO) {
-                        initDispatcher(adminControllers.getIO());
-                    }
-                }, 2000);
-            }
+            initMasterRuntimeDispatcher({
+                currentRole,
+                getIO,
+                initDispatcher: require('./src/cluster/master-dispatcher').initDispatcher,
+                logger: mainLogger,
+            });
 
         } catch (err) {
+            try {
+                await shutdownRuntime.stop();
+            } catch (shutdownErr) {
+                mainLogger.warn('runtime shutdown after bootstrap failure failed', {
+                    error: shutdownErr && shutdownErr.message ? shutdownErr.message : String(shutdownErr),
+                });
+            }
             mainLogger.error('runtime bootstrap failed', { error: err && err.message ? err.message : String(err) });
+            process.exit(1);
         }
     })();
 }

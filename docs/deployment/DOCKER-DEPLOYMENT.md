@@ -162,17 +162,17 @@ docker push target-registry/qq-farm-bot-ui:3.3.0
 ### 使用 Docker Compose（推荐）
 
 ```bash
-# 1. 使用生产环境配置
-docker-compose -f docker-compose.prod.yml up -d
+# 1. 使用当前标准部署编排
+docker compose -f deploy/docker-compose.yml up -d
 
 # 2. 查看运行状态
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f deploy/docker-compose.yml ps
 
 # 3. 查看日志
-docker-compose -f docker-compose.prod.yml logs -f
+docker compose -f deploy/docker-compose.yml logs -f
 
 # 4. 停止服务
-docker-compose -f docker-compose.prod.yml down
+docker compose -f deploy/docker-compose.yml down
 ```
 
 ### 环境变量配置
@@ -216,8 +216,8 @@ docker run -d \
   qq-farm-bot-ui
 
 # 或手动更新
-docker-compose -f docker-compose.prod.yml pull
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f deploy/docker-compose.yml pull
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
 ---
@@ -349,7 +349,7 @@ ufw allow from 192.168.1.0/24 to any port 3080
 
 ```bash
 # 每周更新一次
-0 0 * * 0 docker-compose -f docker-compose.prod.yml pull && docker-compose -f docker-compose.prod.yml up -d
+0 0 * * 0 docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/docker-compose.yml up -d
 ```
 
 ---
@@ -373,13 +373,13 @@ ufw allow from 192.168.1.0/24 to any port 3080
 
 ### 文档资源
 
-- [README.md](README.md) - 项目说明
-- [RELEASE-NOTES.md](RELEASE-NOTES.md) - 版本说明
-- [CHANGELOG.DEVELOPMENT.md](CHANGELOG.DEVELOPMENT.md) - 开发日志
+- [README.md](../../README.md) - 项目说明
+- [RELEASE-NOTES.md](../archive/RELEASE-NOTES.md) - 版本说明
+- [CHANGELOG.DEVELOPMENT.md](../../CHANGELOG.DEVELOPMENT.md) - 开发日志
 
 ### 技术支持
 
-- **GitHub Issues**: https://github.com/Penty-d/qq-farm-bot-ui/issues
+- **GitHub Issues**: https://github.com/smdk000/qq-farm-ui-pro-max/issues
 - **QQ 群**: 227916149
 - **邮箱**: smdk000@example.com
 

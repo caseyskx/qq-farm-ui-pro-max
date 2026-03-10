@@ -1,18 +1,45 @@
-const { initMysql, getPool } = require('./mysql-db');
-const { initRedis, getRedisClient } = require('./redis-cache');
+const { initMysql, closeMysql, getPool, isMysqlInitialized } = require('./mysql-db');
+const { initRedis, closeRedis, getRedisClient } = require('./redis-cache');
 const { circuitBreaker } = require('./circuit-breaker');
 const { createModuleLogger } = require('./logger');
+const { initJwtSecretPersistence } = require('./jwt-service');
 
 const logger = createModuleLogger('database');
 
 let initPromise = null;
+let logFlushHandle = null;
+
+function startLogFlushLoop() {
+    if (logFlushHandle) {
+        return logFlushHandle;
+    }
+
+    logFlushHandle = setInterval(() => {
+        flushLogBatch().catch(() => { });
+    }, 3000);
+    if (logFlushHandle && typeof logFlushHandle.unref === 'function') {
+        logFlushHandle.unref();
+    }
+    return logFlushHandle;
+}
+
+function stopLogFlushLoop() {
+    if (!logFlushHandle) {
+        return;
+    }
+    clearInterval(logFlushHandle);
+    logFlushHandle = null;
+}
 
 async function initDatabase() {
     if (initPromise) return initPromise;
     initPromise = (async () => {
         try {
+            startLogFlushLoop();
             await initMysql();
             logger.info('MySQL initialized');
+            await initJwtSecretPersistence();
+            logger.info('JWT secret initialized');
             try {
                 const redisReady = await initRedis();
                 if (redisReady) {
@@ -37,11 +64,34 @@ function getDb() {
 }
 
 async function closeDatabase() {
-    await flushLogBatch();
-    const pool = getPool();
-    if (pool) {
-        await pool.end();
-        logger.info('MySQL closed');
+    const errors = [];
+
+    stopLogFlushLoop();
+
+    try {
+        await flushLogBatch();
+    } catch (error) {
+        errors.push(error);
+    }
+
+    try {
+        await closeRedis();
+    } catch (error) {
+        errors.push(error);
+    }
+
+    try {
+        if (isMysqlInitialized()) {
+            await closeMysql();
+        }
+    } catch (error) {
+        errors.push(error);
+    }
+
+    initPromise = null;
+
+    if (errors.length > 0) {
+        throw errors[0];
     }
 }
 
@@ -74,7 +124,7 @@ async function transaction(fn, retries = 1) {
         throw e;
     } finally {
         if (connection && connection.release) {
-            try { connection.release(); } catch (ignore) { }
+            try { connection.release(); } catch { }
         }
     }
 }
@@ -95,12 +145,8 @@ async function flushLogBatch() {
     }
 }
 
-// 日志批量写入 — 缩短到 3 秒刷盘，减少高并发下的堆积
-setInterval(() => {
-    flushLogBatch().catch(() => { });
-}, 3000).unref();
-
 function bufferedInsertLog(accountId, action, result, details) {
+    startLogFlushLoop();
     logBatch.push({
         accountId, action, result,
         details: typeof details === 'string' ? details : JSON.stringify(details || {})
@@ -111,7 +157,7 @@ function bufferedInsertLog(accountId, action, result, details) {
     }
 }
 
-async function updateFriendsCache(accountId, friendsList, retryCount = 0) {
+async function updateFriendsCache(accountId, friendsList) {
     try {
         const redis = getRedisClient();
         if (!redis) return;
@@ -195,7 +241,7 @@ async function getAnnouncements() {
             if (redis) {
                 await redis.set(ANNOUNCEMENT_CACHE_KEY, JSON.stringify(data), 'EX', ANNOUNCEMENT_CACHE_TTL);
             }
-        } catch (rErr) { /* ignore */ }
+        } catch { /* ignore */ }
         return data;
     } catch (e) {
         logger.error(`getAnnouncements failed: ${e.message}`);
@@ -246,7 +292,7 @@ async function invalidateAnnouncementCache() {
     try {
         const redis = getRedisClient();
         if (redis) await redis.del(ANNOUNCEMENT_CACHE_KEY);
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
 }
 
 async function insertReportLog(entry = {}) {

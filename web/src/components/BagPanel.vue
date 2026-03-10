@@ -1,14 +1,22 @@
 <script setup lang="ts">
 import { useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
+import BaseFilterChip from '@/components/ui/BaseFilterChip.vue'
+import BaseFilterChips from '@/components/ui/BaseFilterChips.vue'
+import BaseToggleOptionGroup from '@/components/ui/BaseToggleOptionGroup.vue'
 import { useAccountStore } from '@/stores/account'
 import { useBagStore } from '@/stores/bag'
 import { useFarmStore } from '@/stores/farm'
 import { useSettingStore } from '@/stores/setting'
 import { useStatusStore } from '@/stores/status'
 import { useToastStore } from '@/stores/toast'
+import { buildTradeSellConfigFromDraft, buildTradeSellStrategyDraft, normalizeTradeKeepFruitIds } from '@/utils/trade-config'
 
+const router = useRouter()
 const accountStore = useAccountStore()
 const bagStore = useBagStore()
 const farmStore = useFarmStore()
@@ -16,42 +24,87 @@ const settingStore = useSettingStore()
 const statusStore = useStatusStore()
 const toast = useToastStore()
 const { currentAccountId, currentAccount } = storeToRefs(accountStore)
-const { items, dashboardItems, mallGoods, sellPreview, loading: bagLoading, mallLoading, sellPreviewLoading, actionLoading } = storeToRefs(bagStore)
+const {
+  items,
+  dashboardItems,
+  monthCardInfos,
+  shopSections: rawShopSections,
+  mallSections: rawMallSections,
+  sellPreview,
+  loading: bagLoading,
+  mallLoading,
+  shopLoading,
+  sellPreviewLoading,
+  actionLoading,
+} = storeToRefs(bagStore)
 const { lands, loading: landsLoading } = storeToRefs(farmStore)
 const { settings } = storeToRefs(settingStore)
 const { status, loading: statusLoading, error: statusError, realtimeConnected } = storeToRefs(statusStore)
 
 const imageErrors = ref<Record<string | number, boolean>>({})
 const selectedItemIds = ref<number[]>([])
-const purchaseCounts = ref<Record<number, number>>({})
+const purchaseCounts = ref<Record<string, number>>({})
 const useCounts = ref<Record<number, number>>({})
 const selectedLandIds = ref<number[]>([])
 const targetLandsAccountId = ref('')
 const lastUseResult = ref<any | null>(null)
 const activityHistory = ref<any[]>([])
 const expandedActivityKey = ref('')
-const activeTab = ref<'bag' | 'sell' | 'mall'>('bag')
+const refreshingAll = ref(false)
+const previewRefreshing = ref(false)
+const sellingByPolicy = ref(false)
+const activeTab = ref<'bag' | 'shop' | 'sell' | 'mall'>('bag')
 const respectPolicyForSelected = ref(true)
 const bagQuery = ref('')
 const bagCategory = ref<'all' | 'fruit' | 'seed' | 'fertilizer' | 'pack' | 'pet' | 'item'>('all')
+const shopQuery = ref('')
 const mallQuery = ref('')
+const shopQuickFilter = ref<'all' | 'buyable' | 'limited' | 'locked'>('all')
 const mallQuickFilter = ref<'all' | 'free' | 'limited' | 'bundle'>('all')
 const bagSortBy = ref<'count_desc' | 'name_asc' | 'price_desc' | 'level_desc'>('count_desc')
+const shopSortBy = ref<'price_asc' | 'price_desc' | 'name_asc' | 'level_desc'>('price_asc')
 const mallSortBy = ref<'recommended' | 'price_asc' | 'price_desc' | 'contents_desc' | 'name_asc'>('recommended')
 const activityFilter = ref<'all' | 'use' | 'purchase' | 'sell'>('all')
 const bagDetailItem = ref<any | null>(null)
 const mallDetailGoods = ref<any | null>(null)
+const shopTabKey = ref<'seed' | 'pet' | 'dress'>('seed')
+const mallTabKey = ref<'gift' | 'month_card' | 'recharge'>('gift')
 const mallPurchaseMemory = ref<Record<string, { count: number, lastPurchasedAt: number, name: string }>>({})
+const sellStrategyEditorOpen = ref(false)
+const strategySaving = ref(false)
+const keepFruitIdsText = ref('')
+const initialSellStrategyDraft = buildTradeSellStrategyDraft()
+const strategyDraft = ref({
+  keepMinEachFruit: initialSellStrategyDraft.keepMinEachFruit,
+  rareKeepEnabled: initialSellStrategyDraft.rareKeepEnabled,
+  judgeBy: initialSellStrategyDraft.judgeBy,
+  minPlantLevel: initialSellStrategyDraft.minPlantLevel,
+  minUnitPrice: initialSellStrategyDraft.minUnitPrice,
+  batchSize: initialSellStrategyDraft.batchSize,
+  previewBeforeManualSell: initialSellStrategyDraft.previewBeforeManualSell,
+})
 
 const MALL_PURCHASE_HISTORY_KEY = 'qq-farm.mall.purchase-history.v1'
 const LEGACY_BAG_USE_HISTORY_KEY = 'qq-farm.bag.use-history.v1'
 const BAG_ACTIVITY_HISTORY_KEY = 'qq-farm.bag.activity-history.v1'
 const LAND_TARGET_INTERACTIONS = new Set(['water', 'harvest', 'erase', 'erasegrass', 'killbug', 'plant'])
+const BAG_ACTIVITY_BROWSER_PREF_NOTE = '交易动态会跟随当前账号同步到服务器；断网或首屏加载时仍会先使用本机缓存兜底。'
+const MALL_PURCHASE_BROWSER_PREF_NOTE = '常买推荐会跟随当前账号同步到服务器；本机缓存只负责首屏回显和弱网兜底。'
+
+let bagPreferencesRevision = 0
+let bagPreferencesSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 const bagSortOptions = [
   { key: 'count_desc', label: '数量优先' },
   { key: 'name_asc', label: '名称排序' },
   { key: 'price_desc', label: '单价优先' },
+  { key: 'level_desc', label: '等级优先' },
+]
+
+const shopSortOptions = [
+  { key: 'price_asc', label: '价格从低到高' },
+  { key: 'price_desc', label: '价格从高到低' },
+  { key: 'name_asc', label: '名称排序' },
   { key: 'level_desc', label: '等级优先' },
 ]
 
@@ -62,6 +115,123 @@ const mallSortOptions = [
   { key: 'contents_desc', label: '内容物优先' },
   { key: 'name_asc', label: '名称排序' },
 ]
+
+const rareKeepJudgeOptions = [
+  { value: 'either', label: '任一条件命中就保留' },
+  { value: 'plant_level', label: '仅按作物等级保留' },
+  { value: 'unit_price', label: '仅按果实单价保留' },
+]
+
+const shopSections = computed(() => {
+  const defaults = [
+    {
+      shopId: 2,
+      shopType: 2,
+      shopName: '种子商店',
+      tabKey: 'seed',
+      label: '种子',
+      description: '金币购买种子',
+      currencyLabel: '金币',
+      goods: [],
+    },
+    {
+      shopId: 3,
+      shopType: 3,
+      shopName: '宠物商店',
+      tabKey: 'pet',
+      label: '宠物',
+      description: '金币购买宠物相关物品',
+      currencyLabel: '金币',
+      goods: [],
+    },
+    {
+      shopId: 4,
+      shopType: 4,
+      shopName: '装扮商店',
+      tabKey: 'dress',
+      label: '装扮',
+      description: '金币购买装扮与陈设',
+      currencyLabel: '金币',
+      goods: [],
+    },
+  ]
+  return defaults.map((section) => {
+    const remote = rawShopSections.value.find((row: any) => String(row?.tabKey || '') === section.tabKey)
+    return remote
+      ? {
+          ...section,
+          ...remote,
+          label: String(remote?.label || remote?.shopName || section.label),
+          goods: Array.isArray(remote?.goods) ? remote.goods : [],
+          isPlaceholder: false,
+        }
+      : {
+          ...section,
+          goods: [],
+          isPlaceholder: true,
+          error: '当前账号尚未抓到该商店数据',
+        }
+  })
+})
+
+const mallSections = computed(() => {
+  const defaults = [
+    {
+      slotType: 1,
+      slotKey: 'gift',
+      label: '礼包商城',
+      description: '限时礼包、活动礼包与免费福利',
+      supportsPurchase: true,
+      purchaseHint: '',
+      goods: [],
+    },
+    {
+      slotType: 2,
+      slotKey: 'month_card',
+      label: '月卡商城',
+      description: '月卡购买页与月卡奖励状态',
+      supportsPurchase: false,
+      purchaseHint: '月卡购买需在游戏内完成支付',
+      goods: [],
+    },
+    {
+      slotType: 3,
+      slotKey: 'recharge',
+      label: '充值商城',
+      description: '钻石充值页，仅展示价格与档位',
+      supportsPurchase: false,
+      purchaseHint: '充值类商品需在游戏内完成支付',
+      goods: [],
+    },
+  ]
+  return defaults.map((section) => {
+    const remote = rawMallSections.value.find((row: any) => String(row?.slotKey || '') === section.slotKey || Number(row?.slotType || 0) === section.slotType)
+    return remote
+      ? {
+          ...section,
+          ...remote,
+          goods: Array.isArray(remote?.goods) ? remote.goods : [],
+        }
+      : section
+  })
+})
+
+const currentShopSection = computed(() => {
+  return shopSections.value.find((section: any) => String(section?.tabKey || '') === shopTabKey.value) || shopSections.value[0] || null
+})
+
+const currentMallSection = computed(() => {
+  return mallSections.value.find((section: any) => String(section?.slotKey || '') === mallTabKey.value) || mallSections.value[0] || null
+})
+
+const claimableMonthCardCount = computed(() => {
+  return monthCardInfos.value.filter((info: any) => !!info?.canClaim).length
+})
+
+const allTradeGoods = computed(() => {
+  return [...shopSections.value, ...mallSections.value]
+    .flatMap((section: any) => Array.isArray(section?.goods) ? section.goods : [])
+})
 
 function resolveBagCategory(item: any) {
   if (item?.category === 'fruit')
@@ -104,6 +274,50 @@ function getItemFallbackLabel(item: any) {
   if (category === 'pet')
     return 'DG'
   return 'IT'
+}
+
+function getTradeEntryKey(goods: any) {
+  const entryKey = String(goods?.entryKey || '').trim()
+  if (entryKey)
+    return entryKey
+  const sourceType = String(goods?.sourceType || 'mall')
+  const scope = sourceType === 'shop'
+    ? String(goods?.tabKey || goods?.shopId || 'shop')
+    : String(goods?.slotKey || goods?.slotType || 'gift')
+  const goodsId = Number(goods?.goodsId || 0)
+  return `${sourceType}:${scope}:${goodsId}`
+}
+
+function getPurchaseCounterKey(target: any) {
+  if (target && typeof target === 'object')
+    return getTradeEntryKey(target)
+  const numericId = Number(target || 0)
+  if (numericId > 0)
+    return String(numericId)
+  return String(target || '').trim() || 'unknown'
+}
+
+function getPurchaseHistoryKeys(target: any) {
+  if (!target)
+    return []
+  if (typeof target === 'object') {
+    const keys = [getTradeEntryKey(target)]
+    const goodsId = Number(target?.goodsId || 0)
+    if (goodsId > 0 && String(target?.sourceType || '') !== 'shop')
+      keys.push(String(goodsId))
+    return Array.from(new Set(keys.filter(Boolean)))
+  }
+  const numericId = Number(target || 0)
+  if (numericId > 0)
+    return [String(numericId)]
+  const text = String(target || '').trim()
+  return text ? [text] : []
+}
+
+function getGoodsSourceLabel(goods: any) {
+  if (String(goods?.sourceType || '') === 'shop')
+    return String(goods?.shopName || goods?.label || '商店')
+  return String(goods?.slotLabel || goods?.label || '商城')
 }
 
 function getItemMetaLine(item: any) {
@@ -206,6 +420,38 @@ function getSafeStorage() {
   return window.localStorage
 }
 
+function cloneJsonValue<T>(value: T, fallback: T): T {
+  try {
+    return JSON.parse(JSON.stringify(value ?? fallback)) as T
+  }
+  catch {
+    return fallback
+  }
+}
+
+function buildBagPreferencesPayload() {
+  return {
+    purchaseMemory: cloneJsonValue(mallPurchaseMemory.value, {}),
+    activityHistory: cloneJsonValue(activityHistory.value, []),
+  }
+}
+
+function hasBagPreferencesData(payload: { purchaseMemory?: Record<string, any>, activityHistory?: any[] } | null | undefined) {
+  return !!payload && (
+    (payload.purchaseMemory && Object.keys(payload.purchaseMemory).length > 0)
+    || (Array.isArray(payload.activityHistory) && payload.activityHistory.length > 0)
+  )
+}
+
+function applyBagPreferencesPayload(payload: { purchaseMemory?: Record<string, any>, activityHistory?: any[] } | null | undefined) {
+  mallPurchaseMemory.value = payload?.purchaseMemory && typeof payload.purchaseMemory === 'object'
+    ? cloneJsonValue(payload.purchaseMemory, {})
+    : {}
+  activityHistory.value = Array.isArray(payload?.activityHistory)
+    ? cloneJsonValue(payload.activityHistory, [])
+    : []
+}
+
 function loadMallPurchaseMemory() {
   const storage = getSafeStorage()
   if (!storage || !currentAccountId.value) {
@@ -293,30 +539,215 @@ function persistActivityHistory() {
   }
 }
 
-function getMallPurchaseStats(goodsId: number) {
-  const row = mallPurchaseMemory.value[String(Number(goodsId || 0))] || null
-  return {
-    count: Number(row?.count || 0),
-    lastPurchasedAt: Number(row?.lastPurchasedAt || 0),
-    name: String(row?.name || ''),
+function persistBagPreferencesLocally() {
+  persistMallPurchaseMemory()
+  persistActivityHistory()
+}
+
+function clearBagPreferencesSyncTimer() {
+  if (bagPreferencesSyncTimer) {
+    clearTimeout(bagPreferencesSyncTimer)
+    bagPreferencesSyncTimer = null
   }
 }
 
-function recordMallPurchase(goods: any, count: number) {
-  const goodsId = Number(goods?.goodsId || 0)
-  if (!goodsId)
+function scheduleBagPreferencesSync() {
+  const accountIdSnapshot = String(currentAccountId.value || '').trim()
+  if (!accountIdSnapshot)
     return
-  const key = String(goodsId)
-  const current = getMallPurchaseStats(goodsId)
+  const payloadSnapshot = buildBagPreferencesPayload()
+  const revisionSnapshot = bagPreferencesRevision
+  clearBagPreferencesSyncTimer()
+  bagPreferencesSyncTimer = setTimeout(async () => {
+    const saved = await bagStore.saveBagPreferences(accountIdSnapshot, payloadSnapshot)
+    if (!saved)
+      return
+    if (String(currentAccountId.value || '').trim() !== accountIdSnapshot)
+      return
+    if (bagPreferencesRevision !== revisionSnapshot)
+      return
+    applyBagPreferencesPayload(saved)
+    persistBagPreferencesLocally()
+  }, 240)
+}
+
+function persistBagPreferences() {
+  bagPreferencesRevision += 1
+  persistBagPreferencesLocally()
+  scheduleBagPreferencesSync()
+}
+
+async function hydrateBagPreferences() {
+  const accountIdSnapshot = String(currentAccountId.value || '').trim()
+  if (!accountIdSnapshot)
+    return
+  const revisionSnapshot = bagPreferencesRevision
+  const localSnapshot = buildBagPreferencesPayload()
+  const serverSnapshot = await bagStore.fetchBagPreferences(accountIdSnapshot)
+  if (String(currentAccountId.value || '').trim() !== accountIdSnapshot)
+    return
+  if (bagPreferencesRevision !== revisionSnapshot)
+    return
+  if (serverSnapshot && hasBagPreferencesData(serverSnapshot)) {
+    applyBagPreferencesPayload(serverSnapshot)
+    persistBagPreferencesLocally()
+    return
+  }
+  if (hasBagPreferencesData(localSnapshot)) {
+    const migrated = await bagStore.saveBagPreferences(accountIdSnapshot, localSnapshot)
+    if (!migrated)
+      return
+    if (String(currentAccountId.value || '').trim() !== accountIdSnapshot)
+      return
+    if (bagPreferencesRevision !== revisionSnapshot)
+      return
+    applyBagPreferencesPayload(migrated)
+    persistBagPreferencesLocally()
+  }
+}
+
+function getMallPurchaseStats(target: any) {
+  let count = 0
+  let lastPurchasedAt = 0
+  let name = ''
+  for (const key of getPurchaseHistoryKeys(target)) {
+    const row = mallPurchaseMemory.value[key] || null
+    if (!row)
+      continue
+    count += Number(row?.count || 0)
+    lastPurchasedAt = Math.max(lastPurchasedAt, Number(row?.lastPurchasedAt || 0))
+    if (!name && row?.name)
+      name = String(row.name)
+  }
+  return { count, lastPurchasedAt, name }
+}
+
+function syncSellStrategyDraft() {
+  const normalized = buildTradeSellStrategyDraft(settings.value?.tradeConfig)
+  strategyDraft.value = {
+    keepMinEachFruit: normalized.keepMinEachFruit,
+    rareKeepEnabled: normalized.rareKeepEnabled,
+    judgeBy: normalized.judgeBy,
+    minPlantLevel: normalized.minPlantLevel,
+    minUnitPrice: normalized.minUnitPrice,
+    batchSize: normalized.batchSize,
+    previewBeforeManualSell: normalized.previewBeforeManualSell,
+  }
+  keepFruitIdsText.value = normalized.keepFruitIds.join(', ')
+}
+
+const strategyDraftKeepFruitIds = computed(() => normalizeTradeKeepFruitIds(keepFruitIdsText.value))
+const strategyDraftKeepFruitIdSet = computed(() => new Set(strategyDraftKeepFruitIds.value))
+
+const sellStrategyDirty = computed(() => {
+  const current = buildTradeSellStrategyDraft(settings.value?.tradeConfig)
+  const draft = buildTradeSellStrategyDraft({
+    sell: buildTradeSellConfigFromDraft(strategyDraft.value, keepFruitIdsText.value),
+  })
+  return JSON.stringify(current) !== JSON.stringify(draft)
+})
+
+const sellStrategyFruitCandidates = computed(() => {
+  return items.value
+    .filter((item: any) => resolveBagCategory(item) === 'fruit')
+    .map((item: any) => ({
+      id: Number(item?.id || 0),
+      name: String(item?.name || `果实#${Number(item?.id || 0)}`),
+      count: Number(item?.count || 0),
+      price: Number(item?.price || 0),
+      level: Number(item?.level || 0),
+    }))
+    .filter((item: any) => item.id > 0)
+    .sort((a: any, b: any) => {
+      if (b.price !== a.price)
+        return b.price - a.price
+      if (b.level !== a.level)
+        return b.level - a.level
+      if (b.count !== a.count)
+        return b.count - a.count
+      return a.id - b.id
+    })
+})
+
+function toggleStrategyKeepFruit(itemId: number) {
+  const next = new Set(strategyDraftKeepFruitIds.value)
+  if (next.has(itemId))
+    next.delete(itemId)
+  else
+    next.add(itemId)
+  keepFruitIdsText.value = Array.from(next).sort((a, b) => a - b).join(', ')
+}
+
+function applySellStrategyPreset(type: 'conservative' | 'balanced' | 'clear') {
+  if (type === 'conservative') {
+    strategyDraft.value.keepMinEachFruit = 8
+    strategyDraft.value.rareKeepEnabled = true
+    strategyDraft.value.judgeBy = 'either'
+    strategyDraft.value.minPlantLevel = 25
+    strategyDraft.value.minUnitPrice = 800
+    strategyDraft.value.batchSize = 10
+    strategyDraft.value.previewBeforeManualSell = true
+    return
+  }
+  if (type === 'balanced') {
+    strategyDraft.value.keepMinEachFruit = 3
+    strategyDraft.value.rareKeepEnabled = true
+    strategyDraft.value.judgeBy = 'either'
+    strategyDraft.value.minPlantLevel = 40
+    strategyDraft.value.minUnitPrice = 2000
+    strategyDraft.value.batchSize = 15
+    strategyDraft.value.previewBeforeManualSell = true
+    return
+  }
+  strategyDraft.value.keepMinEachFruit = 0
+  strategyDraft.value.rareKeepEnabled = false
+  strategyDraft.value.judgeBy = 'either'
+  strategyDraft.value.minPlantLevel = 40
+  strategyDraft.value.minUnitPrice = 2000
+  strategyDraft.value.batchSize = 15
+  strategyDraft.value.previewBeforeManualSell = true
+}
+
+async function saveSellStrategy() {
+  if (!currentAccountId.value)
+    return
+  strategySaving.value = true
+  try {
+    const payload = JSON.parse(JSON.stringify(settings.value || {}))
+    payload.tradeConfig = {
+      ...(payload.tradeConfig || {}),
+      sell: buildTradeSellConfigFromDraft(strategyDraft.value, keepFruitIdsText.value),
+    }
+    const result = await settingStore.saveSettings(currentAccountId.value, payload)
+    if (!result?.ok) {
+      toast.error(result?.error || '出售策略保存失败')
+      return
+    }
+    sellStrategyEditorOpen.value = false
+    await bagStore.fetchSellPreview(currentAccountId.value)
+    toast.success('出售策略已保存并刷新预览')
+  }
+  finally {
+    strategySaving.value = false
+  }
+}
+
+function openFullSettings() {
+  router.push({ name: 'Settings' })
+}
+
+function recordMallPurchase(goods: any, count: number) {
+  const key = getTradeEntryKey(goods)
+  const current = getMallPurchaseStats(goods)
   mallPurchaseMemory.value = {
     ...mallPurchaseMemory.value,
     [key]: {
       count: current.count + Math.max(1, Number(count || 1)),
       lastPurchasedAt: Date.now(),
-      name: String(goods?.name || current.name || `商品#${goodsId}`),
+      name: String(goods?.name || current.name || `商品#${Number(goods?.goodsId || 0)}`),
     },
   }
-  persistMallPurchaseMemory()
+  persistBagPreferences()
 }
 
 function formatPurchaseTime(ts: number) {
@@ -335,13 +766,13 @@ function formatPurchaseTime(ts: number) {
 
 function clearActivityHistory() {
   activityHistory.value = []
-  persistActivityHistory()
+  persistBagPreferences()
   expandedActivityKey.value = ''
 }
 
 function recordActivityEntry(entry: any) {
   activityHistory.value = [entry, ...activityHistory.value].slice(0, 30)
-  persistActivityHistory()
+  persistBagPreferences()
 }
 
 function recordUseActivity(item: any, result: any) {
@@ -425,7 +856,7 @@ function buildSellActivityDetails(result: any) {
 }
 
 function getActivityKey(entry: any) {
-  return `${String(entry?.type || 'unknown')}-${Number(entry?.ts || 0)}-${Number(entry?.itemId || entry?.goodsId || 0)}`
+  return `${String(entry?.type || 'unknown')}-${Number(entry?.ts || 0)}-${String(entry?.entryKey || entry?.goodsId || entry?.itemId || 0)}`
 }
 
 function toggleActivityExpanded(entry: any) {
@@ -510,11 +941,25 @@ const filteredItems = computed(() => {
   return list
 })
 
+const shopFilterOptions = computed(() => {
+  const goods = Array.isArray(currentShopSection.value?.goods) ? currentShopSection.value.goods : []
+  const buyable = goods.filter((row: any) => !!row?.supportsPurchase).length
+  const limited = goods.filter((row: any) => !!row?.isLimited).length
+  const locked = goods.filter((row: any) => row?.unlocked === false).length
+  return [
+    { key: 'all', label: '全部', count: goods.length },
+    { key: 'buyable', label: '可购买', count: buyable },
+    { key: 'limited', label: '限购', count: limited },
+    { key: 'locked', label: '待解锁', count: locked },
+  ]
+})
+
 const mallFilterOptions = computed(() => {
-  const all = mallGoods.value.length
-  const free = mallGoods.value.filter((goods: any) => goods?.isFree).length
-  const limited = mallGoods.value.filter((goods: any) => goods?.isLimited).length
-  const bundle = mallGoods.value.filter((goods: any) => (goods?.itemIds?.length || 0) > 1).length
+  const goods = Array.isArray(currentMallSection.value?.goods) ? currentMallSection.value.goods : []
+  const all = goods.length
+  const free = goods.filter((row: any) => row?.isFree).length
+  const limited = goods.filter((row: any) => row?.isLimited).length
+  const bundle = goods.filter((row: any) => (row?.itemIds?.length || 0) > 1).length
   return [
     { key: 'all', label: '全部', count: all },
     { key: 'free', label: '免费', count: free },
@@ -528,13 +973,18 @@ function setBagCategory(value: string) {
     bagCategory.value = value as typeof bagCategory.value
 }
 
+function setShopQuickFilter(value: string) {
+  if (['all', 'buyable', 'limited', 'locked'].includes(value))
+    shopQuickFilter.value = value as typeof shopQuickFilter.value
+}
+
 function setMallQuickFilter(value: string) {
   if (['all', 'free', 'limited', 'bundle'].includes(value))
     mallQuickFilter.value = value as typeof mallQuickFilter.value
 }
 
 function getMallRecommendationScore(goods: any) {
-  const stats = getMallPurchaseStats(Number(goods?.goodsId || 0))
+  const stats = getMallPurchaseStats(goods)
   const recencyWindow = 7 * 24 * 60 * 60 * 1000
   const recencyBoost = stats.lastPurchasedAt > 0
     ? Math.max(0, recencyWindow - (Date.now() - stats.lastPurchasedAt)) / (24 * 60 * 60 * 1000)
@@ -544,13 +994,47 @@ function getMallRecommendationScore(goods: any) {
     + recencyBoost * 100
     + (goods?.isFree ? 40 : 0)
     + (goods?.isLimited ? 20 : 0)
+    + (String(goods?.sourceType || '') === 'shop' ? 10 : 0)
     + Math.max(0, 20 - Number(goods?.priceValue || 0))
   )
 }
 
+const filteredShopGoods = computed(() => {
+  const keyword = shopQuery.value.trim().toLowerCase()
+  const list = (Array.isArray(currentShopSection.value?.goods) ? currentShopSection.value.goods : []).filter((goods: any) => {
+    if (shopQuickFilter.value === 'buyable' && !goods?.supportsPurchase)
+      return false
+    if (shopQuickFilter.value === 'limited' && !goods?.isLimited)
+      return false
+    if (shopQuickFilter.value === 'locked' && goods?.unlocked !== false)
+      return false
+    if (!keyword)
+      return true
+    const previewNames = Array.isArray(goods?.itemPreviews) ? goods.itemPreviews.map((item: any) => item?.name || '').join(' ') : ''
+    const haystack = [
+      String(goods?.name || ''),
+      String(goods?.goodsId || ''),
+      String(goods?.itemId || ''),
+      String(goods?.condSummary || ''),
+      previewNames,
+    ].join(' ').toLowerCase()
+    return haystack.includes(keyword)
+  })
+  list.sort((a: any, b: any) => {
+    if (shopSortBy.value === 'price_desc')
+      return Number(b?.priceValue || 0) - Number(a?.priceValue || 0) || Number(a?.goodsId || 0) - Number(b?.goodsId || 0)
+    if (shopSortBy.value === 'name_asc')
+      return String(a?.name || '').localeCompare(String(b?.name || ''), 'zh-CN')
+    if (shopSortBy.value === 'level_desc')
+      return Number(b?.itemPreviews?.[0]?.level || 0) - Number(a?.itemPreviews?.[0]?.level || 0) || Number(a?.goodsId || 0) - Number(b?.goodsId || 0)
+    return Number(a?.priceValue || 0) - Number(b?.priceValue || 0) || Number(a?.goodsId || 0) - Number(b?.goodsId || 0)
+  })
+  return list
+})
+
 const filteredMallGoods = computed(() => {
   const keyword = mallQuery.value.trim().toLowerCase()
-  const list = mallGoods.value.filter((goods: any) => {
+  const list = (Array.isArray(currentMallSection.value?.goods) ? currentMallSection.value.goods : []).filter((goods: any) => {
     if (mallQuickFilter.value === 'free' && !goods?.isFree)
       return false
     if (mallQuickFilter.value === 'limited' && !goods?.isLimited)
@@ -599,10 +1083,10 @@ const filteredMallGoods = computed(() => {
 })
 
 const recommendedMallGoods = computed(() => {
-  return mallGoods.value
+  return (Array.isArray(currentMallSection.value?.goods) ? currentMallSection.value.goods : [])
     .map((goods: any) => ({
       ...goods,
-      purchaseStats: getMallPurchaseStats(Number(goods?.goodsId || 0)),
+      purchaseStats: getMallPurchaseStats(goods),
     }))
     .filter((goods: any) => goods.purchaseStats.count > 0 || goods.purchaseStats.lastPurchasedAt > 0)
     .sort((a: any, b: any) => {
@@ -615,14 +1099,50 @@ const recommendedMallGoods = computed(() => {
 })
 
 function getMallFallbackLabel(goods: any) {
+  if (String(goods?.sourceType || '') === 'shop') {
+    if (String(goods?.tabKey || '') === 'seed')
+      return 'SD'
+    if (String(goods?.tabKey || '') === 'pet')
+      return 'PT'
+    return 'DR'
+  }
   if (goods?.isFree)
     return 'FR'
   if ((goods?.itemIds?.length || 0) > 1)
     return 'BX'
+  if (String(goods?.slotKey || '') === 'month_card')
+    return 'MC'
+  if (String(goods?.slotKey || '') === 'recharge')
+    return 'CZ'
   return 'GD'
 }
 
+function isGoodsLocked(goods: any) {
+  return goods?.unlocked === false
+}
+
+function getShopStatusLabel(goods: any) {
+  if (isGoodsLocked(goods))
+    return '待解锁'
+  if (!goods?.supportsPurchase)
+    return '暂不可买'
+  return ''
+}
+
+function getShopActionLabel(goods: any) {
+  if (goods?.supportsPurchase)
+    return '购买'
+  if (isGoodsLocked(goods))
+    return '未解锁'
+  return '暂不可买'
+}
+
 function getMallPriceLabel(goods: any) {
+  const label = String(goods?.priceLabel || '').trim()
+  if (label)
+    return label
+  if (String(goods?.sourceType || '') === 'shop')
+    return `${Number(goods?.priceValue || 0)} 金币`
   return goods?.isFree ? '免费领取' : `${Number(goods?.priceValue || 0)} 点券`
 }
 
@@ -635,7 +1155,7 @@ function getGoodsPreviewGroups(goods: any, limit = Infinity) {
     if (!groups.has(id)) {
       groups.set(id, { ...preview, count: 0 })
     }
-    groups.get(id).count += 1
+    groups.get(id).count += Math.max(1, Number(preview?.count || 1))
   }
   return Array.from(groups.values()).slice(0, limit)
 }
@@ -644,10 +1164,17 @@ function getGoodsSummary(goods: any) {
   const summary = String(goods?.summary || '').trim()
   if (summary)
     return summary
+  if (String(goods?.sourceType || '') === 'shop' && String(goods?.condSummary || '').trim())
+    return String(goods.condSummary).trim()
   const previews = getGoodsPreviewGroups(goods, 3)
   if (!previews.length)
     return '暂无内容说明'
   return previews.map((preview: any) => `${preview.name}${preview.count > 1 ? ` x${preview.count}` : ''}`).join(' / ')
+}
+
+function getMonthCardInfo(goodsOrId: any) {
+  const goodsId = Number(typeof goodsOrId === 'object' ? goodsOrId?.goodsId : goodsOrId || 0)
+  return monthCardInfos.value.find((info: any) => Number(info?.goodsId || 0) === goodsId) || null
 }
 
 function isLandSelected(landId: number) {
@@ -702,18 +1229,131 @@ const selectedSellItems = computed(() => {
   return items.value.filter((item: any) => selected.has(Number(item.id || 0)) && sellableIds.value.has(Number(item.id || 0)))
 })
 
-const sellConfigSummary = computed(() => {
-  const sell = settings.value.tradeConfig?.sell || {}
-  const rareKeep = sell.rareKeep || {}
-  return {
-    keepMinEachFruit: Number(sell.keepMinEachFruit || 0),
-    keepFruitIds: Array.isArray(sell.keepFruitIds) ? sell.keepFruitIds : [],
-    rareKeepEnabled: !!rareKeep.enabled,
-    judgeBy: rareKeep.judgeBy || 'either',
-    minPlantLevel: Number(rareKeep.minPlantLevel || 0),
-    minUnitPrice: Number(rareKeep.minUnitPrice || 0),
-    previewBeforeManualSell: !!sell.previewBeforeManualSell,
+const activeTabMeta = computed(() => {
+  if (activeTab.value === 'shop') {
+    return {
+      label: '商店',
+      description: `${currentShopSection.value?.label || '商店'}当前展示 ${filteredShopGoods.value.length} 项商品。`,
+    }
   }
+  if (activeTab.value === 'mall') {
+    return {
+      label: '商城',
+      description: `${currentMallSection.value?.label || '商城'}当前展示 ${filteredMallGoods.value.length} 项商品。`,
+    }
+  }
+  if (activeTab.value === 'sell') {
+    return {
+      label: '出售预览',
+      description: `当前预览 ${sellPreview.value?.totalSellKinds || 0} 种果实，预计 ${sellPreview.value?.expectedGold || 0} 金币。`,
+    }
+  }
+  return {
+    label: '背包',
+    description: `当前筛出 ${filteredItems.value.length} 项物品，可手动出售 ${selectedSellItems.value.length} 种果实。`,
+  }
+})
+
+const tradeTabOptions = computed(() => [
+  {
+    key: 'bag',
+    label: '背包',
+    active: activeTab.value === 'bag',
+    class: 'bag-trade-tab',
+    onClick: () => {
+      activeTab.value = 'bag'
+    },
+  },
+  {
+    key: 'shop',
+    label: '商店',
+    active: activeTab.value === 'shop',
+    class: 'bag-trade-tab',
+    onClick: () => {
+      activeTab.value = 'shop'
+    },
+  },
+  {
+    key: 'mall',
+    label: '商城',
+    active: activeTab.value === 'mall',
+    class: 'bag-trade-tab',
+    onClick: () => {
+      activeTab.value = 'mall'
+    },
+  },
+  {
+    key: 'sell',
+    label: '出售预览',
+    active: activeTab.value === 'sell',
+    class: 'bag-trade-tab',
+    onClick: () => {
+      activeTab.value = 'sell'
+    },
+  },
+])
+
+const bagHeaderChips = computed(() => {
+  const chips = [
+    { key: 'inventory', label: `库存 ${items.value.length} 种` },
+    { key: 'tab', label: `当前 ${activeTabMeta.value.label}` },
+  ]
+
+  if (activeTab.value === 'bag')
+    chips.push({ key: 'visible', label: `显示 ${filteredItems.value.length} 项` })
+  if (activeTab.value === 'shop')
+    chips.push({ key: 'shop', label: `${currentShopSection.value?.label || '商店'} ${filteredShopGoods.value.length} 项` })
+  if (activeTab.value === 'mall')
+    chips.push({ key: 'mall', label: `${currentMallSection.value?.label || '商城'} ${filteredMallGoods.value.length} 项` })
+  if (activeTab.value === 'sell')
+    chips.push({ key: 'sell', label: `预览 ${sellPreview.value?.totalSellCount || 0} 个` })
+  if (selectedSellItems.value.length)
+    chips.push({ key: 'selected', label: `已选 ${selectedSellItems.value.length} 种` })
+
+  return chips
+})
+
+const sellConfigSummary = computed(() => {
+  const sell = buildTradeSellStrategyDraft(settings.value?.tradeConfig)
+  return {
+    keepMinEachFruit: sell.keepMinEachFruit,
+    keepFruitIds: sell.keepFruitIds,
+    rareKeepEnabled: sell.rareKeepEnabled,
+    judgeBy: sell.judgeBy,
+    judgeByLabel: rareKeepJudgeOptions.find(option => option.value === sell.judgeBy)?.label || '任一条件命中就保留',
+    minPlantLevel: sell.minPlantLevel,
+    minUnitPrice: sell.minUnitPrice,
+    batchSize: sell.batchSize,
+    previewBeforeManualSell: sell.previewBeforeManualSell,
+  }
+})
+
+const sellStrategyRules = computed(() => {
+  const summary = sellConfigSummary.value
+  return [
+    summary.keepMinEachFruit > 0
+      ? `每种果实至少保留 ${summary.keepMinEachFruit} 个`
+      : '不做基础保留，默认可全部出售',
+    summary.keepFruitIds.length > 0
+      ? `强制保留清单 ${summary.keepFruitIds.length} 项`
+      : '未设置强制保留清单',
+    summary.rareKeepEnabled
+      ? `稀有保留已开启，按${summary.judgeByLabel}判定`
+      : '稀有保留已关闭',
+    summary.previewBeforeManualSell
+      ? '手动出售前会先刷新预览'
+      : '手动出售可直接执行',
+  ]
+})
+
+const sellStrategyPriorityLine = computed(() => {
+  const priorityParts = [
+    strategyDraftKeepFruitIds.value.length > 0 ? '强制保留清单' : '',
+    strategyDraft.value.rareKeepEnabled ? '稀有果实保留' : '',
+    Number(strategyDraft.value.keepMinEachFruit || 0) > 0 ? `每种至少保留 ${Number(strategyDraft.value.keepMinEachFruit || 0)} 个` : '',
+    '其余果实出售',
+  ].filter(Boolean)
+  return priorityParts.join(' > ')
 })
 
 function pruneSelectedItems() {
@@ -753,58 +1393,76 @@ async function ensureConnected() {
 
 async function loadBag() {
   if (!currentAccountId.value)
-    return
+    return false
   const connected = await ensureConnected()
-  if (!connected) {
-    imageErrors.value = {}
-    clearSelection()
-    return
-  }
   await Promise.all([
     settingStore.fetchSettings(currentAccountId.value),
-    bagStore.fetchBag(currentAccountId.value),
-    bagStore.fetchSellPreview(currentAccountId.value),
-    bagStore.fetchMallGoods(currentAccountId.value),
+    bagStore.fetchShopCatalog(currentAccountId.value),
+    bagStore.fetchMallCatalog(currentAccountId.value),
+    connected ? bagStore.fetchBag(currentAccountId.value) : Promise.resolve(null),
+    connected ? bagStore.fetchSellPreview(currentAccountId.value) : Promise.resolve(null),
   ])
   imageErrors.value = {}
+  clearSelection()
   pruneSelectedItems()
   pruneSelectedLands()
+  if (!connected && activeTab.value === 'bag')
+    activeTab.value = 'mall'
+  return connected
 }
 
 async function handleRefresh() {
-  await loadBag()
-  toast.success('背包和商城数据已刷新')
+  refreshingAll.value = true
+  try {
+    const connected = await loadBag()
+    toast.success(connected ? '背包、商店和商城数据已刷新' : '商店和商城数据已刷新，背包需账号在线')
+  }
+  finally {
+    refreshingAll.value = false
+  }
 }
 
 async function handlePreviewSell() {
   if (!currentAccountId.value)
     return
-  await bagStore.fetchSellPreview(currentAccountId.value)
-  activeTab.value = 'sell'
-  toast.success('已刷新出售预览')
+  previewRefreshing.value = true
+  try {
+    await bagStore.fetchSellPreview(currentAccountId.value)
+    activeTab.value = 'sell'
+    toast.success('已刷新出售预览')
+  }
+  finally {
+    previewRefreshing.value = false
+  }
 }
 
 async function handleSellByPolicy() {
   if (!currentAccountId.value)
     return
-  if (sellConfigSummary.value.previewBeforeManualSell) {
-    await bagStore.fetchSellPreview(currentAccountId.value)
+  sellingByPolicy.value = true
+  try {
+    if (sellConfigSummary.value.previewBeforeManualSell) {
+      await bagStore.fetchSellPreview(currentAccountId.value)
+    }
+    const result = await bagStore.sellByPolicy(currentAccountId.value)
+    if (result) {
+      recordActivityEntry({
+        ts: Date.now(),
+        type: 'sell',
+        title: `按策略出售 ${Number(result?.soldCount || 0)} 个果实`,
+        soldCount: Number(result?.soldCount || 0),
+        soldKinds: Number(result?.soldKinds || 0),
+        goldEarned: Number(result?.goldEarned || 0),
+        summary: buildSellActivitySummary(result),
+        details: buildSellActivityDetails(result),
+      })
+      activeTab.value = 'sell'
+      toast.success(result.message || '已按策略出售')
+      clearSelection()
+    }
   }
-  const result = await bagStore.sellByPolicy(currentAccountId.value)
-  if (result) {
-    recordActivityEntry({
-      ts: Date.now(),
-      type: 'sell',
-      title: `按策略出售 ${Number(result?.soldCount || 0)} 个果实`,
-      soldCount: Number(result?.soldCount || 0),
-      soldKinds: Number(result?.soldKinds || 0),
-      goldEarned: Number(result?.goldEarned || 0),
-      summary: buildSellActivitySummary(result),
-      details: buildSellActivityDetails(result),
-    })
-    activeTab.value = 'sell'
-    toast.success(result.message || '已按策略出售')
-    clearSelection()
+  finally {
+    sellingByPolicy.value = false
   }
 }
 
@@ -832,19 +1490,21 @@ async function handleSellSelected() {
   }
 }
 
-function getPurchaseCount(goodsId: number) {
-  return Math.max(1, Number(purchaseCounts.value[goodsId] || 1))
+function getPurchaseCount(target: any) {
+  const key = getPurchaseCounterKey(target)
+  return Math.max(1, Number(purchaseCounts.value[key] || 1))
 }
 
-function updatePurchaseCount(goodsId: number, value: number) {
+function updatePurchaseCount(target: any, value: number) {
+  const key = getPurchaseCounterKey(target)
   purchaseCounts.value = {
     ...purchaseCounts.value,
-    [goodsId]: Math.max(1, Number(value || 1)),
+    [key]: Math.max(1, Number(value || 1)),
   }
 }
 
-function bumpPurchaseCount(goodsId: number, delta: number) {
-  updatePurchaseCount(goodsId, getPurchaseCount(goodsId) + delta)
+function bumpPurchaseCount(target: any, delta: number) {
+  updatePurchaseCount(target, getPurchaseCount(target) + delta)
 }
 
 function getUseCount(itemId: number, maxCount = Infinity) {
@@ -879,17 +1539,26 @@ async function handleBuyGoods(goods: any) {
   const goodsId = Number(goods?.goodsId || 0)
   if (!goodsId)
     return
-  const count = getPurchaseCount(goodsId)
-  const result = await bagStore.buyMallGoods(currentAccountId.value, goodsId, count)
+  if (!goods?.supportsPurchase) {
+    toast.warning(String(goods?.purchaseDisabledReason || '当前商品需在游戏内完成购买'))
+    return
+  }
+  const count = getPurchaseCount(goods)
+  const result = String(goods?.sourceType || '') === 'shop'
+    ? await bagStore.buyShopGoods(currentAccountId.value, goodsId, count)
+    : await bagStore.buyMallGoods(currentAccountId.value, goodsId, count)
   if (result) {
     recordMallPurchase(goods, count)
     recordActivityEntry({
       ts: Date.now(),
       type: 'purchase',
+      sourceType: String(goods?.sourceType || 'mall'),
+      entryKey: getTradeEntryKey(goods),
       goodsId,
       goodsName: String(goods?.name || `商品#${goodsId}`),
       title: `${goods?.name || `商品#${goodsId}`} x${count}`,
       count,
+      sectionLabel: getGoodsSourceLabel(goods),
       summary: getGoodsSummary(goods),
       priceLabel: getMallPriceLabel(goods),
       itemIds: Array.isArray(goods?.itemIds) ? goods.itemIds.slice(0, 12) : [],
@@ -903,6 +1572,17 @@ async function handleBuyGoods(goods: any) {
     })
     toast.success(`已购买 ${goods?.name || `商品#${goodsId}`}`)
   }
+}
+
+async function handleClaimMonthCard(goodsOrId: any) {
+  if (!currentAccountId.value)
+    return
+  const goodsId = Number(typeof goodsOrId === 'object' ? goodsOrId?.goodsId : goodsOrId || 0)
+  if (!goodsId)
+    return
+  const result = await bagStore.claimMonthCardReward(currentAccountId.value, goodsId)
+  if (result)
+    toast.success(result.message || '已领取月卡奖励')
 }
 
 async function handleUseBagItem(item: any) {
@@ -943,15 +1623,35 @@ function isSelected(itemId: number) {
 }
 
 function formatPreviewReason(item: any) {
-  if (!item?.keepReasons?.length)
-    return ''
-  return item.keepReasons.join(' / ')
+  const rawReasons = Array.isArray(item?.keepReasons) ? item.keepReasons : []
+  const reasons = rawReasons.map((reason: string) => reason === '白名单保留' ? '命中强制保留清单' : reason)
+  const keepCount = Math.max(0, Number(item?.keepCount || 0))
+  const sellCount = Math.max(0, Number(item?.sellCount || 0))
+  const totalCount = Math.max(0, Number(item?.count || 0))
+  if (reasons.length > 0)
+    return `全部保留：${reasons.join(' / ')}`
+  if (keepCount > 0 && sellCount > 0)
+    return `基础保留：当前按“每种至少保留 ${keepCount} 个”执行`
+  if (keepCount > 0 && sellCount === 0)
+    return totalCount <= keepCount ? '当前数量未超过保留线，暂不出售' : '当前全部被保留策略覆盖'
+  return ''
 }
 
 function openActivityEntry(entry: any) {
   if (String(entry?.type || '') === 'purchase') {
-    const goods = mallGoods.value.find((item: any) => Number(item?.goodsId || 0) === Number(entry?.goodsId || 0))
-      || { goodsId: entry?.goodsId, name: entry?.goodsName, itemIds: entry?.itemIds || [] }
+    const goods = allTradeGoods.value.find((item: any) => {
+      if (String(entry?.entryKey || '').trim())
+        return String(item?.entryKey || '') === String(entry.entryKey)
+      if (String(entry?.sourceType || '').trim() && String(item?.sourceType || '') !== String(entry.sourceType))
+        return false
+      return Number(item?.goodsId || 0) === Number(entry?.goodsId || 0)
+    }) || {
+      sourceType: entry?.sourceType || 'mall',
+      goodsId: entry?.goodsId,
+      name: entry?.goodsName,
+      itemIds: entry?.itemIds || [],
+      entryKey: entry?.entryKey || '',
+    }
     openMallDetail(goods)
     return
   }
@@ -988,10 +1688,32 @@ function closeDetailPanel() {
 
 // vue-tsc occasionally misses a few late template refs in this large SFC.
 const templateUsageBridge = {
+  strategySaving,
+  shopLoading,
+  shopSortOptions,
+  claimableMonthCardCount,
+  shopFilterOptions,
+  setShopQuickFilter,
+  getMonthCardInfo,
   formatPurchaseTime,
   recommendedMallGoods,
   bumpUseCount,
   handleUseBagItem,
+  handleClaimMonthCard,
+  sellStrategyEditorOpen,
+  sellStrategyDirty,
+  strategyDraft,
+  strategyDraftKeepFruitIds,
+  strategyDraftKeepFruitIdSet,
+  sellStrategyFruitCandidates,
+  sellStrategyRules,
+  sellStrategyPriorityLine,
+  rareKeepJudgeOptions,
+  toggleStrategyKeepFruit,
+  applySellStrategyPreset,
+  saveSellStrategy,
+  syncSellStrategyDraft,
+  openFullSettings,
 }
 void templateUsageBridge
 
@@ -999,15 +1721,24 @@ onMounted(() => {
   loadMallPurchaseMemory()
   loadActivityHistory()
   loadBag()
+  void hydrateBagPreferences()
+})
+
+onBeforeUnmount(() => {
+  clearBagPreferencesSyncTimer()
 })
 
 watch(currentAccountId, () => {
+  clearBagPreferencesSyncTimer()
   clearSelection()
   closeDetailPanel()
   targetLandsAccountId.value = ''
+  shopTabKey.value = 'seed'
+  mallTabKey.value = 'gift'
   loadMallPurchaseMemory()
   loadActivityHistory()
   loadBag()
+  void hydrateBagPreferences()
 })
 
 watch(items, () => {
@@ -1022,108 +1753,260 @@ watch(lands, () => {
   pruneSelectedLands()
 })
 
-watch(mallGoods, () => {
+watch(shopSections, () => {
+  if (!shopSections.value.some((section: any) => String(section?.tabKey || '') === shopTabKey.value))
+    shopTabKey.value = 'seed'
+})
+
+watch(mallSections, () => {
+  if (!mallSections.value.some((section: any) => String(section?.slotKey || '') === mallTabKey.value))
+    mallTabKey.value = 'gift'
+})
+
+watch(allTradeGoods, () => {
   if (mallDetailGoods.value) {
-    const nextGoods = mallGoods.value.find((goods: any) => Number(goods?.goodsId || 0) === Number(mallDetailGoods.value?.goodsId || 0))
+    const nextGoods = allTradeGoods.value.find((goods: any) => String(goods?.entryKey || '') === String(mallDetailGoods.value?.entryKey || ''))
+      || allTradeGoods.value.find((goods: any) => {
+        if (String(goods?.sourceType || '') !== String(mallDetailGoods.value?.sourceType || ''))
+          return false
+        return Number(goods?.goodsId || 0) === Number(mallDetailGoods.value?.goodsId || 0)
+      })
     mallDetailGoods.value = nextGoods || null
   }
 })
+
+watch(() => settings.value.tradeConfig, () => {
+  syncSellStrategyDraft()
+}, { immediate: true, deep: true })
 
 useIntervalFn(loadBag, 60000)
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-      <div>
-        <h2 class="flex items-center gap-2 text-2xl font-bold">
-          <div class="i-carbon-inventory-management" />
-          背包与交易
-        </h2>
-        <div class="mt-1 text-sm text-gray-500">
-          背包 {{ items.length }} 种物品
-          <span v-if="activeTab === 'bag'"> · 当前显示 {{ filteredItems.length }} 项</span>
-          <span v-if="activeTab === 'mall'"> · 当前显示 {{ filteredMallGoods.length }} 项商品</span>
-          <span v-if="selectedSellItems.length"> · 已选 {{ selectedSellItems.length }} 种果实</span>
+  <div class="bag-panel space-y-4">
+    <div class="bag-topbar ui-mobile-sticky-panel">
+      <div class="bag-topbar__header">
+        <div class="bag-topbar__copy">
+          <h2 class="flex items-center gap-2 text-2xl font-bold">
+            <div class="i-carbon-inventory-management" />
+            背包与交易
+          </h2>
+          <div class="bag-panel__summary mt-1 text-sm">
+            背包 {{ items.length }} 种物品
+            <span v-if="activeTab === 'bag'"> · 当前显示 {{ filteredItems.length }} 项</span>
+            <span v-if="activeTab === 'shop'"> · {{ currentShopSection?.label || '商店' }} {{ filteredShopGoods.length }} 项</span>
+            <span v-if="activeTab === 'mall'"> · {{ currentMallSection?.label || '商城' }} {{ filteredMallGoods.length }} 项商品</span>
+            <span v-if="selectedSellItems.length"> · 已选 {{ selectedSellItems.length }} 种果实</span>
+          </div>
+          <p class="bag-topbar__desc md:hidden">
+            {{ activeTabMeta.description }}
+          </p>
+        </div>
+
+        <div class="bag-topbar__actions ui-bulk-actions">
+          <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="actionLoading || refreshingAll" :loading="refreshingAll" loading-label="刷新中" icon-class="i-carbon-renew" @click="handleRefresh">
+            刷新
+          </BaseButton>
+          <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="sellPreviewLoading || actionLoading || previewRefreshing" :loading="previewRefreshing || sellPreviewLoading" loading-label="预览刷新中" icon-class="i-carbon-view" @click="handlePreviewSell">
+            刷新出售预览
+          </BaseButton>
+          <BaseButton variant="primary" class="trade-btn trade-btn-primary" :disabled="actionLoading || sellingByPolicy" :loading="sellingByPolicy" loading-label="执行中" icon-class="i-carbon-flash" @click="handleSellByPolicy">
+            按策略出售
+          </BaseButton>
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-2">
-        <button class="trade-btn trade-btn-secondary" :disabled="actionLoading" @click="handleRefresh">
-          刷新
-        </button>
-        <button class="trade-btn trade-btn-secondary" :disabled="sellPreviewLoading || actionLoading" @click="handlePreviewSell">
-          刷新出售预览
-        </button>
-        <button class="trade-btn trade-btn-primary" :disabled="actionLoading" @click="handleSellByPolicy">
-          按策略出售
-        </button>
+      <div class="bag-topbar__chips ui-bulk-actions md:hidden">
+        <span
+          v-for="chip in bagHeaderChips"
+          :key="chip.key"
+          class="bag-topbar__chip"
+        >
+          {{ chip.label }}
+        </span>
       </div>
+
+      <BaseToggleOptionGroup class="bag-tab-bar ui-bulk-actions" :items="tradeTabOptions" />
     </div>
 
-    <div class="grid gap-3 lg:grid-cols-3">
-      <div class="glass-panel rounded-xl p-4 shadow">
-        <div class="text-xs text-gray-400 tracking-[0.2em] uppercase">
-          交易策略
+    <div class="grid gap-3 lg:grid-cols-4">
+      <div class="glass-panel rounded-xl p-4 shadow lg:col-span-2">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div class="bag-section-eyebrow text-xs uppercase">
+              交易策略
+            </div>
+            <div class="mt-2 text-base font-semibold">
+              按策略出售 = 强制保留 + 稀有保留 + 基础保留
+            </div>
+            <div class="bag-inline-note mt-1 text-xs">
+              背包页现在可以直接查看和调整出售策略，不用再猜“按策略出售”到底按什么卖。
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <BaseButton type="button" variant="secondary" class="trade-btn trade-btn-secondary" @click="sellStrategyEditorOpen = !sellStrategyEditorOpen">
+              {{ sellStrategyEditorOpen ? '收起策略' : '编辑策略' }}
+            </BaseButton>
+            <BaseButton type="button" variant="secondary" class="trade-btn trade-btn-secondary" @click="openFullSettings">
+              去完整设置
+            </BaseButton>
+          </div>
         </div>
-        <div class="mt-2 text-sm font-medium">
-          每种果实保留 {{ sellConfigSummary.keepMinEachFruit }} 个
-        </div>
-        <div class="mt-1 text-xs text-gray-500">
-          白名单 {{ sellConfigSummary.keepFruitIds.length }} 项
-          <span v-if="sellConfigSummary.rareKeepEnabled">
-            · 稀有保留开启
+
+        <div class="strategy-chip-list mt-4">
+          <span v-for="rule in sellStrategyRules" :key="rule" class="strategy-chip">
+            {{ rule }}
           </span>
-          <span v-if="sellConfigSummary.previewBeforeManualSell">
-            · 手动出售前强制预览
-          </span>
         </div>
-        <div class="mt-2 text-xs text-amber-500/90">
+
+        <div class="strategy-priority mt-3">
+          <span class="strategy-priority__label">执行顺序</span>
+          <span class="strategy-priority__value">{{ sellStrategyPriorityLine }}</span>
+        </div>
+
+        <div class="bag-note-warning mt-3 text-xs">
           当前仅支持出售果实，种子、化肥、狗粮、礼包等物品不会出现在出售勾选中。
+        </div>
+
+        <div v-if="sellStrategyEditorOpen" class="strategy-editor mt-4">
+          <div class="strategy-editor__toolbar">
+            <div class="strategy-editor__title">
+              快速调参
+            </div>
+            <div class="strategy-editor__presets">
+              <button type="button" class="strategy-chip strategy-chip-action" @click="applySellStrategyPreset('conservative')">
+                保守保留
+              </button>
+              <button type="button" class="strategy-chip strategy-chip-action" @click="applySellStrategyPreset('balanced')">
+                均衡出售
+              </button>
+              <button type="button" class="strategy-chip strategy-chip-action" @click="applySellStrategyPreset('clear')">
+                快速清仓
+              </button>
+            </div>
+          </div>
+
+          <div class="strategy-editor__grid">
+            <label class="strategy-field">
+              <span class="strategy-field__label">每种至少保留</span>
+              <input v-model.number="strategyDraft.keepMinEachFruit" min="0" max="999999" type="number" class="strategy-input">
+            </label>
+
+            <label class="strategy-field">
+              <span class="strategy-field__label">出售批大小</span>
+              <input v-model.number="strategyDraft.batchSize" min="1" max="50" type="number" class="strategy-input">
+            </label>
+
+            <label class="strategy-field">
+              <span class="strategy-field__label">稀有判定方式</span>
+              <select v-model="strategyDraft.judgeBy" class="strategy-select" :disabled="!strategyDraft.rareKeepEnabled">
+                <option v-for="option in rareKeepJudgeOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+
+            <label class="strategy-field strategy-field-checkbox">
+              <span class="strategy-field__label">执行保护</span>
+              <span class="strategy-checkbox">
+                <input v-model="strategyDraft.previewBeforeManualSell" type="checkbox">
+                <span>手动出售前先刷新预览</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="strategy-editor__grid mt-3">
+            <label class="strategy-field strategy-field-checkbox">
+              <span class="strategy-field__label">稀有果实保留</span>
+              <span class="strategy-checkbox">
+                <input v-model="strategyDraft.rareKeepEnabled" type="checkbox">
+                <span>命中阈值就整项保留，不参与出售</span>
+              </span>
+            </label>
+
+            <label class="strategy-field">
+              <span class="strategy-field__label">最低作物等级</span>
+              <input v-model.number="strategyDraft.minPlantLevel" min="0" max="999" type="number" class="strategy-input" :disabled="!strategyDraft.rareKeepEnabled">
+            </label>
+
+            <label class="strategy-field">
+              <span class="strategy-field__label">最低果实单价</span>
+              <input v-model.number="strategyDraft.minUnitPrice" min="0" max="999999999" type="number" class="strategy-input" :disabled="!strategyDraft.rareKeepEnabled">
+            </label>
+          </div>
+
+          <label class="strategy-field mt-3">
+            <span class="strategy-field__label">强制保留清单</span>
+            <textarea
+              v-model="keepFruitIdsText"
+              rows="2"
+              class="strategy-textarea"
+              placeholder="输入果实 ID，支持逗号或空格分隔；下面也可以直接点选当前背包果实。"
+            />
+          </label>
+
+          <div class="strategy-keep-picker mt-3">
+            <div class="strategy-field__label">
+              当前背包果实快捷选择
+            </div>
+            <div v-if="sellStrategyFruitCandidates.length" class="strategy-keep-picker__list">
+              <button
+                v-for="fruit in sellStrategyFruitCandidates"
+                :key="fruit.id"
+                type="button"
+                class="strategy-keep-pill"
+                :class="{ active: strategyDraftKeepFruitIdSet.has(fruit.id) }"
+                @click="toggleStrategyKeepFruit(fruit.id)"
+              >
+                <span>{{ fruit.name }}</span>
+                <span class="strategy-keep-pill__meta">#{{ fruit.id }} · x{{ fruit.count }} · {{ fruit.price }}金</span>
+              </button>
+            </div>
+            <div v-else class="bag-inline-note text-xs">
+              当前背包里没有可选果实，先刷新背包或切到在线账号。
+            </div>
+          </div>
+
+          <div class="strategy-editor__footer mt-4">
+            <BaseButton type="button" variant="secondary" class="trade-btn trade-btn-secondary" :disabled="strategySaving" @click="syncSellStrategyDraft">
+              还原当前配置
+            </BaseButton>
+            <BaseButton type="button" variant="primary" class="trade-btn trade-btn-primary" :disabled="strategySaving || !sellStrategyDirty" :loading="strategySaving" loading-label="保存中..." @click="saveSellStrategy">
+              保存策略并刷新预览
+            </BaseButton>
+          </div>
         </div>
       </div>
 
       <div class="glass-panel rounded-xl p-4 shadow">
-        <div class="text-xs text-gray-400 tracking-[0.2em] uppercase">
+        <div class="bag-section-eyebrow text-xs uppercase">
           预计出售
         </div>
         <div class="mt-2 text-sm font-medium">
           {{ sellPreview?.totalSellCount || 0 }} 个果实
         </div>
-        <div class="mt-1 text-xs text-gray-500">
+        <div class="bag-inline-note mt-1 text-xs">
           {{ sellPreview?.totalSellKinds || 0 }} 种 · 预计 {{ sellPreview?.expectedGold || 0 }} 金币
         </div>
       </div>
 
       <div class="glass-panel rounded-xl p-4 shadow">
-        <div class="text-xs text-gray-400 tracking-[0.2em] uppercase">
+        <div class="bag-section-eyebrow text-xs uppercase">
           快速选择
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
-          <button class="trade-btn trade-btn-secondary" @click="selectAllSellable">
+          <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" @click="selectAllSellable">
             全选可售果实
-          </button>
-          <button class="trade-btn trade-btn-secondary" @click="clearSelection">
+          </BaseButton>
+          <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" @click="clearSelection">
             清空选择
-          </button>
-          <label class="inline-flex items-center gap-2 text-sm text-gray-500">
+          </BaseButton>
+          <label class="bag-inline-checkbox inline-flex items-center gap-2 text-sm">
             <input v-model="respectPolicyForSelected" type="checkbox">
             选中出售也遵守保留策略
           </label>
         </div>
       </div>
-    </div>
-
-    <div class="flex flex-wrap gap-2">
-      <button class="trade-tab" :class="{ active: activeTab === 'bag' }" @click="activeTab = 'bag'">
-        背包
-      </button>
-      <button class="trade-tab" :class="{ active: activeTab === 'sell' }" @click="activeTab = 'sell'">
-        出售预览
-      </button>
-      <button class="trade-tab" :class="{ active: activeTab === 'mall' }" @click="activeTab = 'mall'">
-        商城
-      </button>
     </div>
 
     <div v-if="activityHistory.length" class="activity-panel glass-panel rounded-2xl p-4 shadow">
@@ -1135,26 +2018,31 @@ useIntervalFn(loadBag, 60000)
           <div class="activity-panel__subtitle">
             最近 30 条购买、使用、出售动作，按账号本地保存
           </div>
+          <div class="bag-info-banner mt-2">
+            {{ BAG_ACTIVITY_BROWSER_PREF_NOTE }}
+          </div>
         </div>
         <div class="activity-panel__actions">
           <div class="activity-panel__summary">
             当前筛选 {{ filteredActivityHistory.length }} 条，展示最近 {{ recentActivityHistory.length }} 条
           </div>
-          <div class="inventory-toolbar__chips">
-            <button
+          <BaseFilterChips class="inventory-toolbar__chips bag-chip-row">
+            <BaseFilterChip
               v-for="option in activityFilterOptions"
               :key="option.key"
-              class="filter-chip"
-              :class="{ active: activityFilter === option.key }"
+              as="button"
+              type="button"
+              class="bag-filter-chip"
+              :active="activityFilter === option.key"
               @click="activityFilter = option.key"
             >
               <span>{{ option.label }}</span>
-              <span class="filter-chip__count">{{ option.count }}</span>
-            </button>
-          </div>
-          <button class="trade-btn trade-btn-secondary" @click="clearActivityHistory()">
+              <span class="bag-filter-chip__count">{{ option.count }}</span>
+            </BaseFilterChip>
+          </BaseFilterChips>
+          <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" @click="clearActivityHistory()">
             清空动态
-          </button>
+          </BaseButton>
         </div>
       </div>
 
@@ -1184,13 +2072,14 @@ useIntervalFn(loadBag, 60000)
             </div>
           </div>
           <div class="activity-card__actions">
-            <button
+            <BaseButton
               v-if="entry.details?.length"
+              variant="secondary"
               class="trade-btn trade-btn-secondary"
               @click="toggleActivityExpanded(entry)"
             >
               {{ isActivityExpanded(entry) ? '收起明细' : '展开明细' }}
-            </button>
+            </BaseButton>
           </div>
           <div v-if="isActivityExpanded(entry) && entry.details?.length" class="activity-card__details">
             <div
@@ -1224,39 +2113,44 @@ useIntervalFn(loadBag, 60000)
         </div>
       </div>
 
-      <div v-else class="activity-panel__empty glass-text-muted border border-white/20 rounded-lg bg-black/5 p-8 text-center backdrop-blur-sm dark:border-white/10 dark:bg-black/20">
-        当前筛选下暂无交易动态
-      </div>
+      <BaseEmptyState
+        v-else
+        compact
+        class="activity-panel__empty bag-empty-state glass-text-muted p-8 text-center backdrop-blur-sm"
+        icon="i-carbon-search"
+        title="暂无交易动态"
+        description="当前筛选下还没有购买、出售或使用记录，切换筛选或执行操作后会出现在这里。"
+      />
     </div>
 
     <div v-if="bagLoading || statusLoading" class="flex justify-center py-12">
-      <div class="i-svg-spinners-90-ring-with-bg text-4xl text-blue-500" />
+      <div class="bag-spinner ui-state-spinner i-svg-spinners-90-ring-with-bg text-4xl" />
     </div>
 
-    <div v-else-if="!currentAccountId" class="glass-text-muted border border-white/20 rounded-lg bg-black/5 p-8 text-center backdrop-blur-sm dark:border-white/10 dark:bg-black/20">
-      请选择账号后查看背包
-    </div>
+    <BaseEmptyState
+      v-else-if="!currentAccountId"
+      class="bag-empty-state glass-text-muted p-8 text-center"
+      icon="i-carbon-user-avatar"
+      title="未选择账号"
+      description="请选择账号后查看背包、商店、商城和出售预览。"
+    />
 
-    <div v-else-if="statusError" class="border border-red-200/50 rounded-lg bg-red-50/50 p-8 text-center text-red-500 shadow backdrop-blur-sm dark:border-red-800 dark:bg-red-900/20">
-      <div class="mb-2 text-lg font-bold">
-        获取数据失败
-      </div>
-      <div class="text-sm">
-        {{ statusError }}
-      </div>
-    </div>
+    <BaseEmptyState
+      v-else-if="statusError"
+      danger
+      class="bag-error-state p-8 text-center shadow"
+      icon="i-carbon-warning-alt"
+      title="获取数据失败"
+      :description="statusError"
+    />
 
-    <div v-else-if="!status?.connection?.connected" class="glass-text-muted flex flex-col items-center justify-center gap-4 border border-white/20 rounded-lg bg-black/5 p-12 text-center shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-black/20">
-      <div class="i-carbon-connection-signal-off text-4xl text-gray-400" />
-      <div>
-        <div class="glass-text-main text-lg font-medium">
-          账号未登录
-        </div>
-        <div class="glass-text-muted mt-1 text-sm">
-          请先运行账号或检查网络连接
-        </div>
-      </div>
-    </div>
+    <BaseEmptyState
+      v-else-if="!status?.connection?.connected"
+      class="bag-empty-state glass-text-muted p-12 text-center shadow-sm"
+      icon="i-carbon-connection-signal-off"
+      title="账号未登录"
+      description="请先运行账号或检查网络连接"
+    />
 
     <template v-else>
       <div v-if="dashboardItems.length" class="grid gap-3 lg:grid-cols-4 md:grid-cols-2">
@@ -1265,7 +2159,7 @@ useIntervalFn(loadBag, 60000)
           :key="`dashboard-${item.id}`"
           class="glass-panel rounded-xl p-4 shadow"
         >
-          <div class="text-xs text-gray-400 tracking-[0.2em] uppercase">
+          <div class="bag-section-eyebrow text-xs uppercase">
             {{ item.name }}
           </div>
           <div class="mt-2 text-lg font-semibold">
@@ -1275,7 +2169,7 @@ useIntervalFn(loadBag, 60000)
       </div>
 
       <div v-if="activeTab === 'bag'">
-        <div class="inventory-toolbar glass-panel mb-4 rounded-2xl p-4 shadow">
+        <div class="inventory-toolbar ui-mobile-sticky-panel glass-panel mb-4 rounded-2xl p-4 shadow">
           <div class="inventory-toolbar__row">
             <div class="inventory-toolbar__search">
               <div class="i-carbon-search text-sm opacity-70" />
@@ -1290,25 +2184,32 @@ useIntervalFn(loadBag, 60000)
               </select>
             </label>
           </div>
-          <div class="inventory-toolbar__chips">
-            <button
+          <BaseFilterChips class="inventory-toolbar__chips bag-chip-row">
+            <BaseFilterChip
               v-for="option in bagCategoryOptions"
               :key="option.key"
-              class="filter-chip"
-              :class="{ active: bagCategory === option.key }"
+              as="button"
+              type="button"
+              class="bag-filter-chip"
+              :active="bagCategory === option.key"
               @click="setBagCategory(option.key)"
             >
               <span>{{ option.label }}</span>
-              <span class="filter-chip__count">{{ option.count }}</span>
-            </button>
-          </div>
+              <span class="bag-filter-chip__count">{{ option.count }}</span>
+            </BaseFilterChip>
+          </BaseFilterChips>
         </div>
 
-        <div v-if="filteredItems.length === 0" class="glass-text-muted border border-white/20 rounded-lg bg-black/5 p-8 text-center backdrop-blur-sm dark:border-white/10 dark:bg-black/20">
-          无可展示物品
-        </div>
+        <BaseEmptyState
+          v-if="filteredItems.length === 0"
+          compact
+          class="bag-empty-state glass-text-muted p-8 text-center"
+          icon="i-carbon-search"
+          title="没有匹配物品"
+          description="调整关键词、分类或排序后，再试一次。"
+        />
 
-        <div v-else class="grid grid-cols-2 gap-4 lg:grid-cols-4 md:grid-cols-3 xl:grid-cols-5">
+        <div v-else class="bag-inventory-grid">
           <div
             v-for="item in filteredItems"
             :key="item.id"
@@ -1320,7 +2221,7 @@ useIntervalFn(loadBag, 60000)
           >
             <label
               v-if="item.category === 'fruit'"
-              class="absolute right-3 top-3 z-10 h-6 w-6 flex items-center justify-center rounded-full bg-white/85 text-xs shadow-sm dark:bg-black/50"
+              class="bag-select-marker absolute right-3 top-3 z-10 h-6 w-6 flex items-center justify-center rounded-full text-xs shadow-sm"
               @click.stop
             >
               <input
@@ -1331,7 +2232,7 @@ useIntervalFn(loadBag, 60000)
               >
             </label>
 
-            <div class="absolute left-3 top-3 z-10 rounded-full bg-black/10 px-2 py-1 text-[11px] text-white/80 font-mono backdrop-blur-sm">
+            <div class="bag-item-id-pill absolute left-3 top-3 z-10 rounded-full px-2 py-1 text-[11px] font-mono backdrop-blur-sm">
               #{{ item.id }}
             </div>
 
@@ -1365,7 +2266,7 @@ useIntervalFn(loadBag, 60000)
               <span v-if="getItemDescription(item)">
                 {{ getItemDescription(item) }}
               </span>
-              <span v-if="item.category === 'fruit'" class="text-emerald-300">
+              <span v-if="item.category === 'fruit'" class="bag-meta-success">
                 可加入手动出售
               </span>
             </div>
@@ -1378,47 +2279,234 @@ useIntervalFn(loadBag, 60000)
         </div>
       </div>
 
+      <div v-else-if="activeTab === 'shop'" class="space-y-4">
+        <div class="bag-subtoolbar ui-mobile-sticky-panel glass-panel rounded-2xl p-4 shadow">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div class="text-lg font-semibold">
+                商店货架
+              </div>
+              <div class="bag-inline-note mt-1 text-sm">
+                游戏内商店分为种子、宠物、装扮三个分页，当前优先展示已抓到的真实商品。
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="inventory-toolbar__search min-w-[220px]">
+                <div class="i-carbon-search text-sm opacity-70" />
+                <input v-model="shopQuery" type="text" class="inventory-search-input" placeholder="搜索商店商品 / 物品 / 条件">
+              </div>
+              <label class="trade-select-wrap">
+                <span class="trade-select-wrap__label">排序</span>
+                <select v-model="shopSortBy" class="trade-select">
+                  <option v-for="option in shopSortOptions" :key="option.key" :value="option.key">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+              <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="shopLoading || actionLoading" :loading="shopLoading" loading-label="刷新中" icon-class="i-carbon-renew" @click="currentAccountId && bagStore.fetchShopCatalog(currentAccountId)">
+                刷新商店
+              </BaseButton>
+            </div>
+          </div>
+
+          <BaseFilterChips class="inventory-toolbar__chips bag-chip-row mt-4">
+            <BaseFilterChip
+              v-for="section in shopSections"
+              :key="section.tabKey"
+              as="button"
+              type="button"
+              class="bag-filter-chip"
+              :active="shopTabKey === section.tabKey"
+              @click="shopTabKey = section.tabKey"
+            >
+              <span>{{ section.label }}</span>
+              <span class="bag-filter-chip__count">{{ section.goods?.length || 0 }}</span>
+            </BaseFilterChip>
+          </BaseFilterChips>
+
+          <div class="bag-inline-note mt-4 flex flex-wrap items-center gap-3 text-sm">
+            <span>{{ currentShopSection?.description || '商店数据加载中' }}</span>
+            <span v-if="currentShopSection?.isPlaceholder">· 当前账号尚未抓到该分页，先保留完整结构</span>
+            <span v-else-if="currentShopSection?.error">· {{ currentShopSection.error }}</span>
+          </div>
+
+          <BaseFilterChips class="inventory-toolbar__chips bag-chip-row mt-4">
+            <BaseFilterChip
+              v-for="option in shopFilterOptions"
+              :key="option.key"
+              as="button"
+              type="button"
+              class="bag-filter-chip"
+              :active="shopQuickFilter === option.key"
+              @click="setShopQuickFilter(option.key)"
+            >
+              <span>{{ option.label }}</span>
+              <span class="bag-filter-chip__count">{{ option.count }}</span>
+            </BaseFilterChip>
+          </BaseFilterChips>
+        </div>
+
+        <div v-if="shopLoading" class="flex justify-center py-10">
+          <div class="bag-spinner ui-state-spinner i-svg-spinners-90-ring-with-bg text-3xl" />
+        </div>
+
+        <BaseEmptyState
+          v-else-if="!filteredShopGoods.length"
+          compact
+          class="bag-empty-state glass-text-muted p-8 text-center"
+          icon="i-carbon-shopping-bag"
+          title="当前暂无商店商品"
+          :description="currentShopSection?.isPlaceholder ? `当前账号尚未抓到${currentShopSection?.label || '该'}商店数据` : '当前筛选下没有可显示的商店商品。'"
+        />
+
+        <div v-else class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          <div
+            v-for="goods in filteredShopGoods"
+            :key="goods.entryKey || goods.goodsId"
+            class="bag-market-card mall-card glass-panel rounded-2xl p-4 shadow"
+            role="button"
+            tabindex="0"
+            @click="openMallDetail(goods)"
+          >
+            <div class="bag-market-card__head flex items-start gap-4">
+              <div class="mall-card__art" :data-fallback="getMallFallbackLabel(goods)">
+                <img
+                  v-if="goods.image && !imageErrors[getImageErrorKey('shop', goods.goodsId)]"
+                  :src="goods.image"
+                  :alt="goods.name"
+                  class="mall-card__image"
+                  :class="{ 'mall-card__image--locked': isGoodsLocked(goods) }"
+                  loading="lazy"
+                  @error="imageErrors[getImageErrorKey('shop', goods.goodsId)] = true"
+                >
+                <div v-else class="inventory-card__fallback">
+                  {{ getMallFallbackLabel(goods) }}
+                </div>
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <div class="glass-text-main truncate text-base font-semibold">
+                  {{ goods.name }}
+                </div>
+                <div class="bag-inline-note mt-1 text-sm">
+                  商品ID #{{ goods.goodsId }} · {{ getGoodsSourceLabel(goods) }}
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2 text-xs">
+                  <span class="inventory-pill inventory-pill-emerald">
+                    {{ getMallPriceLabel(goods) }}
+                  </span>
+                  <span v-if="goods.isLimited" class="inventory-pill inventory-pill-amber">
+                    限购 {{ goods.remainingCount ?? goods.limitCount ?? 0 }}
+                  </span>
+                  <span v-if="getShopStatusLabel(goods)" class="inventory-pill inventory-pill-sky">
+                    {{ getShopStatusLabel(goods) }}
+                  </span>
+                </div>
+                <div class="mall-card__summary">
+                  {{ getGoodsSummary(goods) }}
+                </div>
+              </div>
+              <div class="bag-market-card__side-meta bag-inline-note shrink-0 text-right text-xs">
+                {{ goods.itemCount || 0 }} 个/次
+              </div>
+            </div>
+
+            <div v-if="goods.itemPreviews?.length" class="mall-card__previews">
+              <div
+                v-for="preview in getGoodsPreviewGroups(goods, 4)"
+                :key="`${goods.goodsId}-${preview.id}`"
+                class="mall-preview-pill"
+                :title="preview.name"
+              >
+                <div class="mall-preview-pill__thumb" :data-fallback="getItemFallbackLabel(preview)">
+                  <img
+                    v-if="preview.image && !imageErrors[getImageErrorKey('shop-preview', goods.goodsId, preview.id)]"
+                    :src="preview.image"
+                    :alt="preview.name"
+                    loading="lazy"
+                    @error="imageErrors[getImageErrorKey('shop-preview', goods.goodsId, preview.id)] = true"
+                  >
+                  <div v-else class="inventory-card__fallback mall-preview-pill__fallback">
+                    {{ getItemFallbackLabel(preview) }}
+                  </div>
+                </div>
+                <span class="mall-preview-pill__name">{{ preview.name }}<template v-if="preview.count > 1"> x{{ preview.count }}</template></span>
+              </div>
+            </div>
+
+            <div class="bag-market-card__actions mall-card__actions">
+              <div class="trade-stepper" @click.stop>
+                <button class="trade-stepper__btn" @click="bumpPurchaseCount(goods, -1)">
+                  -
+                </button>
+                <input
+                  :value="getPurchaseCount(goods)"
+                  type="number"
+                  min="1"
+                  class="trade-input trade-input-stepper"
+                  @input="updatePurchaseCount(goods, Number(($event.target as HTMLInputElement).value || 1))"
+                >
+                <button class="trade-stepper__btn" @click="bumpPurchaseCount(goods, 1)">
+                  +
+                </button>
+              </div>
+              <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="actionLoading" stop-propagation @click="openMallDetail(goods)">
+                详情
+              </BaseButton>
+              <BaseButton variant="primary" class="trade-btn trade-btn-primary flex-1" :disabled="actionLoading || !goods.supportsPurchase" stop-propagation @click="handleBuyGoods(goods)">
+                {{ getShopActionLabel(goods) }}
+              </BaseButton>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div v-else-if="activeTab === 'sell'" class="space-y-4">
-        <div class="glass-panel rounded-xl p-4 shadow">
+        <div class="bag-subtoolbar ui-mobile-sticky-panel glass-panel rounded-xl p-4 shadow">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div class="text-lg font-semibold">
                 出售预览
               </div>
-              <div class="mt-1 text-sm text-gray-500">
+              <div class="bag-inline-note mt-1 text-sm">
                 可出售 {{ sellPreview?.totalSellKinds || 0 }} 种，共 {{ sellPreview?.totalSellCount || 0 }} 个，预计 {{ sellPreview?.expectedGold || 0 }} 金币
               </div>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button class="trade-btn trade-btn-secondary" :disabled="sellPreviewLoading || actionLoading" @click="handlePreviewSell">
+              <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="sellPreviewLoading || actionLoading || previewRefreshing" :loading="previewRefreshing || sellPreviewLoading" loading-label="刷新中" icon-class="i-carbon-view" @click="handlePreviewSell">
                 刷新预览
-              </button>
-              <button class="trade-btn trade-btn-primary" :disabled="actionLoading" @click="handleSellByPolicy">
+              </BaseButton>
+              <BaseButton variant="primary" class="trade-btn trade-btn-primary" :disabled="actionLoading || sellingByPolicy" :loading="sellingByPolicy" loading-label="执行中" icon-class="i-carbon-flash" @click="handleSellByPolicy">
                 全部按策略出售
-              </button>
-              <button class="trade-btn trade-btn-secondary" :disabled="actionLoading || selectedSellItems.length === 0" @click="handleSellSelected">
+              </BaseButton>
+              <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="actionLoading || selectedSellItems.length === 0" @click="handleSellSelected">
                 出售选中 {{ selectedSellItems.length }} 种
-              </button>
+              </BaseButton>
             </div>
           </div>
         </div>
 
         <div v-if="sellPreviewLoading" class="flex justify-center py-10">
-          <div class="i-svg-spinners-90-ring-with-bg text-3xl text-blue-500" />
+          <div class="bag-spinner ui-state-spinner i-svg-spinners-90-ring-with-bg text-3xl" />
         </div>
 
-        <div v-else-if="!sellPreview?.items?.length" class="glass-text-muted border border-white/20 rounded-lg bg-black/5 p-8 text-center backdrop-blur-sm dark:border-white/10 dark:bg-black/20">
-          当前没有可预览的果实出售计划
-        </div>
+        <BaseEmptyState
+          v-else-if="!sellPreview?.items?.length"
+          compact
+          class="bag-empty-state glass-text-muted p-8 text-center"
+          icon="i-carbon-flash"
+          title="暂无出售计划"
+          description="先刷新预览，或调整出售策略后再查看。"
+        />
 
         <div v-else class="space-y-3">
           <div
             v-for="item in sellPreview.items"
             :key="`sell-${item.id}`"
-            class="glass-panel flex flex-col gap-3 rounded-xl p-4 shadow sm:flex-row sm:items-center sm:justify-between"
+            class="bag-sell-preview-card glass-panel flex flex-col gap-3 rounded-xl p-4 shadow sm:flex-row sm:items-center sm:justify-between"
           >
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-3">
+            <div class="bag-sell-preview-card__body min-w-0 flex-1">
+              <div class="bag-sell-preview-card__head flex items-center gap-3">
                 <label v-if="sellableIds.has(Number(item.id || 0))" class="shrink-0">
                   <input
                     :checked="isSelected(Number(item.id || 0))"
@@ -1430,20 +2518,20 @@ useIntervalFn(loadBag, 60000)
                   <div class="truncate text-base font-semibold">
                     {{ item.name }}
                   </div>
-                  <div class="mt-1 text-sm text-gray-500">
+                  <div class="bag-inline-note mt-1 text-sm">
                     持有 {{ item.count }} · 出售 {{ item.sellCount }} · 保留 {{ item.keepCount }} · 单价 {{ item.unitPrice }}
                   </div>
-                  <div v-if="formatPreviewReason(item)" class="mt-1 text-xs text-amber-500">
+                  <div v-if="formatPreviewReason(item)" class="bag-note-warning mt-1 text-xs">
                     {{ formatPreviewReason(item) }}
                   </div>
                 </div>
               </div>
             </div>
-            <div class="text-right text-sm">
-              <div class="text-emerald-500 font-semibold">
+            <div class="bag-sell-preview-card__meta text-right text-sm">
+              <div class="bag-value-success font-semibold">
                 预计 {{ item.sellValue }} 金币
               </div>
-              <div class="mt-1 text-xs text-gray-400">
+              <div class="bag-inline-note mt-1 text-xs">
                 ID #{{ item.id }}
               </div>
             </div>
@@ -1451,15 +2539,15 @@ useIntervalFn(loadBag, 60000)
         </div>
       </div>
 
-      <div v-else class="space-y-4">
-        <div class="glass-panel rounded-2xl p-4 shadow">
+      <div v-else-if="activeTab === 'mall'" class="space-y-4">
+        <div class="bag-subtoolbar ui-mobile-sticky-panel glass-panel rounded-2xl p-4 shadow">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <div class="text-lg font-semibold">
-                商城商品
+                商城货架
               </div>
-              <div class="mt-1 text-sm text-gray-500">
-                支持按礼包内容、限购与免费状态快速筛选
+              <div class="bag-inline-note mt-1 text-sm">
+                商城包含礼包商城、月卡商城、充值商城；月卡与充值页默认只展示，不直接代付。
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -1475,28 +2563,78 @@ useIntervalFn(loadBag, 60000)
                   </option>
                 </select>
               </label>
-              <button class="trade-btn trade-btn-secondary" :disabled="mallLoading || actionLoading" @click="currentAccountId && bagStore.fetchMallGoods(currentAccountId)">
+              <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="mallLoading || actionLoading" :loading="mallLoading" loading-label="刷新中" icon-class="i-carbon-renew" @click="currentAccountId && bagStore.fetchMallCatalog(currentAccountId)">
                 刷新商城
-              </button>
+              </BaseButton>
             </div>
           </div>
 
-          <div class="inventory-toolbar__chips mt-4">
-            <button
+          <BaseFilterChips class="inventory-toolbar__chips bag-chip-row mt-4">
+            <BaseFilterChip
+              v-for="section in mallSections"
+              :key="section.slotKey"
+              as="button"
+              type="button"
+              class="bag-filter-chip"
+              :active="mallTabKey === section.slotKey"
+              @click="mallTabKey = section.slotKey"
+            >
+              <span>{{ section.label }}</span>
+              <span class="bag-filter-chip__count">{{ section.goods?.length || 0 }}</span>
+            </BaseFilterChip>
+          </BaseFilterChips>
+
+          <div class="bag-inline-note mt-4 flex flex-wrap items-center gap-3 text-sm">
+            <span>{{ currentMallSection?.description || '商城数据加载中' }}</span>
+            <span v-if="currentMallSection?.purchaseHint">· {{ currentMallSection.purchaseHint }}</span>
+            <span v-if="claimableMonthCardCount && mallTabKey === 'month_card'">· 当前有 {{ claimableMonthCardCount }} 个月卡奖励可领</span>
+          </div>
+
+          <BaseFilterChips class="inventory-toolbar__chips bag-chip-row mt-4">
+            <BaseFilterChip
               v-for="option in mallFilterOptions"
               :key="option.key"
-              class="filter-chip"
-              :class="{ active: mallQuickFilter === option.key }"
+              as="button"
+              type="button"
+              class="bag-filter-chip"
+              :active="mallQuickFilter === option.key"
               @click="setMallQuickFilter(option.key)"
             >
               <span>{{ option.label }}</span>
-              <span class="filter-chip__count">{{ option.count }}</span>
-            </button>
+              <span class="bag-filter-chip__count">{{ option.count }}</span>
+            </BaseFilterChip>
+          </BaseFilterChips>
+
+          <div v-if="mallTabKey === 'month_card' && monthCardInfos.length" class="grid mt-4 gap-3 md:grid-cols-2">
+            <div
+              v-for="info in monthCardInfos"
+              :key="`month-card-${info.goodsId}`"
+              class="glass-panel rounded-xl p-4 shadow"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <div class="text-sm font-semibold">
+                    月卡商品 #{{ info.goodsId }}
+                  </div>
+                  <div class="bag-inline-note mt-1 text-xs">
+                    {{ info.reward ? `${info.reward.name} x${info.reward.count}` : '暂无奖励配置' }}
+                  </div>
+                </div>
+                <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="actionLoading || !info.canClaim" @click="handleClaimMonthCard(info.goodsId)">
+                  {{ info.canClaim ? '领取奖励' : '今日已领' }}
+                </BaseButton>
+              </div>
+            </div>
           </div>
 
           <div v-if="recommendedMallGoods.length" class="recommend-strip">
-            <div class="recommend-strip__label">
-              常买推荐
+            <div class="flex flex-col gap-2">
+              <div class="recommend-strip__label">
+                常买推荐
+              </div>
+              <div class="bag-info-banner">
+                {{ MALL_PURCHASE_BROWSER_PREF_NOTE }}
+              </div>
             </div>
             <div class="recommend-strip__list">
               <button
@@ -1518,23 +2656,28 @@ useIntervalFn(loadBag, 60000)
         </div>
 
         <div v-if="mallLoading" class="flex justify-center py-10">
-          <div class="i-svg-spinners-90-ring-with-bg text-3xl text-blue-500" />
+          <div class="bag-spinner ui-state-spinner i-svg-spinners-90-ring-with-bg text-3xl" />
         </div>
 
-        <div v-else-if="!filteredMallGoods.length" class="glass-text-muted border border-white/20 rounded-lg bg-black/5 p-8 text-center backdrop-blur-sm dark:border-white/10 dark:bg-black/20">
-          商城暂无可显示商品
-        </div>
+        <BaseEmptyState
+          v-else-if="!filteredMallGoods.length"
+          compact
+          class="bag-empty-state glass-text-muted p-8 text-center"
+          icon="i-carbon-shopping-cart"
+          title="当前暂无商城商品"
+          :description="mallTabKey === 'month_card' && monthCardInfos.length ? '当前已展示月卡奖励状态，暂无可直接购买商品。' : `${currentMallSection?.label || '商城'}当前筛选下暂无可显示商品。`"
+        />
 
         <div v-else class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           <div
             v-for="goods in filteredMallGoods"
             :key="goods.goodsId"
-            class="mall-card glass-panel rounded-2xl p-4 shadow"
+            class="bag-market-card mall-card glass-panel rounded-2xl p-4 shadow"
             role="button"
             tabindex="0"
             @click="openMallDetail(goods)"
           >
-            <div class="flex items-start gap-4">
+            <div class="bag-market-card__head flex items-start gap-4">
               <div class="mall-card__art" :data-fallback="getMallFallbackLabel(goods)">
                 <img
                   v-if="goods.image && !imageErrors[getImageErrorKey('mall', goods.goodsId)]"
@@ -1550,11 +2693,11 @@ useIntervalFn(loadBag, 60000)
               </div>
 
               <div class="min-w-0 flex-1">
-                <div class="truncate text-base text-white/95 font-semibold">
+                <div class="glass-text-main truncate text-base font-semibold">
                   {{ goods.name }}
                 </div>
-                <div class="mt-1 text-sm text-white/55">
-                  商品ID #{{ goods.goodsId }} · 类型 {{ goods.type }}
+                <div class="glass-text-muted mt-1 text-sm">
+                  商品ID #{{ goods.goodsId }} · {{ goods.slotLabel || currentMallSection?.label || '商城' }}
                 </div>
                 <div class="mt-3 flex flex-wrap gap-2 text-xs">
                   <span class="inventory-pill inventory-pill-emerald">
@@ -1566,12 +2709,18 @@ useIntervalFn(loadBag, 60000)
                   <span v-if="goods.discount" class="inventory-pill inventory-pill-sky">
                     {{ goods.discount }}
                   </span>
+                  <span v-if="!goods.supportsPurchase" class="inventory-pill inventory-pill-sky">
+                    游戏内支付
+                  </span>
                 </div>
                 <div class="mall-card__summary">
                   {{ getGoodsSummary(goods) }}
                 </div>
+                <div v-if="goods.slotKey === 'month_card' && getMonthCardInfo(goods)?.reward" class="glass-text-muted mt-2 text-xs">
+                  今日奖励：{{ getMonthCardInfo(goods)?.reward?.name }} x{{ getMonthCardInfo(goods)?.reward?.count }}
+                </div>
               </div>
-              <div class="shrink-0 text-right text-xs text-white/45">
+              <div class="glass-text-muted shrink-0 text-right text-xs">
                 包含 {{ goods.itemIds?.length || 0 }} 项
               </div>
             </div>
@@ -1602,28 +2751,38 @@ useIntervalFn(loadBag, 60000)
               </div>
             </div>
 
-            <div class="mall-card__actions">
+            <div class="bag-market-card__actions mall-card__actions">
               <div class="trade-stepper" @click.stop>
-                <button class="trade-stepper__btn" @click="bumpPurchaseCount(goods.goodsId, -1)">
+                <button class="trade-stepper__btn" @click="bumpPurchaseCount(goods, -1)">
                   -
                 </button>
                 <input
-                  :value="getPurchaseCount(goods.goodsId)"
+                  :value="getPurchaseCount(goods)"
                   type="number"
                   min="1"
                   class="trade-input trade-input-stepper"
-                  @input="updatePurchaseCount(goods.goodsId, Number(($event.target as HTMLInputElement).value || 1))"
+                  @input="updatePurchaseCount(goods, Number(($event.target as HTMLInputElement).value || 1))"
                 >
-                <button class="trade-stepper__btn" @click="bumpPurchaseCount(goods.goodsId, 1)">
+                <button class="trade-stepper__btn" @click="bumpPurchaseCount(goods, 1)">
                   +
                 </button>
               </div>
-              <button class="trade-btn trade-btn-secondary" :disabled="actionLoading" @click.stop="openMallDetail(goods)">
+              <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="actionLoading" stop-propagation @click="openMallDetail(goods)">
                 详情
-              </button>
-              <button class="trade-btn trade-btn-primary flex-1" :disabled="actionLoading" @click.stop="handleBuyGoods(goods)">
-                购买
-              </button>
+              </BaseButton>
+              <BaseButton
+                v-if="goods.slotKey === 'month_card' && getMonthCardInfo(goods)?.canClaim"
+                variant="secondary"
+                class="trade-btn trade-btn-secondary"
+                :disabled="actionLoading"
+                stop-propagation
+                @click="handleClaimMonthCard(goods)"
+              >
+                领今日奖励
+              </BaseButton>
+              <BaseButton variant="primary" class="trade-btn trade-btn-primary flex-1" :disabled="actionLoading || !goods.supportsPurchase" stop-propagation @click="handleBuyGoods(goods)">
+                {{ goods.supportsPurchase ? '购买' : '去游戏内购买' }}
+              </BaseButton>
             </div>
           </div>
         </div>
@@ -1636,7 +2795,7 @@ useIntervalFn(loadBag, 60000)
           <div class="detail-modal-header">
             <div class="detail-modal-header__copy">
               <div class="detail-modal-header__eyebrow">
-                {{ bagDetailItem ? '物品详情' : '商城商品详情' }}
+                {{ bagDetailItem ? '物品详情' : (mallDetailGoods?.sourceType === 'shop' ? '商店商品详情' : '商城商品详情') }}
               </div>
               <div class="detail-modal-header__title">
                 {{ bagDetailItem?.name || mallDetailGoods?.name }}
@@ -1646,7 +2805,7 @@ useIntervalFn(loadBag, 60000)
                   物品ID #{{ bagDetailItem.id }}
                 </template>
                 <template v-else>
-                  商品ID #{{ mallDetailGoods?.goodsId }} · 槽位 {{ mallDetailGoods?.slotType }}
+                  商品ID #{{ mallDetailGoods?.goodsId }} · {{ getGoodsSourceLabel(mallDetailGoods) }}
                 </template>
               </div>
             </div>
@@ -1701,24 +2860,26 @@ useIntervalFn(loadBag, 60000)
                   <div v-if="bagDetailItem.canUse && itemNeedsLandSelection(bagDetailItem)" class="detail-land-counter">
                     已选 {{ selectedLandIds.length }} / {{ getLandSelectionLimit(bagDetailItem) }} 块，将按选中地块数消耗
                   </div>
-                  <button
+                  <BaseButton
                     v-if="bagDetailItem.canUse"
+                    variant="primary"
                     class="trade-btn trade-btn-primary"
                     :disabled="actionLoading"
                     @click="handleUseBagItem(bagDetailItem)"
                   >
                     立即使用
-                  </button>
-                  <button
+                  </BaseButton>
+                  <BaseButton
                     v-if="bagDetailItem.category === 'fruit'"
+                    variant="primary"
                     class="trade-btn trade-btn-primary"
                     @click="toggleSelectItem(Number(bagDetailItem.id || 0))"
                   >
                     {{ isSelected(Number(bagDetailItem.id || 0)) ? '移出出售选择' : '加入出售选择' }}
-                  </button>
-                  <button class="trade-btn trade-btn-secondary" @click="closeDetailPanel">
+                  </BaseButton>
+                  <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" @click="closeDetailPanel">
                     返回列表
-                  </button>
+                  </BaseButton>
                 </div>
               </div>
             </div>
@@ -1757,15 +2918,15 @@ useIntervalFn(loadBag, 60000)
                   {{ getLandSelectionHint(bagDetailItem) }}
                 </div>
                 <div class="detail-land-toolbar__actions">
-                  <button class="trade-btn trade-btn-secondary" :disabled="landsLoading" @click="ensureFarmLandsLoaded()">
+                  <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="landsLoading" @click="ensureFarmLandsLoaded()">
                     刷新土地
-                  </button>
-                  <button class="trade-btn trade-btn-secondary" :disabled="suggestedTargetLandIds.length === 0" @click="selectSuggestedLands()">
+                  </BaseButton>
+                  <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="suggestedTargetLandIds.length === 0" @click="selectSuggestedLands()">
                     智能选择
-                  </button>
-                  <button class="trade-btn trade-btn-secondary" :disabled="selectedLandIds.length === 0" @click="clearSelectedLands()">
+                  </BaseButton>
+                  <BaseButton variant="secondary" class="trade-btn trade-btn-secondary" :disabled="selectedLandIds.length === 0" @click="clearSelectedLands()">
                     清空选择
-                  </button>
+                  </BaseButton>
                 </div>
               </div>
               <div v-if="landsLoading" class="detail-land-empty">
@@ -1868,30 +3029,40 @@ useIntervalFn(loadBag, 60000)
                 <div class="detail-badges">
                   <span class="inventory-pill inventory-pill-emerald">{{ getMallPriceLabel(mallDetailGoods) }}</span>
                   <span v-if="mallDetailGoods.isLimited" class="inventory-pill inventory-pill-amber">限购商品</span>
+                  <span v-if="!mallDetailGoods.supportsPurchase" class="inventory-pill inventory-pill-sky">{{ mallDetailGoods.purchaseDisabledReason || '需在游戏内完成' }}</span>
                   <span class="inventory-pill inventory-pill-sky">内容 {{ getGoodsPreviewGroups(mallDetailGoods).length }} 种</span>
                 </div>
                 <div class="detail-summary">
                   {{ getGoodsSummary(mallDetailGoods) }}
                 </div>
                 <div class="detail-actions">
-                  <div class="trade-stepper">
-                    <button class="trade-stepper__btn" @click="bumpPurchaseCount(mallDetailGoods.goodsId, -1)">
+                  <div v-if="mallDetailGoods.supportsPurchase" class="trade-stepper">
+                    <button class="trade-stepper__btn" @click="bumpPurchaseCount(mallDetailGoods, -1)">
                       -
                     </button>
                     <input
-                      :value="getPurchaseCount(mallDetailGoods.goodsId)"
+                      :value="getPurchaseCount(mallDetailGoods)"
                       type="number"
                       min="1"
                       class="trade-input trade-input-stepper"
-                      @input="updatePurchaseCount(mallDetailGoods.goodsId, Number(($event.target as HTMLInputElement).value || 1))"
+                      @input="updatePurchaseCount(mallDetailGoods, Number(($event.target as HTMLInputElement).value || 1))"
                     >
-                    <button class="trade-stepper__btn" @click="bumpPurchaseCount(mallDetailGoods.goodsId, 1)">
+                    <button class="trade-stepper__btn" @click="bumpPurchaseCount(mallDetailGoods, 1)">
                       +
                     </button>
                   </div>
-                  <button class="trade-btn trade-btn-primary" :disabled="actionLoading" @click="handleBuyGoods(mallDetailGoods)">
-                    立即购买
-                  </button>
+                  <BaseButton
+                    v-if="mallDetailGoods.slotKey === 'month_card' && getMonthCardInfo(mallDetailGoods)?.canClaim"
+                    variant="secondary"
+                    class="trade-btn trade-btn-secondary"
+                    :disabled="actionLoading"
+                    @click="handleClaimMonthCard(mallDetailGoods)"
+                  >
+                    领取今日奖励
+                  </BaseButton>
+                  <BaseButton variant="primary" class="trade-btn trade-btn-primary" :disabled="actionLoading || !mallDetailGoods.supportsPurchase" @click="handleBuyGoods(mallDetailGoods)">
+                    {{ mallDetailGoods.supportsPurchase ? '立即购买' : '需在游戏内完成' }}
+                  </BaseButton>
                 </div>
               </div>
             </div>
@@ -1902,8 +3073,8 @@ useIntervalFn(loadBag, 60000)
                 <span class="detail-stat-card__value">{{ getMallPriceLabel(mallDetailGoods) }}</span>
               </div>
               <div class="detail-stat-card">
-                <span class="detail-stat-card__label">商品类型</span>
-                <span class="detail-stat-card__value">{{ mallDetailGoods.type || 0 }}</span>
+                <span class="detail-stat-card__label">所属分页</span>
+                <span class="detail-stat-card__value">{{ getGoodsSourceLabel(mallDetailGoods) }}</span>
               </div>
               <div class="detail-stat-card">
                 <span class="detail-stat-card__label">内容总项</span>
@@ -1916,7 +3087,7 @@ useIntervalFn(loadBag, 60000)
               <div class="detail-stat-card">
                 <span class="detail-stat-card__label">购买记录</span>
                 <span class="detail-stat-card__value">
-                  {{ getMallPurchaseStats(mallDetailGoods.goodsId).count || 0 }} 次 · {{ formatPurchaseTime(getMallPurchaseStats(mallDetailGoods.goodsId).lastPurchasedAt) }}
+                  {{ getMallPurchaseStats(mallDetailGoods).count || 0 }} 次 · {{ formatPurchaseTime(getMallPurchaseStats(mallDetailGoods).lastPurchasedAt) }}
                 </span>
               </div>
             </div>
@@ -1961,55 +3132,261 @@ useIntervalFn(loadBag, 60000)
 </template>
 
 <style scoped>
-.trade-btn {
+.bag-panel {
+  --bag-surface: var(--ui-bg-surface);
+  --bag-surface-raised: var(--ui-bg-surface-raised);
+  --bag-border: var(--ui-border-subtle);
+  --bag-border-strong: var(--ui-border-strong);
+  --bag-text-main: var(--ui-text-1);
+  --bag-text-muted: var(--ui-text-2);
+  --bag-text-soft: var(--ui-text-3);
+  --bag-shadow-soft: var(--ui-shadow-panel);
+  --bag-shadow-strong: var(--ui-shadow-panel-strong);
+  --bag-shadow-inner: var(--ui-shadow-inner);
+  --bag-overlay-backdrop: var(--ui-overlay-backdrop);
+  --bag-brand-soft: color-mix(in srgb, var(--ui-brand-500) 12%, transparent);
+  --bag-brand-soft-strong: color-mix(in srgb, var(--ui-brand-500) 18%, transparent);
+  --bag-brand-border: color-mix(in srgb, var(--ui-border-subtle) 68%, var(--ui-brand-500) 32%);
+  --bag-brand-border-strong: color-mix(in srgb, var(--ui-border-subtle) 54%, var(--ui-brand-500) 46%);
+  --bag-brand-gradient-soft: linear-gradient(135deg, var(--bag-brand-soft), var(--bag-surface));
+  --bag-brand-gradient-strong: linear-gradient(135deg, var(--bag-brand-soft-strong), var(--bag-surface));
+  --bag-status-use-bg: color-mix(in srgb, var(--ui-status-success-soft) 78%, transparent);
+  --bag-status-purchase-bg: color-mix(in srgb, var(--ui-status-warning-soft) 80%, transparent);
+  --bag-status-sell-bg: color-mix(in srgb, var(--ui-status-info-soft) 80%, transparent);
+  --bag-category-fruit-border: color-mix(in srgb, var(--ui-border-subtle) 70%, var(--ui-status-warning) 30%);
+  --bag-category-seed-border: color-mix(in srgb, var(--ui-border-subtle) 70%, var(--ui-status-success) 30%);
+  --bag-category-fertilizer-border: color-mix(in srgb, var(--ui-border-subtle) 70%, var(--ui-status-info) 30%);
+  --bag-category-pack-border: color-mix(in srgb, var(--ui-border-subtle) 70%, var(--ui-status-danger) 30%);
+  --bag-category-pet-border: color-mix(in srgb, var(--ui-border-subtle) 70%, var(--ui-status-info) 30%);
+  --bag-category-item-border: color-mix(in srgb, var(--ui-border-subtle) 82%, var(--ui-text-3) 18%);
+}
+
+.bag-panel :deep([class*='text-'][class*='gray-500']),
+.bag-panel :deep([class*='text-'][class*='gray-400']) {
+  color: var(--bag-text-muted) !important;
+}
+
+.bag-panel :deep([class*='text-'][class*='white/95']),
+.bag-panel :deep([class*='text-'][class*='white/90']),
+.bag-panel :deep([class*='text-'][class*='white/85']) {
+  color: color-mix(in srgb, var(--ui-text-on-brand) 92%, var(--bag-text-main) 8%) !important;
+}
+
+.bag-panel :deep([class*='text-'][class*='white/55']),
+.bag-panel :deep([class*='text-'][class*='white/45']) {
+  color: color-mix(in srgb, var(--ui-text-on-brand) 68%, var(--bag-text-main) 32%) !important;
+}
+
+.bag-panel :deep(.glass-panel) {
+  border-color: var(--bag-border) !important;
+}
+
+.bag-panel__summary,
+.bag-inline-note,
+.bag-inline-checkbox {
+  color: var(--bag-text-muted) !important;
+}
+
+.bag-topbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.bag-topbar__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
+.bag-topbar__copy {
+  min-width: 0;
+}
+
+.bag-topbar__desc {
+  margin-top: 0.45rem;
+  color: var(--bag-text-muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.bag-topbar__actions,
+.bag-topbar__chips,
+.bag-tab-bar {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.bag-topbar__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.8rem;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--bag-border);
+  border-radius: 999px;
+  background: var(--bag-surface);
+  color: var(--bag-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.bag-section-eyebrow {
+  color: var(--bag-text-soft) !important;
+  letter-spacing: 0.2em;
+}
+
+.bag-note-warning {
+  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--bag-text-main)) !important;
+}
+
+.bag-info-banner {
+  border: 1px solid color-mix(in srgb, var(--ui-status-info) 22%, transparent) !important;
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--ui-status-info) 7%, var(--bag-surface-raised) 93%) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 76%, var(--bag-text-main)) !important;
+  padding: 0.5rem 0.75rem;
+  line-height: 1.5;
+}
+
+.bag-empty-state {
+  border: 1px solid var(--bag-border) !important;
+  border-radius: 0.75rem;
+  background: var(--bag-surface) !important;
+}
+
+.bag-error-state {
+  border: 1px solid color-mix(in srgb, var(--ui-status-danger) 22%, transparent) !important;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--ui-status-danger) 8%, var(--bag-surface-raised) 92%) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 82%, var(--bag-text-main)) !important;
+}
+
+.bag-spinner {
+  color: var(--ui-status-info) !important;
+}
+
+.bag-offline-icon {
+  color: var(--bag-text-soft) !important;
+}
+
+.bag-select-marker {
+  background: color-mix(in srgb, var(--bag-surface-raised) 92%, transparent) !important;
+  color: var(--bag-text-main) !important;
+}
+
+.bag-item-id-pill {
+  background: color-mix(in srgb, var(--ui-text-1) 16%, transparent) !important;
+  color: var(--ui-text-on-brand) !important;
+}
+
+.bag-meta-success,
+.bag-value-success {
+  color: color-mix(in srgb, var(--ui-status-success) 80%, var(--bag-text-main)) !important;
+}
+
+.ui-btn.trade-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.45rem;
   border-radius: 999px;
   padding: 0.55rem 1rem;
   font-size: 0.875rem;
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    opacity 180ms ease;
   border: 1px solid transparent;
+  box-shadow:
+    0 10px 22px -18px var(--bag-shadow-soft),
+    inset 0 1px 0 var(--bag-shadow-inner);
 }
 
-.trade-btn:disabled {
+.ui-btn.trade-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-.trade-btn-primary {
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
-  color: #fff;
+.ui-btn.trade-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 24px -18px var(--bag-shadow-soft),
+    inset 0 1px 0 var(--bag-shadow-inner);
 }
 
-.trade-btn-secondary {
-  background: rgba(15, 23, 42, 0.04);
-  color: #334155;
-  border-color: rgba(148, 163, 184, 0.35);
+.ui-btn.trade-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
 }
 
-.trade-tab {
+.ui-btn.trade-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--ui-focus-ring),
+    0 14px 24px -18px var(--bag-shadow-soft),
+    inset 0 1px 0 var(--bag-shadow-inner);
+}
+
+.ui-btn.trade-btn-primary {
+  background: var(--bag-brand-gradient-strong);
+  color: var(--ui-text-on-brand);
+}
+
+.ui-btn.trade-btn-secondary {
+  background: var(--bag-surface);
+  color: var(--bag-text-main);
+  border-color: var(--bag-border-strong);
+}
+
+.bag-tab-bar :deep(.ui-toggle-option-group__item.bag-trade-tab) {
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--bag-border-strong);
+  background: var(--bag-surface);
   padding: 0.55rem 1rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--bag-text-muted);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
 }
 
-.trade-tab.active {
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
-  color: #fff;
+.bag-tab-bar :deep(.ui-toggle-option-group__item.bag-trade-tab:hover) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px -18px var(--bag-shadow-soft);
+}
+
+.bag-tab-bar :deep(.ui-toggle-option-group__item.bag-trade-tab:active) {
+  transform: translateY(0) scale(0.985);
+}
+
+.bag-tab-bar :deep(.ui-toggle-option-group__item.bag-trade-tab:focus-visible) {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.bag-tab-bar :deep(.ui-toggle-option-group__item--active.bag-trade-tab) {
+  background: var(--bag-brand-gradient-strong);
+  color: var(--ui-text-on-brand);
   border-color: transparent;
 }
 
 .trade-input {
   width: 88px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--bag-border-strong);
+  background: var(--bag-surface-raised);
+  color: var(--bag-text-main);
   padding: 0.55rem 0.85rem;
   font-size: 0.875rem;
 }
@@ -2040,10 +3417,10 @@ useIntervalFn(loadBag, 60000)
   align-items: center;
   gap: 0.6rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
   padding: 0.72rem 0.95rem;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--bag-text-main);
 }
 
 .inventory-search-input {
@@ -2056,7 +3433,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .inventory-search-input::placeholder {
-  color: rgba(255, 255, 255, 0.38);
+  color: var(--bag-text-soft);
 }
 
 .trade-select-wrap {
@@ -2064,26 +3441,200 @@ useIntervalFn(loadBag, 60000)
   align-items: center;
   gap: 0.6rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
   padding: 0.28rem 0.42rem 0.28rem 0.85rem;
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--bag-text-main);
 }
 
 .trade-select-wrap__label {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.58);
+  color: var(--bag-text-muted);
 }
 
 .trade-select {
   min-width: 148px;
-  border: 0;
+  border: 1px solid var(--bag-border);
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.38);
-  color: #fff;
+  background: var(--bag-surface-raised);
+  color: var(--bag-text-main);
   padding: 0.45rem 0.85rem;
   outline: none;
   font-size: 0.85rem;
+}
+
+.strategy-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.strategy-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface-raised);
+  color: var(--bag-text-main);
+  padding: 0.38rem 0.75rem;
+  font-size: 0.76rem;
+  line-height: 1.2;
+}
+
+.strategy-chip-action {
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.strategy-chip-action:hover {
+  transform: translateY(-1px);
+  border-color: var(--bag-brand-border-strong);
+}
+
+.strategy-priority {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+}
+
+.strategy-priority__label {
+  color: var(--bag-text-soft);
+}
+
+.strategy-priority__value {
+  color: var(--bag-text-main);
+  font-weight: 600;
+}
+
+.strategy-editor {
+  border-radius: 20px;
+  border: 1px solid var(--bag-brand-border);
+  background: var(--bag-brand-gradient-soft);
+  padding: 1rem;
+  box-shadow: var(--bag-shadow-inner);
+}
+
+.strategy-editor__toolbar,
+.strategy-editor__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.strategy-editor__title {
+  color: var(--bag-text-main);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.strategy-editor__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.strategy-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.strategy-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.42rem;
+}
+
+.strategy-field-checkbox {
+  justify-content: flex-end;
+}
+
+.strategy-field__label {
+  color: var(--bag-text-muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.strategy-input,
+.strategy-select,
+.strategy-textarea {
+  width: 100%;
+  border: 1px solid var(--bag-border-strong);
+  background: var(--bag-surface);
+  color: var(--bag-text-main);
+  outline: none;
+}
+
+.strategy-input,
+.strategy-select {
+  border-radius: 14px;
+  padding: 0.62rem 0.8rem;
+  font-size: 0.88rem;
+}
+
+.strategy-textarea {
+  min-height: 68px;
+  resize: vertical;
+  border-radius: 16px;
+  padding: 0.75rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.strategy-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--bag-border-strong);
+  background: var(--bag-surface);
+  padding: 0.62rem 0.8rem;
+  color: var(--bag-text-main);
+  font-size: 0.84rem;
+}
+
+.strategy-keep-picker__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.strategy-keep-pill {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.18rem;
+  border-radius: 16px;
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
+  padding: 0.62rem 0.8rem;
+  color: var(--bag-text-main);
+  text-align: left;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.strategy-keep-pill:hover {
+  transform: translateY(-1px);
+  border-color: var(--bag-brand-border-strong);
+}
+
+.strategy-keep-pill.active {
+  border-color: var(--bag-brand-border-strong);
+  background: var(--bag-brand-soft);
+}
+
+.strategy-keep-pill__meta {
+  color: var(--bag-text-muted);
+  font-size: 0.72rem;
 }
 
 .inventory-toolbar__chips {
@@ -2107,14 +3658,14 @@ useIntervalFn(loadBag, 60000)
 }
 
 .activity-panel__title {
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--bag-text-main);
   font-size: 1rem;
   font-weight: 700;
 }
 
 .activity-panel__subtitle {
   margin-top: 0.2rem;
-  color: rgba(255, 255, 255, 0.52);
+  color: var(--bag-text-muted);
   font-size: 0.8rem;
 }
 
@@ -2126,12 +3677,12 @@ useIntervalFn(loadBag, 60000)
 }
 
 .activity-panel__summary {
-  color: rgba(255, 255, 255, 0.56);
+  color: var(--bag-text-muted);
   font-size: 0.78rem;
 }
 
 .activity-panel__empty {
-  color: rgba(255, 255, 255, 0.56);
+  color: var(--bag-text-muted);
 }
 
 .activity-list {
@@ -2145,8 +3696,8 @@ useIntervalFn(loadBag, 60000)
   flex-direction: column;
   gap: 0.75rem;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
   padding: 0.9rem 1rem;
   transition:
     transform 0.2s ease,
@@ -2155,7 +3706,13 @@ useIntervalFn(loadBag, 60000)
 
 .activity-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(45, 212, 191, 0.24);
+  border-color: color-mix(in srgb, var(--ui-border-subtle) 70%, var(--ui-status-success) 30%);
+}
+
+.activity-card__body:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+  border-radius: 0.85rem;
 }
 
 .activity-card__body {
@@ -2186,18 +3743,18 @@ useIntervalFn(loadBag, 60000)
 }
 
 .activity-card__type.use {
-  background: rgba(45, 212, 191, 0.12);
-  color: rgba(153, 246, 228, 0.95);
+  background: var(--bag-status-use-bg);
+  color: var(--ui-status-success);
 }
 
 .activity-card__type.purchase {
-  background: rgba(251, 191, 36, 0.14);
-  color: rgba(253, 224, 71, 0.95);
+  background: var(--bag-status-purchase-bg);
+  color: var(--ui-status-warning);
 }
 
 .activity-card__type.sell {
-  background: rgba(96, 165, 250, 0.14);
-  color: rgba(191, 219, 254, 0.95);
+  background: var(--bag-status-sell-bg);
+  color: var(--ui-status-info);
 }
 
 .activity-card__main {
@@ -2208,7 +3765,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .activity-card__title {
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--bag-text-main);
   font-size: 0.92rem;
   font-weight: 700;
 }
@@ -2217,12 +3774,12 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--bag-text-muted);
   font-size: 0.76rem;
 }
 
 .activity-card__summary {
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--bag-text-muted);
   font-size: 0.82rem;
   line-height: 1.5;
 }
@@ -2231,7 +3788,7 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   gap: 0.7rem;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bag-surface);
   padding: 0.75rem;
 }
 
@@ -2240,7 +3797,7 @@ useIntervalFn(loadBag, 60000)
   height: 56px;
   flex-shrink: 0;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bag-surface-raised);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2261,7 +3818,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .activity-detail-card__title {
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--bag-text-main);
   font-size: 0.84rem;
   font-weight: 700;
 }
@@ -2270,7 +3827,7 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  color: rgba(255, 255, 255, 0.56);
+  color: var(--bag-text-muted);
   font-size: 0.74rem;
   line-height: 1.45;
 }
@@ -2279,27 +3836,50 @@ useIntervalFn(loadBag, 60000)
   font-size: 0.8rem;
 }
 
-.filter-chip {
+.bag-chip-row :deep(.ui-filter-chip.bag-filter-chip) {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
   padding: 0.5rem 0.85rem;
-  color: rgba(255, 255, 255, 0.82);
-  transition: 0.2s ease;
+  color: var(--bag-text-main);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
 }
 
-.filter-chip.active {
-  border-color: rgba(45, 212, 191, 0.55);
-  background: linear-gradient(135deg, rgba(20, 184, 166, 0.25), rgba(13, 148, 136, 0.32));
-  color: #fff;
+.bag-chip-row :deep(.ui-filter-chip.bag-filter-chip:hover) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px -18px var(--bag-shadow-soft);
 }
 
-.filter-chip__count {
+.bag-chip-row :deep(.ui-filter-chip.bag-filter-chip:active) {
+  transform: translateY(0) scale(0.985);
+}
+
+.bag-chip-row :deep(.ui-filter-chip.bag-filter-chip:focus-visible) {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.bag-chip-row :deep(.ui-filter-chip--active.bag-filter-chip) {
+  border-color: var(--bag-brand-border-strong);
+  background: linear-gradient(
+    135deg,
+    var(--bag-brand-soft-strong),
+    color-mix(in srgb, var(--bag-brand-soft-strong) 72%, var(--bag-surface) 28%)
+  );
+  color: var(--ui-text-on-brand);
+}
+
+.bag-chip-row :deep(.bag-filter-chip__count) {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bag-surface-raised);
   padding: 0.1rem 0.45rem;
   font-size: 0.72rem;
 }
@@ -2311,10 +3891,10 @@ useIntervalFn(loadBag, 60000)
   min-height: 250px;
   flex-direction: column;
   border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--bag-border);
   background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.1), transparent 46%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(15, 23, 42, 0.12));
+    radial-gradient(circle at top, var(--bag-brand-soft-strong), transparent 48%),
+    linear-gradient(180deg, var(--bag-surface-raised), var(--bag-surface));
   padding: 1rem;
   transition:
     transform 0.2s ease,
@@ -2325,31 +3905,38 @@ useIntervalFn(loadBag, 60000)
 
 .inventory-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.18);
+  box-shadow: 0 16px 34px var(--bag-shadow-soft);
+}
+
+.inventory-card:focus-visible,
+.mall-card:focus-visible,
+.recommend-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
 }
 
 .inventory-card-fruit {
-  border-color: rgba(251, 146, 60, 0.28);
+  border-color: var(--bag-category-fruit-border);
 }
 
 .inventory-card-seed {
-  border-color: rgba(74, 222, 128, 0.26);
+  border-color: var(--bag-category-seed-border);
 }
 
 .inventory-card-fertilizer {
-  border-color: rgba(56, 189, 248, 0.24);
+  border-color: var(--bag-category-fertilizer-border);
 }
 
 .inventory-card-pack {
-  border-color: rgba(244, 114, 182, 0.24);
+  border-color: var(--bag-category-pack-border);
 }
 
 .inventory-card-pet {
-  border-color: rgba(168, 85, 247, 0.24);
+  border-color: var(--bag-category-pet-border);
 }
 
 .inventory-card-item {
-  border-color: rgba(148, 163, 184, 0.24);
+  border-color: var(--bag-category-item-border);
 }
 
 .inventory-card__art,
@@ -2358,7 +3945,7 @@ useIntervalFn(loadBag, 60000)
   margin-top: 2.3rem;
   height: 112px;
   border-radius: 22px;
-  background: radial-gradient(circle at top, rgba(255, 255, 255, 0.16), transparent 60%), rgba(255, 255, 255, 0.06);
+  background: radial-gradient(circle at top, var(--bag-brand-soft), transparent 60%), var(--bag-surface);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2369,7 +3956,11 @@ useIntervalFn(loadBag, 60000)
   max-width: 78%;
   max-height: 78%;
   object-fit: contain;
-  filter: drop-shadow(0 10px 20px rgba(15, 23, 42, 0.24));
+  filter: drop-shadow(0 10px 20px var(--bag-shadow-soft));
+}
+
+.mall-card__image--locked {
+  filter: grayscale(1) saturate(0.2) opacity(0.78) drop-shadow(0 10px 20px var(--bag-shadow-soft));
 }
 
 .inventory-card__fallback {
@@ -2379,12 +3970,12 @@ useIntervalFn(loadBag, 60000)
   font-size: 1.55rem;
   font-weight: 800;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--bag-text-main);
 }
 
 .inventory-card__count {
   margin-top: 0.9rem;
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--bag-text-main);
   font-size: 1.45rem;
   font-weight: 700;
 }
@@ -2394,7 +3985,7 @@ useIntervalFn(loadBag, 60000)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--bag-text-main);
   font-size: 1rem;
   font-weight: 700;
 }
@@ -2404,7 +3995,7 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--bag-text-muted);
   font-size: 0.8rem;
 }
 
@@ -2415,15 +4006,55 @@ useIntervalFn(loadBag, 60000)
   justify-content: space-between;
   gap: 0.75rem;
   padding-top: 0.85rem;
-  color: rgba(255, 255, 255, 0.44);
+  color: var(--bag-text-soft);
   font-size: 0.72rem;
 }
 
 .inventory-card__footer-tag {
   border-radius: 999px;
-  background: rgba(16, 185, 129, 0.16);
+  background: var(--ui-status-success-soft);
   padding: 0.18rem 0.48rem;
-  color: #a7f3d0;
+  color: var(--ui-status-success);
+}
+
+.bag-inventory-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .bag-inventory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .bag-inventory-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .bag-inventory-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .bag-inventory-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.bag-market-card__head,
+.bag-sell-preview-card__head {
+  min-width: 0;
+}
+
+.bag-market-card__side-meta,
+.bag-sell-preview-card__meta {
+  min-width: fit-content;
 }
 
 .inventory-pill {
@@ -2432,39 +4063,49 @@ useIntervalFn(loadBag, 60000)
   gap: 0.35rem;
   width: fit-content;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bag-surface-raised);
   padding: 0.22rem 0.55rem;
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--bag-text-main);
   font-size: 0.72rem;
   font-weight: 600;
 }
 
 .inventory-pill-emerald {
-  background: rgba(16, 185, 129, 0.16);
-  color: #a7f3d0;
+  background: color-mix(in srgb, var(--ui-status-success-soft) 86%, transparent);
+  color: var(--ui-status-success);
 }
 
 .inventory-pill-amber {
-  background: rgba(245, 158, 11, 0.16);
-  color: #fde68a;
+  background: color-mix(in srgb, var(--ui-status-warning-soft) 86%, transparent);
+  color: var(--ui-status-warning);
 }
 
 .inventory-pill-sky {
-  background: rgba(14, 165, 233, 0.16);
-  color: #bae6fd;
+  background: color-mix(in srgb, var(--ui-status-info-soft) 86%, transparent);
+  color: var(--ui-status-info);
 }
 
 .mall-card {
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--bag-border);
   background:
-    radial-gradient(circle at top right, rgba(45, 212, 191, 0.14), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(15, 23, 42, 0.16));
+    radial-gradient(circle at top right, var(--bag-brand-soft-strong), transparent 36%),
+    linear-gradient(180deg, var(--bag-surface-raised), var(--bag-surface));
   cursor: pointer;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.mall-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px -24px var(--bag-shadow-soft);
 }
 
 .mall-card__summary {
   margin-top: 0.7rem;
-  color: rgba(255, 255, 255, 0.58);
+  color: var(--bag-text-muted);
   font-size: 0.8rem;
   line-height: 1.5;
 }
@@ -2482,12 +4123,12 @@ useIntervalFn(loadBag, 60000)
   gap: 0.5rem;
   max-width: 100%;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bag-surface);
   padding: 0.35rem 0.55rem 0.35rem 0.4rem;
 }
 
 .mall-preview-pill--more {
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--bag-text-muted);
 }
 
 .mall-preview-pill__thumb {
@@ -2495,7 +4136,7 @@ useIntervalFn(loadBag, 60000)
   width: 30px;
   flex-shrink: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bag-surface-raised);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2513,7 +4154,7 @@ useIntervalFn(loadBag, 60000)
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 120px;
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--bag-text-muted);
   font-size: 0.78rem;
 }
 
@@ -2537,7 +4178,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .recommend-strip__label {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--bag-text-muted);
   font-size: 0.8rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2555,8 +4196,8 @@ useIntervalFn(loadBag, 60000)
   justify-content: space-between;
   gap: 0.8rem;
   border-radius: 18px;
-  border: 1px solid rgba(45, 212, 191, 0.14);
-  background: linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--bag-brand-border);
+  background: var(--bag-brand-gradient-soft);
   padding: 0.85rem 0.95rem;
   text-align: left;
   transition:
@@ -2566,7 +4207,8 @@ useIntervalFn(loadBag, 60000)
 
 .recommend-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(45, 212, 191, 0.28);
+  border-color: var(--bag-brand-border-strong);
+  box-shadow: 0 14px 24px -20px var(--bag-shadow-soft);
 }
 
 .recommend-card__main {
@@ -2580,14 +4222,14 @@ useIntervalFn(loadBag, 60000)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--bag-text-main);
   font-size: 0.92rem;
   font-weight: 700;
 }
 
 .recommend-card__meta,
 .recommend-card__time {
-  color: rgba(255, 255, 255, 0.54);
+  color: var(--bag-text-muted);
   font-size: 0.77rem;
 }
 
@@ -2596,7 +4238,7 @@ useIntervalFn(loadBag, 60000)
   align-items: center;
   gap: 0.35rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bag-surface);
   padding: 0.28rem;
 }
 
@@ -2605,8 +4247,8 @@ useIntervalFn(loadBag, 60000)
   height: 32px;
   border-radius: 999px;
   border: 0;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
+  background: var(--bag-surface-raised);
+  color: var(--bag-text-main);
   font-size: 1rem;
   font-weight: 700;
 }
@@ -2619,7 +4261,7 @@ useIntervalFn(loadBag, 60000)
   align-items: center;
   justify-content: center;
   padding: 1.25rem;
-  background: rgba(2, 6, 23, 0.56);
+  background: var(--bag-overlay-backdrop);
   backdrop-filter: blur(12px);
 }
 
@@ -2628,12 +4270,12 @@ useIntervalFn(loadBag, 60000)
   max-height: calc(100vh - 2rem);
   overflow: auto;
   border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--bag-border);
   background:
-    radial-gradient(circle at top right, rgba(45, 212, 191, 0.12), transparent 28%),
-    linear-gradient(180deg, rgba(71, 14, 54, 0.98), rgba(43, 11, 34, 0.98));
+    radial-gradient(circle at top right, var(--bag-brand-soft-strong), transparent 32%),
+    linear-gradient(180deg, var(--bag-surface-raised), var(--bag-surface));
   padding: 1.25rem;
-  box-shadow: 0 28px 60px rgba(2, 6, 23, 0.4);
+  box-shadow: 0 28px 60px var(--bag-shadow-strong);
 }
 
 .detail-modal-header {
@@ -2645,7 +4287,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .detail-modal-header__eyebrow {
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--bag-text-soft);
   font-size: 0.74rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -2653,22 +4295,22 @@ useIntervalFn(loadBag, 60000)
 
 .detail-modal-header__title {
   margin-top: 0.4rem;
-  color: rgba(255, 255, 255, 0.96);
+  color: var(--bag-text-main);
   font-size: 1.45rem;
   font-weight: 800;
 }
 
 .detail-modal-header__sub {
   margin-top: 0.35rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--bag-text-muted);
   font-size: 0.86rem;
 }
 
 .detail-modal-close {
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.84);
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
+  color: var(--bag-text-main);
   padding: 0.6rem 0.95rem;
   font-size: 0.85rem;
   font-weight: 600;
@@ -2683,7 +4325,7 @@ useIntervalFn(loadBag, 60000)
 .detail-hero__art {
   min-height: 220px;
   border-radius: 24px;
-  background: radial-gradient(circle at top, rgba(255, 255, 255, 0.14), transparent 56%), rgba(255, 255, 255, 0.05);
+  background: radial-gradient(circle at top, var(--bag-brand-soft), transparent 56%), var(--bag-surface);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2693,7 +4335,7 @@ useIntervalFn(loadBag, 60000)
   max-width: 78%;
   max-height: 78%;
   object-fit: contain;
-  filter: drop-shadow(0 12px 24px rgba(15, 23, 42, 0.28));
+  filter: drop-shadow(0 12px 24px var(--bag-shadow-soft));
 }
 
 .detail-hero__copy {
@@ -2710,7 +4352,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .detail-summary {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--bag-text-muted);
   line-height: 1.7;
   font-size: 0.94rem;
 }
@@ -2725,9 +4367,9 @@ useIntervalFn(loadBag, 60000)
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  background: rgba(45, 212, 191, 0.12);
+  background: var(--bag-brand-soft-strong);
   padding: 0.6rem 0.95rem;
-  color: rgba(153, 246, 228, 0.95);
+  color: var(--bag-text-main);
   font-size: 0.84rem;
   font-weight: 600;
 }
@@ -2744,19 +4386,19 @@ useIntervalFn(loadBag, 60000)
   flex-direction: column;
   gap: 0.45rem;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bag-surface);
   padding: 0.95rem 1rem;
 }
 
 .detail-stat-card__label {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--bag-text-soft);
   font-size: 0.76rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .detail-stat-card__value {
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--bag-text-main);
   font-size: 0.95rem;
   font-weight: 700;
 }
@@ -2769,15 +4411,15 @@ useIntervalFn(loadBag, 60000)
 
 .detail-section-card {
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bag-surface);
   padding: 1rem 1.05rem;
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--bag-text-muted);
   line-height: 1.72;
 }
 
 .detail-section-title {
   margin-top: 1.15rem;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--bag-text-main);
   font-size: 1rem;
   font-weight: 700;
 }
@@ -2792,7 +4434,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .detail-land-toolbar__hint {
-  color: rgba(255, 255, 255, 0.56);
+  color: var(--bag-text-muted);
   font-size: 0.84rem;
 }
 
@@ -2805,9 +4447,9 @@ useIntervalFn(loadBag, 60000)
 .detail-land-empty {
   margin-top: 0.85rem;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bag-surface);
   padding: 1rem;
-  color: rgba(255, 255, 255, 0.58);
+  color: var(--bag-text-muted);
   text-align: center;
 }
 
@@ -2824,8 +4466,8 @@ useIntervalFn(loadBag, 60000)
   flex-direction: column;
   gap: 0.45rem;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--bag-border);
+  background: var(--bag-surface);
   padding: 0.9rem;
   text-align: left;
   transition:
@@ -2836,16 +4478,16 @@ useIntervalFn(loadBag, 60000)
 
 .detail-land-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--bag-border-strong);
 }
 
 .detail-land-card.active {
-  border-color: rgba(45, 212, 191, 0.52);
-  background: linear-gradient(135deg, rgba(20, 184, 166, 0.16), rgba(255, 255, 255, 0.04));
+  border-color: var(--bag-brand-border-strong);
+  background: var(--bag-brand-gradient-strong);
 }
 
 .detail-land-card.suggested:not(.active) {
-  border-color: rgba(125, 211, 252, 0.28);
+  border-color: color-mix(in srgb, var(--ui-border-subtle) 72%, var(--ui-status-info) 28%);
 }
 
 .detail-land-card__head {
@@ -2856,13 +4498,13 @@ useIntervalFn(loadBag, 60000)
 }
 
 .detail-land-card__id {
-  color: rgba(255, 255, 255, 0.84);
+  color: var(--bag-text-main);
   font-size: 0.78rem;
   font-weight: 700;
 }
 
 .detail-land-card__status {
-  color: rgba(255, 255, 255, 0.52);
+  color: var(--bag-text-muted);
   font-size: 0.74rem;
 }
 
@@ -2870,7 +4512,7 @@ useIntervalFn(loadBag, 60000)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--bag-text-main);
   font-size: 0.9rem;
   font-weight: 700;
 }
@@ -2879,19 +4521,19 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--bag-text-muted);
   font-size: 0.76rem;
 }
 
 .detail-use-summary {
   margin-top: 0.85rem;
   border-radius: 20px;
-  background: linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(255, 255, 255, 0.04));
+  background: var(--bag-brand-gradient-soft);
   padding: 1rem 1.05rem;
 }
 
 .detail-use-summary__message {
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--bag-text-main);
   font-size: 0.94rem;
   font-weight: 700;
 }
@@ -2901,7 +4543,7 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
-  color: rgba(255, 255, 255, 0.56);
+  color: var(--bag-text-muted);
   font-size: 0.8rem;
 }
 
@@ -2916,7 +4558,7 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   gap: 0.8rem;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bag-surface);
   padding: 0.85rem;
 }
 
@@ -2925,7 +4567,7 @@ useIntervalFn(loadBag, 60000)
   height: 72px;
   flex-shrink: 0;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bag-surface-raised);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2946,7 +4588,7 @@ useIntervalFn(loadBag, 60000)
 }
 
 .detail-preview-card__title {
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--bag-text-main);
   font-weight: 700;
 }
 
@@ -2954,12 +4596,12 @@ useIntervalFn(loadBag, 60000)
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  color: rgba(255, 255, 255, 0.52);
+  color: var(--bag-text-muted);
   font-size: 0.78rem;
 }
 
 .detail-preview-card__desc {
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--bag-text-muted);
   font-size: 0.82rem;
   line-height: 1.55;
 }
@@ -2969,6 +4611,42 @@ useIntervalFn(loadBag, 60000)
 }
 
 @media (max-width: 768px) {
+  .bag-topbar {
+    z-index: 12;
+    padding: 0.875rem;
+    border: 1px solid var(--bag-border);
+    border-radius: 1.25rem;
+    background: color-mix(in srgb, var(--bag-surface-raised) 88%, transparent);
+    box-shadow:
+      0 12px 24px -24px var(--bag-shadow-soft),
+      inset 0 1px 0 var(--bag-shadow-inner);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .bag-topbar__header {
+    flex-direction: column;
+  }
+
+  .bag-topbar__actions,
+  .bag-topbar__chips,
+  .bag-tab-bar {
+    margin-inline: -0.1rem;
+    padding-inline: 0.1rem;
+  }
+
+  .bag-subtoolbar,
+  .inventory-toolbar {
+    z-index: 11;
+    background: color-mix(in srgb, var(--bag-surface-raised) 88%, transparent) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .strategy-editor__grid {
+    grid-template-columns: 1fr;
+  }
+
   .inventory-toolbar__row {
     flex-direction: column;
     align-items: stretch;
@@ -2997,22 +4675,59 @@ useIntervalFn(loadBag, 60000)
   }
 
   .inventory-card {
-    min-height: 222px;
+    min-height: 0;
     padding: 0.9rem;
+    border-radius: 20px;
   }
 
   .inventory-card__art,
   .mall-card__art {
+    margin-top: 1.9rem;
     height: 96px;
+    border-radius: 18px;
   }
 
   .mall-preview-pill__name {
     max-width: 88px;
   }
 
+  .inventory-card__count {
+    margin-top: 0.75rem;
+    font-size: 1.2rem;
+  }
+
+  .inventory-card__name {
+    margin-top: 0.45rem;
+    font-size: 0.94rem;
+  }
+
+  .inventory-card__meta {
+    margin-top: 0.5rem;
+    gap: 0.28rem;
+    font-size: 0.76rem;
+  }
+
+  .inventory-card__footer {
+    padding-top: 0.65rem;
+  }
+
+  .bag-market-card__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bag-market-card__side-meta {
+    align-self: flex-start;
+    text-align: left;
+  }
+
   .mall-card__actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .bag-market-card__actions .ui-btn.trade-btn {
+    width: 100%;
   }
 
   .recommend-strip__list {
@@ -3022,6 +4737,21 @@ useIntervalFn(loadBag, 60000)
   .trade-stepper {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .bag-sell-preview-card {
+    gap: 0.85rem;
+  }
+
+  .bag-sell-preview-card__head {
+    align-items: flex-start;
+  }
+
+  .bag-sell-preview-card__meta {
+    width: 100%;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--bag-border);
+    text-align: left;
   }
 
   .detail-modal-panel {

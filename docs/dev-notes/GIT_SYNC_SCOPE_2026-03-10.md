@@ -213,3 +213,140 @@ docs/dev-notes/GIT_SYNC_SCOPE_2026-03-10.md
 - 最大的同步风险，已经不是这 30 个已暂存文件本身，而是剩余 `944 + 178` 项并行改动容易被误混进来。
 - 当前这批同步范围现在是 `31` 个已暂存文件。
 - 后续如果继续整理 git，优先级应该是继续把未暂存/未跟踪范围按主题切层，而不是再扩大本次提交面。
+
+## 7. 阶段更新（2026-03-10 第二轮整理后）
+
+### 7.1 当前状态
+
+- 上一阶段的 `31` 个文件已经压缩并落成 `3` 个提交。
+- 当前分支 `main` 相比 `origin/main` 超前 `3` 个提交。
+- 当前没有 staged 内容。
+- 当前没有 unmerged 冲突。
+- 原本的大工作区改动已经恢复回工作区。
+
+当前剩余范围：
+
+- 未暂存已修改：`344` 个文件
+- 未跟踪：`185` 个文件
+
+安全保险仍然保留：
+
+- 备份分支：`codex/rewrite-backup-20260310`
+- stash：`codex-pre-pop-current-2026-03-10`
+- stash：`codex-rewrite-residual-2026-03-10`
+- stash：`codex-rewrite-unstaged-2026-03-10`
+- stash：`codex-split-unstaged-2026-03-10`
+
+### 7.2 下一层候选同步包
+
+下面这些范围已经能看出清晰主题，但还没有继续拆成新提交：
+
+#### A. 后端管理路由拆分与接线
+
+文件量：约 `48` 个
+
+核心范围：
+
+- `core/src/controllers/admin.js`
+- `core/src/controllers/users.js`
+- `core/client.js`
+- `core/src/controllers/admin/*`
+- `core/__tests__/admin-*.test.js`
+
+这一包的主题已经比较清楚：
+
+- 把原本集中在 `admin.js` 的大路由继续拆成独立子模块
+- 补 `auth / account / announcement / commerce / maintenance / socket / system-public` 等路由测试
+- 调整应用壳、运行时接线和路由装配
+
+这一包适合作为下一批优先整理对象，因为边界最清晰，也最像一组真正的结构性重构。
+
+#### B. 持久化与运行时收口补包
+
+文件量：约 `23` 个
+
+核心范围：
+
+- `core/src/models/store.js`
+- `core/src/models/user-store.js`
+- `core/src/runtime/data-provider.js`
+- `core/src/services/database.js`
+- `core/src/services/jwt-service.js`
+- `core/src/services/system-settings.js`
+- `core/src/services/user-ui-settings.js`
+- `core/src/services/account-bag-preferences.js`
+- `core/src/database/migrations/014-system-settings.sql`
+- `core/src/database/migrations/016-account-bag-preferences.sql`
+- 多个 `store / data-provider / jwt / user-ui / account-bag` 测试
+
+这一包主要是：
+
+- 把前面做过的持久化改造继续补完整
+- 收尾 `system_settings / user_ui / bag_preferences / jwt / data-provider`
+- 补运行时和持久化回归测试
+
+这一包也比较适合独立成一组，但它会和前面的 `user-preferences` 提交形成“同类续作”，提交信息要显式区分。
+
+#### C. Web 管理页与主题统一重构
+
+文件量：约 `90` 个
+
+核心范围：
+
+- `web/src/views/*`
+- `web/src/components/*`
+- `web/src/components/ui/*`
+- `web/src/stores/*`
+- `web/src/utils/*`
+- `web/src/theme/*`
+- `web/__tests__/*`
+
+这一包体量明显更大，里面至少又混着 3 类子主题：
+
+- 账号/用户/卡密/日志等管理页布局重构
+- 基础 UI 组件抽象
+- 主题与全局视觉统一
+
+这一包不建议直接整体同步，后续应该继续拆成更细的前端批次。
+
+#### D. 文档、截图、仓库运维与发布材料
+
+文件量：约 `156` 个
+
+核心范围：
+
+- `docs/**`
+- `assets/screenshots/**`
+- `.github/**`
+- `scripts/utils/**`
+- `README.md`
+- `CHANGELOG*.md`
+- `deploy/**`
+- `docker-compose.yml`
+- `docker/**`
+- `package.json`
+
+这一包包含：
+
+- 大量说明文档和阶段记录
+- 主题审计截图和界面素材
+- 仓库维护脚本
+- 工作流和发布材料
+
+这一包只能最后再整理，不适合现在和代码重构一起提交。
+
+### 7.3 当前建议顺序
+
+如果继续拆下一批提交，建议顺序是：
+
+1. `后端管理路由拆分与接线`
+2. `持久化与运行时收口补包`
+3. `Web 管理页与主题统一重构`
+4. `文档、截图、仓库运维与发布材料`
+
+原因很简单：
+
+- A 包边界最清楚，结构性最强
+- B 包和已提交的偏好持久化链最接近，容易串成连续历史
+- C 包太大，必须继续二次拆分
+- D 包最适合作为尾包

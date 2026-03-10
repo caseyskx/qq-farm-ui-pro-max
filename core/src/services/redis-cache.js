@@ -8,6 +8,7 @@ loadProjectEnv();
 const logger = createModuleLogger('redis-cache');
 let redisDisabled = false;
 let redisDisableReason = '';
+let redisInstance = null;
 
 function getErrorMessage(err) {
     return String(err && err.message ? err.message : err || 'unknown').trim() || 'unknown';
@@ -30,7 +31,7 @@ function disableRedis(reason) {
     redisDisableReason = reason || 'unknown';
     logger.warn(`⚠️ Redis 已切换为降级模式: ${redisDisableReason}`);
     try {
-        redis.disconnect();
+        redisInstance && redisInstance.disconnect();
     } catch {
         // ignore
     }
@@ -62,40 +63,69 @@ if (REDIS_PASSWORD) {
     redisOptions.password = REDIS_PASSWORD;
 }
 
-const redis = new Redis(redisOptions);
+function bindRedisEvents(redis) {
+    redis.on('connect', () => {
+        if (redisDisabled) return;
+        logger.info(`Redis TCP connected (${REDIS_HOST}:${REDIS_PORT})`);
+    });
 
-// === Redis 连接事件 → 同步更新熔断器状态 ===
+    redis.on('ready', () => {
+        if (redisDisabled) return;
+        logger.debug('Redis socket ready，等待 PING 鉴权验证');
+    });
 
-redis.on('connect', () => {
-    if (redisDisabled) return;
-    logger.info(`Redis TCP connected (${REDIS_HOST}:${REDIS_PORT})`);
-});
+    redis.on('error', (err) => {
+        const message = getErrorMessage(err);
+        logger.error(`❌ Redis 发生错误: ${message}`);
+        if (isAuthError(message)) {
+            disableRedis(getRedisAuthFailureReason(message));
+            return;
+        }
+        if (!redisDisabled)
+            circuitBreaker.recordFailure(message);
+    });
 
-redis.on('ready', () => {
-    if (redisDisabled) return;
-    logger.debug('Redis socket ready，等待 PING 鉴权验证');
-});
+    redis.on('close', () => {
+        if (redisDisabled) return;
+        logger.warn('⚠️ Redis 连接已断开');
+        circuitBreaker.recordFailure();
+    });
 
-redis.on('error', (err) => {
-    const message = getErrorMessage(err);
-    logger.error(`❌ Redis 发生错误: ${message}`);
-    if (isAuthError(message)) {
-        disableRedis(getRedisAuthFailureReason(message));
-        return;
+    redis.on('reconnecting', () => {
+        if (redisDisabled) return;
+        logger.info('🔄 Redis 正在重连...');
+    });
+}
+
+function createRedisClient() {
+    const client = new Redis(redisOptions);
+    bindRedisEvents(client);
+    return client;
+}
+
+function getOrCreateRedis() {
+    if (redisDisabled) {
+        return null;
     }
-    if (!redisDisabled)
-        circuitBreaker.recordFailure(message);
-});
+    if (!redisInstance) {
+        redisInstance = createRedisClient();
+    }
+    return redisInstance;
+}
 
-redis.on('close', () => {
-    if (redisDisabled) return;
-    logger.warn('⚠️ Redis 连接已断开');
-    circuitBreaker.recordFailure();
-});
-
-redis.on('reconnecting', () => {
-    if (redisDisabled) return;
-    logger.info('🔄 Redis 正在重连...');
+const redis = new Proxy({}, {
+    get(_target, property) {
+        const client = getOrCreateRedis();
+        if (!client) return undefined;
+        const value = client[property];
+        return typeof value === 'function' ? value.bind(client) : value;
+    },
+    set(_target, property, value) {
+        const client = getOrCreateRedis();
+        if (!client) return true;
+        client[property] = value;
+        return true;
+    },
 });
 
 /**
@@ -105,6 +135,10 @@ redis.on('reconnecting', () => {
 async function initRedis() {
     if (redisDisabled) {
         logger.warn(`⚠️ Redis 已停用，跳过初始化: ${redisDisableReason}`);
+        return false;
+    }
+    const redis = getOrCreateRedis();
+    if (!redis) {
         return false;
     }
     try {
@@ -134,7 +168,8 @@ async function initRedis() {
  * @param {number} expireSecs 过期时间(秒) 默认永不过期
  */
 async function setCache(key, value, expireSecs = 0) {
-    if (redisDisabled) return;
+    const redis = getRedisClient();
+    if (!redis) return;
     // 熔断器检查：Redis 不可用时直接跳过写入
     if (!circuitBreaker.allowRequest()) return;
     try {
@@ -156,7 +191,8 @@ async function setCache(key, value, expireSecs = 0) {
  * @param {string} key 
  */
 async function getCache(key) {
-    if (redisDisabled) return null;
+    const redis = getRedisClient();
+    if (!redis) return null;
     // 熔断器检查：Redis 不可用时直接返回 null
     if (!circuitBreaker.allowRequest()) return null;
     try {
@@ -179,7 +215,8 @@ async function getCache(key) {
  * 提供分布式锁简单实现 (SET NX)（接入熔断器）
  */
 async function acquireLock(lockKey, expireMs = 5000) {
-    if (redisDisabled) return false;
+    const redis = getRedisClient();
+    if (!redis) return false;
     if (!circuitBreaker.allowRequest()) return false;
     try {
         // PX = 毫秒， NX = 不存在才创建
@@ -194,7 +231,8 @@ async function acquireLock(lockKey, expireMs = 5000) {
 }
 
 async function releaseLock(lockKey) {
-    if (redisDisabled) return;
+    const redis = getRedisClient();
+    if (!redis) return;
     if (!circuitBreaker.allowRequest()) return;
     try {
         await redis.del(lockKey);
@@ -206,13 +244,42 @@ async function releaseLock(lockKey) {
 }
 
 function getRedisClient() {
-    if (redisDisabled) return null;
-    return redis;
+    return getOrCreateRedis();
+}
+
+async function closeRedis() {
+    const redis = redisInstance;
+    if (!redis) {
+        return;
+    }
+    try {
+        if (redis.status === 'end') {
+            redisInstance = null;
+            return;
+        }
+
+        if (redis.status === 'ready' || redis.status === 'connect' || redis.status === 'reconnecting') {
+            await redis.quit();
+        } else {
+            redis.disconnect();
+        }
+        logger.info('Redis closed');
+    } catch (error) {
+        try {
+            redis.disconnect();
+        } catch {
+            // ignore
+        }
+        throw error;
+    } finally {
+        redisInstance = null;
+    }
 }
 
 module.exports = {
     redis,
     initRedis,
+    closeRedis,
     getRedisClient,
     setCache,
     getCache,

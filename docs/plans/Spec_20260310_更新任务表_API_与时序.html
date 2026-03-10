@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>系统更新任务表、API 与时序规格 - 2026-03-10</title>
+  <style>
+    :root {
+      --bg: #071018;
+      --panel: #0d1a27;
+      --panel-2: #132333;
+      --text: #eaf0f6;
+      --muted: #9db2c6;
+      --line: #2a4359;
+      --brand: #7bdff2;
+      --brand-2: #c7f5ff;
+      --ok: #58c48b;
+      --warn: #ffc46b;
+      --danger: #ff8a8a;
+      --code: #09131d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(123, 223, 242, 0.14), transparent 25%),
+        radial-gradient(circle at top right, rgba(199, 245, 255, 0.08), transparent 20%),
+        linear-gradient(180deg, #071018 0%, #09131b 100%);
+      font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { max-width: 1240px; margin: 0 auto; }
+    .hero, .card {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(13, 26, 39, 0.98), rgba(19, 35, 51, 0.96));
+      box-shadow: 0 18px 56px rgba(0, 0, 0, 0.25);
+    }
+    .hero { padding: 24px 26px; }
+    .card { margin-top: 16px; padding: 18px 20px; }
+    h1, h2, h3 { margin: 0 0 12px; line-height: 1.32; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 20px; margin-top: 24px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--code);
+      color: var(--brand-2);
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .metric {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(9, 19, 29, 0.72);
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .metric .value {
+      margin-top: 7px;
+      color: var(--text);
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .brand { color: var(--brand); font-weight: 700; }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .danger { color: var(--danger); font-weight: 700; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    code {
+      background: var(--code);
+      border: 1px solid rgba(123, 223, 242, 0.18);
+      color: #d7fbff;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 13px;
+    }
+    pre {
+      margin: 12px 0 0;
+      padding: 14px 16px;
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: auto;
+      color: #d7fbff;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: rgba(9, 19, 29, 0.9);
+      color: var(--brand-2);
+      font-weight: 700;
+    }
+    ul, ol { margin: 8px 0 0 20px; color: var(--muted); }
+    li { margin: 6px 0; }
+    .callout {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: rgba(9, 19, 29, 0.92);
+      border-left: 4px solid var(--brand);
+      color: var(--muted);
+    }
+    .flow {
+      margin-top: 12px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px dashed var(--line);
+      background: rgba(9, 19, 29, 0.68);
+    }
+    .flow-line {
+      margin: 6px 0;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+    }
+    .footer {
+      margin-top: 28px;
+      color: #8ea4b9;
+      font-size: 12px;
+    }
+    @media (max-width: 1000px) {
+      body { padding: 16px; }
+      .hero, .card { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>系统更新任务表、API 与时序规格</h1>
+      <p>这一版文档把“下一步怎么开发”落到表结构、接口协议、任务状态机和宿主机代理轮询流程上，目的是让实现可以直接按规格推进。</p>
+      <div class="meta">
+        <span class="chip">建议迁移文件：017-system-update-jobs.sql</span>
+        <span class="chip">建议接口前缀：/api/admin/system-update</span>
+        <span class="chip">状态同步方式：HTTP 轮询</span>
+        <span class="chip">现有风格：{ ok, data, error }</span>
+      </div>
+      <div class="grid">
+        <div class="metric">
+          <div class="label">表结构</div>
+          <div class="value">新增 update_jobs</div>
+        </div>
+        <div class="metric">
+          <div class="label">系统配置</div>
+          <div class="value">沿用 system_settings</div>
+        </div>
+        <div class="metric">
+          <div class="label">提醒标记</div>
+          <div class="value">复用 app_seen_version</div>
+        </div>
+        <div class="metric">
+          <div class="label">执行入口</div>
+          <div class="value">宿主机 update-agent</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>一、先对齐当前仓库约束</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>约束</th>
+            <th>当前仓库事实</th>
+            <th>规格影响</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>迁移执行方式</td>
+            <td><code>mysql-db.js</code> 不是扫目录批量执行，而是按“缺什么补什么”显式调用迁移文件</td>
+            <td>新增表不仅要加 <code>017-system-update-jobs.sql</code>，还要在 <code>mysql-db.js</code> 里显式加检测逻辑</td>
+          </tr>
+          <tr>
+            <td>接口返回风格</td>
+            <td>管理员路由大多返回 <code>{ ok, data }</code> 或 <code>{ ok: false, error }</code></td>
+            <td>新接口沿用同样风格，不引入新包装格式</td>
+          </tr>
+          <tr>
+            <td>管理员系统入口</td>
+            <td>设置页已有第三方 API、自检、集群配置等管理员卡片</td>
+            <td>更新卡片直接挂在设置页系统区</td>
+          </tr>
+          <tr>
+            <td>公告已读版本</td>
+            <td><code>user_preferences.app_seen_version</code> 已存在</td>
+            <td>可直接用于“管理员是否看过当前版本提醒”</td>
+          </tr>
+          <tr>
+            <td>管理员操作日志</td>
+            <td>已有 <code>admin_operation_logs</code>，但 scope 目前只支持有限值</td>
+            <td>更新任务主体放 <code>update_jobs</code>；如要写操作审计，可额外扩一个 <code>system_update</code> scope</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>二、数据库设计</h2>
+      <h3>2.1 新增表：update_jobs</h3>
+      <p>建议单表承载任务排队、执行状态、阶段日志摘要和回滚结果。这样前端、后台、宿主机代理都围绕同一对象协作。</p>
+
+      <pre><code>CREATE TABLE IF NOT EXISTS `update_jobs` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `job_uid` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `requested_by` VARCHAR(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `request_source` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'web_admin',
+  `channel` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'stable',
+  `strategy` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'preserve',
+  `current_version` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `target_version` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `current_app_image` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `target_app_image` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `manifest_url` VARCHAR(512) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+  `status` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'queued',
+  `current_step` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'queued',
+  `progress` INT NOT NULL DEFAULT 0,
+  `lock_token` VARCHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `claimed_by_host` VARCHAR(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `claimed_by_pid` INT DEFAULT NULL,
+  `deploy_dir` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `previous_deploy_dir` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `backup_path` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `log_path` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `summary` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `error_code` VARCHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `error_message` VARCHAR(1000) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `details_json` JSON DEFAULT NULL,
+  `requested_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `claimed_at` DATETIME DEFAULT NULL,
+  `started_at` DATETIME DEFAULT NULL,
+  `finished_at` DATETIME DEFAULT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_update_jobs_job_uid` (`job_uid`),
+  KEY `idx_update_jobs_status_requested` (`status`, `requested_at`),
+  KEY `idx_update_jobs_target_version` (`target_version`, `created_at`),
+  KEY `idx_update_jobs_requested_by` (`requested_by`, `created_at`),
+  KEY `idx_update_jobs_claimed_host` (`claimed_by_host`, `claimed_at`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;</code></pre>
+
+      <h3>2.2 字段设计说明</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>为什么需要</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>job_uid</code></td>
+            <td>给前端和代理一个稳定任务标识，不依赖自增 ID 展示</td>
+          </tr>
+          <tr>
+            <td><code>request_source</code></td>
+            <td>区分是 Web 后台触发、CLI 触发，还是未来自动计划任务触发</td>
+          </tr>
+          <tr>
+            <td><code>strategy</code></td>
+            <td>标记本次是保留旧目录还是覆盖更新</td>
+          </tr>
+          <tr>
+            <td><code>lock_token</code></td>
+            <td>宿主机代理认领任务时写入，避免多代理并发抢同一任务</td>
+          </tr>
+          <tr>
+            <td><code>details_json</code></td>
+            <td>保存镜像、端口、自检结果、构建来源、回滚结果等结构化数据</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2.3 状态枚举建议</h3>
+      <p>建议把 <code>status</code> 控制在固定集合内：</p>
+      <pre><code>queued
+claimed
+precheck
+backup
+repair
+pull_or_build
+deploy
+verify
+succeeded
+failed
+rollback_running
+rolled_back
+rollback_failed
+canceled</code></pre>
+
+      <h3>2.4 current_step 建议</h3>
+      <p><code>current_step</code> 可以更细，用来给前端展示“当前卡在哪一步”。建议值：</p>
+      <pre><code>queued
+claim_job
+read_manifest
+check_environment
+backup_bundle
+backup_database
+repair_deploy
+repair_mysql
+pull_app_image
+build_app_image
+compose_up
+wait_app
+verify_mysql
+verify_redis
+verify_ipad860
+verify_http
+rollback_prepare
+rollback_compose
+done</code></pre>
+    </section>
+
+    <section class="card">
+      <h2>三、系统配置键设计</h2>
+      <p>这部分不需要新建表，直接放进现有 <code>system_settings</code> 即可。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>key</th>
+            <th>内容建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>update_config</code></td>
+            <td>Manifest URL、通道、检查周期、是否允许后台更新、是否允许覆盖更新、默认策略</td>
+          </tr>
+          <tr>
+            <td><code>update_release_cache</code></td>
+            <td>最近一次从 GitHub 拉到的最新版本快照</td>
+          </tr>
+          <tr>
+            <td><code>update_runtime</code></td>
+            <td>最后检查时间、最后成功更新时间、当前活跃任务 ID、最近错误</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>3.1 update_config 示例</h3>
+      <pre><code>{
+  "enabled": true,
+  "allowWebTriggeredUpdate": true,
+  "allowOverwriteStrategy": true,
+  "defaultStrategy": "preserve",
+  "channel": "stable",
+  "manifestUrl": "https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/deploy/latest.json",
+  "checkIntervalMinutes": 30,
+  "checkTimeoutMs": 8000
+}</code></pre>
+
+      <h3>3.2 update_release_cache 示例</h3>
+      <pre><code>{
+  "version": "4.5.18",
+  "channel": "stable",
+  "releasedAt": "2026-03-12T09:30:00Z",
+  "appImage": "smdk000/qq-farm-bot-ui:4.5.18",
+  "offlineBundleUrl": "https://example.com/qq-farm-bot-v4.5.18-offline.tar.gz",
+  "notes": "修复安装器和更新提醒链路",
+  "checkedAt": 1773306000000
+}</code></pre>
+
+      <h3>3.3 update_runtime 示例</h3>
+      <pre><code>{
+  "currentVersion": "4.5.17",
+  "activeJobId": 1024,
+  "lastCheckAt": 1773306000000,
+  "lastCheckOk": true,
+  "lastSuccessUpdateAt": 1773309000000,
+  "lastFailedUpdateAt": 0,
+  "lastError": ""
+}</code></pre>
+    </section>
+
+    <section class="card">
+      <h2>四、后端接口规格</h2>
+      <p>建议全部挂在管理员前缀下：<code>/api/admin/system-update</code>。</p>
+
+      <h3>4.1 GET /api/admin/system-update/overview</h3>
+      <p>读取设置页卡片所需的全部概览信息。</p>
+      <pre><code>{
+  "ok": true,
+  "data": {
+    "currentVersion": "4.5.17",
+    "latestRelease": {
+      "version": "4.5.18",
+      "channel": "stable",
+      "releasedAt": "2026-03-12T09:30:00Z",
+      "notes": "修复安装器和更新提醒链路"
+    },
+    "updateConfig": {
+      "enabled": true,
+      "channel": "stable",
+      "defaultStrategy": "preserve",
+      "allowWebTriggeredUpdate": true
+    },
+    "runtime": {
+      "activeJobId": 1024,
+      "lastCheckAt": 1773306000000,
+      "lastSuccessUpdateAt": 1773309000000
+    },
+    "hasNewVersion": true,
+    "adminSeenCurrentLatest": false,
+    "latestJob": {
+      "id": 1024,
+      "status": "deploy",
+      "currentStep": "compose_up",
+      "progress": 72,
+      "summary": "正在重建主程序容器"
+    }
+  }
+}</code></pre>
+
+      <h3>4.2 POST /api/admin/system-update/check</h3>
+      <p>管理员手动检查一次新版本。</p>
+      <pre><code>Request:
+{}
+
+Response:
+{
+  "ok": true,
+  "data": {
+    "hasNewVersion": true,
+    "currentVersion": "4.5.17",
+    "latestRelease": {
+      "version": "4.5.18",
+      "releasedAt": "2026-03-12T09:30:00Z"
+    },
+    "checkedAt": 1773306000000
+  }
+}</code></pre>
+
+      <h3>4.3 GET /api/admin/system-update/config</h3>
+      <p>读取系统更新配置。</p>
+
+      <h3>4.4 POST /api/admin/system-update/config</h3>
+      <p>保存更新配置。只允许超级管理员。</p>
+      <pre><code>Request:
+{
+  "enabled": true,
+  "allowWebTriggeredUpdate": true,
+  "allowOverwriteStrategy": false,
+  "defaultStrategy": "preserve",
+  "channel": "stable",
+  "manifestUrl": "https://raw.githubusercontent.com/.../latest.json",
+  "checkIntervalMinutes": 30
+}</code></pre>
+
+      <h3>4.5 POST /api/admin/system-update/jobs</h3>
+      <p>创建一条更新任务。</p>
+      <pre><code>Request:
+{
+  "targetVersion": "4.5.18",
+  "channel": "stable",
+  "strategy": "preserve",
+  "currentVersion": "4.5.17",
+  "targetAppImage": "smdk000/qq-farm-bot-ui:4.5.18"
+}
+
+Response:
+{
+  "ok": true,
+  "data": {
+    "jobId": 1024,
+    "jobUid": "upd_20260310_6f4f3a8c",
+    "status": "queued"
+  }
+}</code></pre>
+
+      <h3>4.6 GET /api/admin/system-update/jobs/latest</h3>
+      <p>轮询最近一条任务，适合设置页卡片轮询。</p>
+
+      <h3>4.7 GET /api/admin/system-update/jobs/:id</h3>
+      <p>查看单条任务详情，给“展开详情弹窗”使用。</p>
+
+      <h3>4.8 POST /api/admin/system-update/jobs/:id/retry</h3>
+      <p>失败后重建一条新的 queued 任务，不建议直接原地复用旧任务。</p>
+
+      <h3>4.9 POST /api/view-preferences</h3>
+      <p>无需新增接口，管理员关闭提醒时继续复用现有接口写入 <code>appSeenVersion</code>。</p>
+    </section>
+
+    <section class="card">
+      <h2>五、接口校验规则</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>接口</th>
+            <th>关键校验</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>创建更新任务</td>
+            <td>必须是管理员；若已有 <code>queued/claimed/precheck/.../rollback_running</code> 任务，则拒绝再建新任务</td>
+          </tr>
+          <tr>
+            <td>保存配置</td>
+            <td><code>manifestUrl</code> 必须是白名单域名；<code>checkIntervalMinutes</code> 限定范围</td>
+          </tr>
+          <tr>
+            <td>手动检查版本</td>
+            <td>遵循超时和失败缓存，避免连续击穿 GitHub</td>
+          </tr>
+          <tr>
+            <td>重试任务</td>
+            <td>只能对 <code>failed</code> / <code>rollback_failed</code> / <code>rolled_back</code> 的任务发起</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>六、宿主机代理轮询规格</h2>
+      <h3>6.1 代理循环建议</h3>
+      <pre><code>while true:
+  1. 读取 update_config，确认后台更新功能是否启用
+  2. 查找最早一条 status = 'queued' 的任务
+  3. 尝试用 lock_token + claimed_by_host 原子认领
+  4. 认领成功后进入执行阶段
+  5. 分阶段回写 status/current_step/progress/summary
+  6. 成功则写 succeeded
+  7. 失败则进入 rollback_running，再写 rolled_back 或 rollback_failed
+  8. sleep 5-10s</code></pre>
+
+      <h3>6.2 认领 SQL 思路</h3>
+      <pre><code>UPDATE update_jobs
+SET
+  status = 'claimed',
+  current_step = 'claim_job',
+  progress = 2,
+  lock_token = ?,
+  claimed_by_host = ?,
+  claimed_by_pid = ?,
+  claimed_at = NOW()
+WHERE id = ?
+  AND status = 'queued';</code></pre>
+      <p>只有影响行数为 1 时，才算认领成功。</p>
+
+      <h3>6.3 阶段推进建议</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>建议进度</th>
+            <th>动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>precheck</td>
+            <td>10</td>
+            <td>检查 Docker、部署目录、磁盘、端口、QEMU 兼容</td>
+          </tr>
+          <tr>
+            <td>backup</td>
+            <td>20</td>
+            <td>备份部署文件，必要时备份数据库</td>
+          </tr>
+          <tr>
+            <td>repair</td>
+            <td>35</td>
+            <td>跑 <code>repair-deploy.sh</code> 和 <code>repair-mysql.sh</code></td>
+          </tr>
+          <tr>
+            <td>pull_or_build</td>
+            <td>55</td>
+            <td>拉主程序镜像，失败时回源码构建</td>
+          </tr>
+          <tr>
+            <td>deploy</td>
+            <td>75</td>
+            <td>执行 <code>update-app.sh</code> 或统一入口脚本</td>
+          </tr>
+          <tr>
+            <td>verify</td>
+            <td>90</td>
+            <td>验证 MySQL / Redis / ipad860 / HTTP</td>
+          </tr>
+          <tr>
+            <td>succeeded</td>
+            <td>100</td>
+            <td>回写结果，更新 runtime</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>七、任务详情 JSON 建议</h2>
+      <p><code>details_json</code> 适合保存结构化检查结果，前端展示时不需要解析纯文本日志。</p>
+      <pre><code>{
+  "manifest": {
+    "version": "4.5.18",
+    "appImage": "smdk000/qq-farm-bot-ui:4.5.18"
+  },
+  "precheck": {
+    "dockerOk": true,
+    "composeOk": true,
+    "deployDir": "/opt/2026_03_10/qq-farm-bot",
+    "currentLink": "/opt/qq-farm-bot-current",
+    "arch": "linux/amd64"
+  },
+  "backup": {
+    "bundleBackup": "/opt/.../deploy-bundle-20260310_180102.tar.gz",
+    "mysqlBackup": "/opt/.../mysql-repair-20260310_180110.sql"
+  },
+  "pullOrBuild": {
+    "appSource": "docker_pull",
+    "ipad860Source": "existing_local",
+    "pullFailed": false
+  },
+  "verify": {
+    "httpPingOk": true,
+    "mysqlOk": true,
+    "redisOk": true,
+    "ipad860Ok": true
+  },
+  "rollback": null
+}</code></pre>
+    </section>
+
+    <section class="card">
+      <h2>八、前端设置页交互状态表</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>条件</th>
+            <th>按钮</th>
+            <th>文案</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>未检查版本</td>
+            <td>“检查更新”</td>
+            <td>显示当前版本和最近检查时间为空</td>
+          </tr>
+          <tr>
+            <td>无新版本</td>
+            <td>仅保留“重新检查”</td>
+            <td>显示“当前已是最新版本”</td>
+          </tr>
+          <tr>
+            <td>有新版本且无活动任务</td>
+            <td>“保留旧版本更新”“覆盖更新”</td>
+            <td>显示更新摘要和目标版本</td>
+          </tr>
+          <tr>
+            <td>活动任务进行中</td>
+            <td>禁用提交按钮</td>
+            <td>显示当前步骤、进度、最近摘要</td>
+          </tr>
+          <tr>
+            <td>更新成功</td>
+            <td>“查看详情”</td>
+            <td>显示新版本已安装完成</td>
+          </tr>
+          <tr>
+            <td>更新失败但已回滚</td>
+            <td>“查看详情”“重试更新”</td>
+            <td>明确显示“已自动回滚到旧版本”</td>
+          </tr>
+          <tr>
+            <td>回滚失败</td>
+            <td>“查看详情”</td>
+            <td>标红，提示需要人工介入</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>8.1 轮询建议</h3>
+      <ul>
+        <li>设置页打开后先拉一次 <code>overview</code>。</li>
+        <li>若存在活动任务，每 5 秒轮询一次 <code>jobs/latest</code>。</li>
+        <li>若任务进入终态，再回到 30 秒轮询 <code>overview</code> 或停止轮询。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>九、完整时序图</h2>
+      <div class="flow">
+        <div class="flow-line">管理员前端        -&gt; 后端 API: POST /system-update/check</div>
+        <div class="flow-line">后端 API         -&gt; GitHub Manifest: 拉取 latest.json</div>
+        <div class="flow-line">后端 API         -&gt; system_settings: 更新 update_release_cache</div>
+        <div class="flow-line">管理员前端        -&gt; 后端 API: POST /system-update/jobs</div>
+        <div class="flow-line">后端 API         -&gt; MySQL: INSERT update_jobs(status=queued)</div>
+        <div class="flow-line">宿主机 update-agent -&gt; MySQL: SELECT queued job</div>
+        <div class="flow-line">宿主机 update-agent -&gt; MySQL: UPDATE claimed + lock_token</div>
+        <div class="flow-line">宿主机 update-agent -&gt; 本地脚本: repair-deploy / repair-mysql / update-app</div>
+        <div class="flow-line">宿主机 update-agent -&gt; MySQL: 分阶段回写 progress/current_step</div>
+        <div class="flow-line">管理员前端        -&gt; 后端 API: GET /system-update/jobs/latest (轮询)</div>
+        <div class="flow-line">后端 API         -&gt; 前端: 返回 status/progress/summary</div>
+        <div class="flow-line">宿主机 update-agent -&gt; MySQL: 最终写 succeeded 或 rolled_back</div>
+        <div class="flow-line">后端 API         -&gt; system_settings: 更新 update_runtime</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>十、实现注意点</h2>
+      <ol>
+        <li>迁移文件建议直接命名为 <code>017-system-update-jobs.sql</code>，不要再复用旧编号。</li>
+        <li><code>mysql-db.js</code> 里要加显式检测：<code>SHOW TABLES LIKE 'update_jobs'</code>，缺失时执行 <code>017-system-update-jobs.sql</code>。</li>
+        <li>更新任务详情不能只靠纯文本日志，至少要写 <code>summary</code> 和 <code>details_json</code>。</li>
+        <li>第一阶段不建议实现“取消正在执行的更新”，因为 shell 流程中断和回滚边界复杂。</li>
+        <li>若要写管理员操作审计，可考虑把 <code>admin-operation-logs.js</code> 的 <code>VALID_SCOPES</code> 扩到 <code>system_update</code>。</li>
+        <li>前端提醒关闭继续复用 <code>/api/view-preferences</code> 里的 <code>appSeenVersion</code>，不必再做新字段。</li>
+      </ol>
+      <div class="callout">
+        <span class="brand">推荐开发顺序：</span>
+        1. 迁移表和 service 层模型。2. overview/check/config/jobs API。3. 设置页管理员更新卡片。4. 宿主机代理。5. 统一安装器收口。
+      </div>
+    </section>
+
+    <p class="footer">
+      说明：本规格严格对齐当前仓库中的迁移执行方式、管理员路由返回风格和设置页挂载结构。落地时不建议跳过 service 层，直接在 controller 里写 SQL。
+    </p>
+  </div>
+</body>
+</html>

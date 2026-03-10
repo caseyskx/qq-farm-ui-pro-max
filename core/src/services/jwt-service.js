@@ -1,11 +1,13 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const jwt = require('jsonwebtoken');
-const { ensureDataDir, getDataFile } = require('../config/runtime-paths');
+const { getDataFile } = require('../config/runtime-paths');
 const { createModuleLogger } = require('./logger');
-const { getPool } = require('./mysql-db');
+const { getPool, isMysqlInitialized } = require('./mysql-db');
+const { getSystemSetting, setSystemSetting, SYSTEM_SETTING_KEYS } = require('./system-settings');
 
 const logger = createModuleLogger('jwt');
+const JWT_SECRET_SETTING_KEY = SYSTEM_SETTING_KEYS.JWT_SECRET;
 
 const TOKEN_CONFIG = {
     admin: { accessExpiresIn: '24h', refreshExpiresInMs: 365 * 24 * 3600 * 1000 },
@@ -13,32 +15,125 @@ const TOKEN_CONFIG = {
 };
 
 let _jwtSecret = null;
+let _jwtSecretInitPromise = null;
+
+function readLegacySecretFromFile() {
+    const secretFile = getDataFile('.jwt-secret');
+    try {
+        if (!fs.existsSync(secretFile)) {
+            return '';
+        }
+        const stored = fs.readFileSync(secretFile, 'utf8').trim();
+        if (stored.length >= 32) {
+            try { fs.chmodSync(secretFile, 0o600); } catch { /* non-critical */ }
+            return stored;
+        }
+    } catch { /* ignore and regenerate below */ }
+    return '';
+}
+
+function generateJwtSecret() {
+    return crypto.randomBytes(64).toString('hex');
+}
+
+async function loadJwtSecretFromDB() {
+    if (!isMysqlInitialized()) {
+        return '';
+    }
+
+    try {
+        const stored = await getSystemSetting(JWT_SECRET_SETTING_KEY);
+        if (typeof stored === 'string' && stored.trim().length >= 32) {
+            return stored.trim();
+        }
+    } catch (e) {
+        logger.warn(`加载 JWT secret 失败，将回退兼容源: ${e.message}`);
+    }
+
+    return '';
+}
+
+async function persistJwtSecretToDB(secret) {
+    if (!secret || !isMysqlInitialized()) {
+        return false;
+    }
+
+    try {
+        await setSystemSetting(JWT_SECRET_SETTING_KEY, secret);
+        return true;
+    } catch (e) {
+        logger.error(`保存 JWT secret 到数据库失败: ${e.message}`);
+        return false;
+    }
+}
+
+async function initJwtSecretPersistence() {
+    if (_jwtSecret) {
+        await persistJwtSecretToDB(_jwtSecret);
+        return _jwtSecret;
+    }
+    if (_jwtSecretInitPromise) {
+        return _jwtSecretInitPromise;
+    }
+
+    _jwtSecretInitPromise = (async () => {
+        if (_jwtSecret) {
+            return _jwtSecret;
+        }
+
+        const envSecret = String(process.env.JWT_SECRET || '').trim();
+        if (envSecret.length >= 32) {
+            _jwtSecret = envSecret;
+            await persistJwtSecretToDB(_jwtSecret);
+            return _jwtSecret;
+        }
+
+        const dbSecret = await loadJwtSecretFromDB();
+        if (dbSecret) {
+            _jwtSecret = dbSecret;
+            return _jwtSecret;
+        }
+
+        const legacyFileSecret = readLegacySecretFromFile();
+        if (legacyFileSecret) {
+            _jwtSecret = legacyFileSecret;
+            await persistJwtSecretToDB(_jwtSecret);
+            logger.info('JWT secret migrated from legacy file to MySQL');
+            return _jwtSecret;
+        }
+
+        _jwtSecret = generateJwtSecret();
+        await persistJwtSecretToDB(_jwtSecret);
+        logger.info('JWT secret generated and persisted to MySQL');
+        return _jwtSecret;
+    })().finally(() => {
+        _jwtSecretInitPromise = null;
+    });
+
+    return _jwtSecretInitPromise;
+}
 
 function getJwtSecret() {
     if (_jwtSecret) return _jwtSecret;
 
-    if (process.env.JWT_SECRET) {
-        _jwtSecret = process.env.JWT_SECRET;
+    const envSecret = String(process.env.JWT_SECRET || '').trim();
+    if (envSecret.length >= 32) {
+        _jwtSecret = envSecret;
         return _jwtSecret;
     }
 
-    ensureDataDir();
-    const secretFile = getDataFile('.jwt-secret');
-    try {
-        if (fs.existsSync(secretFile)) {
-            const stored = fs.readFileSync(secretFile, 'utf8').trim();
-            if (stored.length >= 32) {
-                _jwtSecret = stored;
-                try { fs.chmodSync(secretFile, 0o600); } catch { /* non-critical */ }
-                return _jwtSecret;
-            }
-        }
-    } catch { /* regenerate below */ }
+    if (isMysqlInitialized()) {
+        throw new Error('JWT secret not initialized. Call initJwtSecretPersistence() before issuing or verifying tokens.');
+    }
 
-    const newSecret = crypto.randomBytes(64).toString('hex');
-    fs.writeFileSync(secretFile, newSecret, { encoding: 'utf8', mode: 0o600 });
-    _jwtSecret = newSecret;
-    logger.info('JWT secret generated and persisted');
+    const legacyFileSecret = readLegacySecretFromFile();
+    if (legacyFileSecret) {
+        _jwtSecret = legacyFileSecret;
+        return _jwtSecret;
+    }
+
+    _jwtSecret = generateJwtSecret();
+    logger.warn('JWT secret generated before database init; it will be kept only in memory until MySQL initialization completes');
     return _jwtSecret;
 }
 
@@ -199,6 +294,7 @@ function clearTokenCookies(req, res) {
 }
 
 module.exports = {
+    initJwtSecretPersistence,
     signAccessToken,
     verifyAccessToken,
     generateRefreshToken,

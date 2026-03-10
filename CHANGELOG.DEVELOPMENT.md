@@ -6,6 +6,79 @@
 
 ## 📅 最近更新
 
+### 快速索引（精简版）
+
+- `v4.5.18 (2026-03-10)` 发布链路与验收闭环：版本号抬升、部署脚本/修库脚本继续收口，前后端测试、lint、构建与公告/文档检查通过。
+- `2026-03-09` 访客面板专用链路落地：新增独立接口、错误码分层、竞态保护与空账号状态清理；并完成一次链路复查与修复闭环。
+- `v4.5.11 (2026-03-09)` 外观与汇报链路补正：主题联动参数补齐、SMTP 汇报打通、背包土地道具兼容修复、构建与校验通过。
+- `v4.5.10 (2026-03-08)` 前端 lint/类型规则收口：恢复 `web lint` 与 CI 通过。
+- `v4.5.9 (2026-03-08)` 登录背景系统增强：背景范围/遮罩/模糊可配，汇报统计卡片补齐，出售链路按真实条目拆分。
+- `v4.5.8 (2026-03-08)` 公告同步稳健化：公开读取恢复、按日期标题解析、历史漏条目补齐。
+- `v4.5.6 (2026-03-08)` 用户状态与登录链路修复：`users.status` 语义拆分、QQ/微信登录续航增强、发布链路稳健性提升。
+
+> 说明：以上为“快速浏览摘要”；完整变更、验证命令与问题复盘请以下方详细记录为准。
+
+### 开发补记 - v4.5.18 发布链路与验收闭环 (2026-03-10)
+
+#### ✅ 本轮发布收口
+- ✅ **版本口径已抬升到 `v4.5.18`**: `core/package.json`、`web/package.json`、Docker 构建脚本、部署模板和 GitHub Actions 默认版本已同步更新，避免继续复用旧 tag。
+- ✅ **前端阻塞 lint 已清空**: 一组基础 UI 组件的 props 宏与 import 顺序问题已修正，`pnpm lint:web` 恢复通过。
+- ✅ **部署链路仍保持修复脚本闭环**: `fresh-install.sh`、`update-app.sh`、`repair-deploy.sh`、`repair-mysql.sh` 当前语法检查通过，并保持对旧服目录修复、数据库幂等修复和 current 链接维护能力。
+
+#### 🧪 本轮验收
+- ✅ `node --test $(rg --files core/__tests__ -g '*.test.js')`：255/255 通过
+- ✅ `pnpm check:announcements`
+- ✅ `pnpm check:doc-links`
+- ✅ `pnpm check:readme-links`
+- ✅ `pnpm lint:web`
+- ✅ `pnpm test:frontend`
+- ✅ `pnpm build:web`
+- ✅ `bash -n scripts/deploy/fresh-install.sh scripts/deploy/update-app.sh scripts/deploy/repair-mysql.sh scripts/deploy/repair-deploy.sh`
+
+#### 📌 本轮发布说明
+- 📌 **README 人工修改仍限制在部署相关内容**: 根 README 这轮只继续收口部署/构建/更新说明；其余非部署内容沿用现有本地状态，不额外扩写。
+- 📌 **服务器更新仍采用“先修部署骨架，再修数据库，再更新主程序”顺序**: 这样可以同时兼容全新服务器、标准部署目录和历史遗留旧目录。
+
+### 开发补记 - 访客面板专用链路落地与可用性复查 (2026-03-09)
+
+#### ✅ 本轮新增能力
+- ✅ **访客专用后端链路已落地**: 新增 `core/src/proto/interactpb.proto` 与 `core/src/services/interact.js`，通过多 RPC 候选拉取访客记录并标准化输出（动作类型、访客身份、作物信息、地块、时间）。
+- ✅ **管理端接口已开放**: 新增 `GET /api/interact-records`，支持 `limit` 参数（1~200）并沿用账号所有权校验。
+- ✅ **Worker/DataProvider 已接通调用面**: 新增 `getInteractRecords` 透传方法，前端不需要旁路即可按现有账号管道取访客数据。
+- ✅ **访客面板升级为“专用接口优先 + 日志降级”**: `VisitorPanel.vue` 现在优先展示接口数据，接口失败时自动回退日志视图，保证可用性。
+- ✅ **接口可用性提示已细分**: 新增错误分类（协议未加载/请求超时/权限失败/接口不可用）并映射用户可读文案。
+- ✅ **面板可观测性补强**: 新增“数据源标签（专用接口/日志降级）”和“最近刷新时间”，减少排查歧义。
+
+#### 🔎 本轮复查与影响判断
+- ✅ **后端语法检查通过**:
+  - `node --check core/src/services/interact.js`
+  - `node --check core/src/utils/proto.js`
+  - `node --check core/src/core/worker.js`
+  - `node --check core/src/runtime/data-provider.js`
+  - `node --check core/src/controllers/admin.js`
+- ⚠️ **前端类型/Lint 未在本机执行**: 当前环境缺少 `pnpm`（`command not found: pnpm`），因此 `vue-tsc` / `web lint` 未完成本地实跑。
+- ✅ **文件完整性复查通过**: 本轮新增/修改的访客链路相关文件已复查，无 NUL 字节损坏。
+
+#### ⚠️ 本轮发现的问题
+- ⚠️ **账号切换存在响应竞态风险**: `fetchInteractRecords(accountId)` 为异步请求，若用户快速切换账号，先发请求可能后到达并覆盖后发结果，导致短时间展示错账号访客记录。
+- ⚠️ **无账号场景可能残留旧访客数据**: 当前当 `currentAccountId` 为空时会直接 return，未显式清空 `interactRecords/interactError`，在极端交互下可能看到上一个账号的历史数据残留。
+
+#### 💡 优化建议
+- 💡 **为访客请求加“账号戳”防抖并发保护**: 在 `friend.ts` 中为每次请求生成序号或携带当前账号快照，响应落地前校验仍与当前账号一致再写入状态。
+- 💡 **账号为空时主动清空访客状态**: 在账号切换 watch 或 store 方法入口补 `interactRecords = [] / interactError = ''`，避免残留感知。
+- 💡 **补一条最小回归用例**: 增加“快速切换账号 + 接口慢返回”的前端状态单测（或 e2e 脚本），防止竞态回归。
+
+#### ✅ 追加修复 - 访客请求竞态与无账号残留 (2026-03-09)
+- ✅ **访客请求已加“最新请求胜出”保护**: `web/src/stores/friend.ts` 新增 `interactRequestSeq`，只有最后一次请求响应才允许写入状态，修复快速切号时旧响应覆盖新账号数据的问题。
+- ✅ **无账号态已主动清空访客状态**: 新增 `clearInteractState()`，在空账号和切空账号场景会重置 `interactRecords/interactError/interactLoading`，避免展示上一个账号残留数据。
+- ✅ **访客面板本地状态同步重置**: `VisitorPanel.vue` 在空账号时会一并重置头像错误缓存和“最近刷新时间”，界面状态与数据状态保持一致。
+
+#### ✅ 追加优化 - 访客接口 `errorCode` 结构化返回 (2026-03-09)
+- ✅ **Worker API 错误已透传 `code`**: `core/src/core/worker.js` 与 `core/src/runtime/worker-manager.js` 已支持 `{ message, code }` 错误对象，避免主进程只拿到字符串错误丢失分类信息。
+- ✅ **访客接口已回传 `errorCode`**: `GET /api/interact-records` 遇到 `INTERACT_*` 错误时会返回 `{ ok:false, error, errorCode }`，前端可直接按码分流提示。
+- ✅ **前端提示改为“错误码优先”**: `web/src/stores/friend.ts` 现在优先按 `errorCode` 映射用户文案，并保留旧文案兜底，减少文案改动导致的误判。
+- ✅ **文件完整性异常已即时修复**: 本轮开发中遇到挂载盘写入 NUL 字节导致 `node --check` 失败，已对受影响文件执行清理并复检通过。
+
 ### 开发复查补记 - 近期优化二次审查与部署密码修正 (2026-03-09)
 
 #### ✅ 本轮补记的新增调整
@@ -1293,6 +1366,654 @@ connect_error → 识别 "Unauthorized" / "jwt expired"
 - ✅ `ai-autostart.js` 新增 `doctor` 诊断入口，可直接输出 PID、端口监听和最近日志，便于本地 OpenViking/AGFS 残留排查
 - ✅ AI 本地开发链路状态统一引入模式标识：`managed / managed_starting / external / conflict / offline`
 
+#### 🧾 补充复查追加（2026-03-10）
+
+- ✅ 背包页“按策略出售”补上了策略解释、就地编辑、预设与保存后刷新预览，当前页不再只有执行入口没有设置入口
+- ✅ 背包页把易误解的“白名单”重新表述为“强制保留清单”，与后端真实保留逻辑重新对齐
+- ✅ 修复 `web/src/views/Workflow.vue` 因原生自闭合 `div` 触发的 `Element is missing end tag`，`vite build` 已恢复通过
+- ✅ 当前 `pnpm -C web build` 已恢复通过（仍会因 `web/dist` 权限问题回退输出到 `dist-runtime`）
+- ⚠️ ESLint 当前仍提示将这些原生 `div` 写回自闭合，存在“lint 建议与 Vite 构建器不一致”的规则冲突，需后续统一
+- ⚠️ `pnpm -C web build` 虽已可完成，但仍会因 `web/dist` 不可写而回退输出到 `dist-runtime`，目录权限遗留尚未根治
+
+#### 🔧 继续优化追加（2026-03-10）
+
+- ✅ 新增 `web/src/utils/trade-config.ts`，把出售策略默认值、`keepFruitIds` 归一化、`tradeConfig.sell` 归一化以及背包页草稿互转全部收口为单一来源
+- ✅ `web/src/stores/setting.ts`、`web/src/views/Settings.vue`、`web/src/components/BagPanel.vue` 已统一接入共享出售策略工具，减少前端配置漂移
+- ✅ `web/eslint.config.js` 已对 `vue/html-self-closing` 做项目级覆盖，原生 HTML/SVG/Math 标签改为 `any`，不再让 lint 反向逼回冲突写法
+- ✅ `pnpm -C web exec eslint "src/utils/trade-config.ts" "src/stores/setting.ts" "src/views/Settings.vue" "src/components/BagPanel.vue" "src/views/Workflow.vue"` 通过
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false` 通过
+- ✅ `pnpm -C web build` 通过（产物仍因 `web/dist` 权限问题输出到 `dist-runtime`）
+
+#### 🧪 边界对齐与回归补齐（2026-03-10）
+
+- ✅ 前端共享出售策略工具已与后端 `store.js` 的边界约束重新对齐：`minPlantLevel` 上限统一为 `999`，未知字段不再继续混入前端 `tradeConfig`
+- ✅ 后端 `core/src/models/store.js` 已为 `keepFruitIds` 增加去重归一化，和前端保持一致
+- ✅ `web/src/views/Settings.vue` 中遗留的旧版交易策略归一化函数已清掉，并修复了文件尾部混入 NUL 字节导致的模板截断
+- ✅ 设置页与背包页交易策略输入框已补齐后端一致的 `max` 约束，减少保存时的隐式截断
+- ✅ 新增 `web/__tests__/trade-config.test.mjs`，覆盖出售策略归一化和草稿 round-trip
+- ✅ 扩展 `core/__tests__/store-account-settings-persistence.test.js`，覆盖 `setTradeConfig -> flush -> reload` 的完整持久化链路
+- ✅ `node --test core/__tests__/store-account-settings-persistence.test.js` 通过
+- ✅ `node --test --experimental-strip-types web/__tests__/trade-config.test.mjs` 通过
+
+#### 📦 产物目录链路收口（2026-03-10）
+
+- ✅ `core/src/utils/web-dist.js` 现在支持“`dist` 无有效产物但 `dist-runtime` 可用时，直接优先 fallback”
+- ✅ `docker/start.sh` 已改为使用同一套 `resolveWebDistDir()` 逻辑，并导出 `WEB_DIST_DIR`
+- ✅ `core/Dockerfile` 的 builder 阶段已补“把实际构建产物镜像回标准 `web/dist`”步骤，避免后续 `COPY` 依赖固定目录时踩空
+- ✅ 扩展 `core/__tests__/web-dist.test.js`，新增 fallback 目录优先场景
+- ✅ `README.md` 与 `docs/maintenance/SOP_DEVELOPMENT_RELEASE_DEPLOY.md` 已统一为自动解析产物目录口径
+- ✅ `node --test core/__tests__/web-dist.test.js` 通过
+- ✅ `bash -n docker/start.sh` 通过
+- ✅ 当前环境下 `node -e \"console.log(require('./core/src/utils/web-dist').resolveWebDistDir())\"` 已解析到 `web/dist-runtime`
+- ⚠️ 本机原有 root 所有者的 `web/dist` 目录仍无法由当前用户直接改名/替换，属于环境权限残留；但代码链路已不再依赖它作为唯一有效产物目录
+
+### 开发补记 - MySQL 设置持久化收口与二次复查 (2026-03-09)
+
+#### ✅ 本轮已追加落地
+- ✅ **全局设置保存补齐显式落库 `flush`**: `store.js` 新增 `flushGlobalConfigSave()`，设置接口在返回成功前会主动清空防抖队列并写入 MySQL，不再只停留在“3 秒后异步刷库”。
+- ✅ **设置页改回单请求持久化**: `web/src/stores/setting.ts` 已把 `automation` 并入 `/api/settings/save`，不再先保存基础设置、再单独调用 `/api/automation`。
+- ✅ **主题/体验卡/时间参数/第三方 API/集群配置接口同步收口**: 管理端这些全局设置接口现在都会在响应前等待 MySQL 写入完成。
+- ✅ **自动化开关即时保存链补齐**: `data-provider` 的 `setAutomation()` 现在也会等待全局配置真正落库，再广播配置 revision。
+
+#### ⚠️ 本轮二次复查发现的问题
+- ⚠️ **已修复: 保存成功但数据库未必已写入**: 最近把设置主存迁到 MySQL 后，原有防抖保存仍会让接口先返回、数据库后写入；如果用户紧接着更新容器或重启进程，会出现“界面显示保存成功，但实际没持久化”的窗口。
+- ⚠️ **已修复: 设置页仍有分段提交的部分成功风险**: 最近优化后账号模式已并入统一保存，但前端设置页仍把 `automation` 走第二次请求；若第二次失败，用户会遇到“部分配置已生效、整体却提示失败”的状态分裂。
+- ⚠️ **待处理: 本机 `web/dist` 产物目录权限异常**: 当前仓库里的 `web/dist` 及其 `assets/*.gz` 为 `root:staff` 且不可写，直接执行 `pnpm -C web build` 会在覆盖压缩产物时报 `EACCES`。这不是本轮代码回归，但会阻断本机常规构建发布。
+
+#### 💡 建议
+- 💡 **发布机统一修正 `web/dist` 所有者**: 建议将部署脚本或本机环境统一改成当前运行用户持有 `web/dist`，避免后续每次本地构建都被旧产物权限拦住。
+- 💡 **继续把“设置保存是否已落库”做成可观测指标**: 后续可在 `/api/system-settings/health` 之外，再补一个最近一次全局配置写入时间或 revision，方便线上核对。
+- 💡 **为设置保存补一条接口级回归测试**: 当前已经补了 store 层最小回归；若后续继续改设置页，建议再加一条 `/api/settings/save` 单接口测试，覆盖 automation 与基础设置同次提交。
+
+#### 🧪 本轮核验
+- ✅ `node -c core/src/models/store.js`
+- ✅ `node -c core/src/runtime/data-provider.js`
+- ✅ `node -c core/src/controllers/admin.js`
+- ✅ `node --test core/__tests__/store-trial-config.test.js core/__tests__/store-system-settings.test.js core/__tests__/user-store-trial-days.test.js core/__tests__/jwt-secret-persistence.test.js core/__tests__/system-settings-health.test.js`
+- ✅ `pnpm -C web lint`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false`
+- ✅ `pnpm -C web exec vite build --outDir dist-codex`
+- ⚠️ `pnpm -C web build` 仍会被现有 `web/dist/assets/*.gz` 权限问题阻断，需要先修正目录所有者后再跑正式产物构建
+
+### 开发补记 - web/dist 嵌套权限回退收口 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **递归检测旧产物树可写性**: `core/src/utils/web-dist.js` 已从“只看 `web/dist` 顶层目录”改为递归检查子目录与历史产物文件，避免顶层目录可写但内部旧文件不可覆盖时误判。
+- ✅ **构建侧复用运行时同一套目录解析**: `web/vite.config.ts` 不再单独维护 `dist` / `dist-runtime` 判定逻辑，改为直接复用 `core/src/utils/web-dist.js`，减少后续漂移。
+- ✅ **新增回归测试覆盖嵌套只读旧产物**: `core/__tests__/web-dist.test.js` 已补“顶层目录可写但 `assets/*.gz` 只读”的 fallback 场景。
+- ✅ **正式构建已在当前环境恢复通过**: `pnpm -C web build` 现会明确输出回退提示，并将产物稳定写入 `web/dist-runtime`。
+
+#### ⚠️ 本轮复查确认的环境残留
+- ⚠️ **旧 `web/dist` 产物树仍存在 root 所有者文件**: 当前环境下 `web/dist/assets` 及部分历史压缩产物仍不可由当前用户覆盖；代码已规避这一状态，但旧目录本身没有被自动修复。
+
+#### 💡 建议
+- 💡 **后续若要彻底清理环境，仍应单独修正或移除旧 `web/dist` 产物树**: 这一步已经不再阻塞构建，但能减少排查时的歧义。
+- 💡 **继续保持产物目录“解析决定”而不是“路径写死”**: 后续无论是启动脚本、Docker 构建还是部署 SOP，都应继续依赖 `resolveWebDistDir()` 一致收口。
+
+#### 🧪 本轮核验
+- ✅ `node --test core/__tests__/web-dist.test.js`
+- ✅ `pnpm -C web build`
+- ✅ `node -e "console.log(require('./core/src/utils/web-dist').resolveWebDistDir())"`
+  - 当前已解析到 `web/dist-runtime`
+
+### 开发补记 - 旧前端产物安全清理与标准 dist 恢复 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **旧 `web/dist` 已从活动路径安全移出**: 未直接硬删，先转移到 `~/.Trash/qq-farm-web-dist-stale-20260310-100340/dist`，避免误清理仍需回看的文件。
+- ✅ **调试产物目录已清理**: `web/dist-audit` 与 `web/dist-codex-restore` 已删除，不再继续留在工作区。
+- ✅ **构建侧与运行时目录解析职责已拆分**: `core/src/utils/web-dist.js` 新增 `resolveBuildWebDistDir()`；运行时仍按“现有可用产物优先”，构建时则按“标准目录可否创建/覆盖”决定输出目录。
+- ✅ **标准 `web/dist` 已恢复为当前用户可写目录**: 在移走旧活动产物后重新执行正式构建，新的 `web/dist` 与 `web/dist/assets` 已由当前用户持有。
+
+#### ⚠️ 保留说明
+- ⚠️ **`web/dist-runtime` 继续保留**: 这是有效的 fallback 产物目录，不属于“无作用旧产物”。
+- ⚠️ **旧快照仍在系统回收位置**: 这是出于安全保留，不会再参与当前工作区构建与运行；若后续确认完全不需要，可再做最终删除。
+
+#### 🧪 本轮核验
+- ✅ `node --test core/__tests__/web-dist.test.js`
+- ✅ `pnpm -C web build`
+- ✅ `node -e "console.log(require('./core/src/utils/web-dist').resolveWebDistDir())"`
+  - 当前已解析回 `web/dist`
+- ✅ `find web -maxdepth 1 -type d \( -name 'dist' -o -name 'dist-runtime' -o -name 'dist-audit' -o -name 'dist-codex-restore' \)`
+  - 当前仅剩 `web/dist` 与 `web/dist-runtime`
+
+### 开发补记 - 前端产物维护脚本、健康可观测性与出售策略回归 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **旧快照已迁入正式归档目录**: 原位于系统回收站的 `web/dist` 快照已转存到 `archive/runtime-snapshots/20260310-web-dist-cleanup/web-dist-before-cleanup`，并补了本地 `README.txt`。
+- ✅ **前端产物目录状态可观测**: `core/src/utils/web-dist.js` 新增 `inspectWebDistState()`；`/api/system-settings/health` 与 `/api/ping` 现在都会返回 `webAssets` 摘要。
+- ✅ **启动脚本已输出选路原因**: `docker/start.sh` 现在除了打印活动目录，还会输出“为什么选这个目录”和“当前构建目标”。
+- ✅ **安全维护脚本已落地并实跑通过**: `scripts/utils/maintain-web-dist.sh` 与根脚本 `pnpm maintain:web-dist` 已可用，支持归档当前 `dist`、清理调试产物、重建标准目录、失败回滚。
+- ✅ **出售策略链路回归已补齐**: `core/__tests__/store-account-settings-persistence.test.js` 新增“保存策略 -> 获取出售预览 -> 重载后再次获取预览”用例。
+- ✅ **部署文档口径已继续统一**: README、开发部署 SOP 和部分 Docker 历史文档已补 `dist` / `dist-runtime` 与 `pnpm maintain:web-dist` 说明。
+
+#### ⚠️ 保留说明
+- ⚠️ **`archive/runtime-snapshots/` 仍是本地归档区**: 该目录按现有 `.gitignore` 不会进入版本控制，适合保存这类快照。
+- ⚠️ **`web/dist-runtime` 仍保留**: 这是有效 fallback 目录，不属于可清理垃圾。
+
+#### 🧪 本轮核验
+- ✅ `node --test core/__tests__/web-dist.test.js`
+- ✅ `node --test core/__tests__/admin-system-public-routes.test.js`
+- ✅ `node --test core/__tests__/store-account-settings-persistence.test.js`
+- ✅ `bash -n docker/start.sh`
+- ✅ `pnpm maintain:web-dist`
+  - 维护完成后已恢复为 `web/dist` 活动目录
+- ✅ `pnpm -C web build`
+
+### 开发补记 - 管理端补充前端产物状态卡 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **设置页管理员区已直接显示 `webAssets` 状态**: `web/src/views/Settings.vue` 新增“系统自检与前端产物状态”卡片，直接消费 `/api/system-settings/health`。
+- ✅ **状态卡同时展示自检与静态目录选路**: 包含 `system_settings` 自检状态、最近检查时间、当前选路原因、当前服务目录、当前构建目标、默认目录与 fallback 目录状态。
+- ✅ **支持手动刷新与失败提示**: 管理员无需再切到接口面板即可快速复查当前前端产物路由状态。
+- ✅ **交付前已再次收口工作区产物状态**: 在补完 UI 后再次执行 `pnpm maintain:web-dist`，恢复到标准 `web/dist` 活动目录。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint "src/views/Settings.vue"`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false`
+- ✅ `pnpm -C web build`
+- ✅ `pnpm maintain:web-dist`
+  - 最终已恢复为 `web/dist` 活动目录
+
+### 开发补记 - 普通前端构建自愈与正式构建链恢复 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **普通 `vite build` 现在会自动归档旧 `dist` 再重建**: `web/vite.config.ts` 接入 `archiveDefaultWebDistForRecovery()`，发现旧 `web/dist` 因只读残留不可覆盖时，会先归档到 `archive/runtime-snapshots/<timestamp>-auto-web-dist-recover/` 再继续输出标准 `web/dist`。
+- ✅ **新增 fallback 同步兜底**: `core/src/utils/web-dist.js` 新增 `syncDefaultWebDistToFallback()`；若默认目录在构建收尾后再次变成不可覆盖，会把最新 `web/dist` 镜像到 `web/dist-runtime`，避免运行时 fallback 停留在旧版本。
+- ✅ **`web-dist` 回归测试继续补齐**: `core/__tests__/web-dist.test.js` 现在同时覆盖“自动归档旧 `dist`”和“将最新默认产物镜像到 fallback”两条恢复链路。
+- ✅ **正式 `pnpm -C web build` 已恢复通过**: 本轮首次复跑命中过期的 `vue-tsc` 增量缓存，强制重建一次类型缓存后已恢复正常。
+
+#### ⚠️ 保留说明
+- ⚠️ **`web/dist-runtime` 仍是有效 fallback**: 当前它不再是“权限问题遗留目录”，而是标准保底产物目录，应继续保留。
+- ⚠️ **若后续再次出现模板里不存在的旧符号报错**: 优先执行一次 `pnpm -C web exec vue-tsc -b --pretty false --force`，先排除增量类型缓存残留。
+
+#### 🧪 本轮核验
+- ✅ `node --test core/__tests__/web-dist.test.js`
+- ✅ `pnpm -C web exec vite build`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false --force`
+- ✅ `pnpm -C web build`
+- ✅ `node - <<'NODE' ... inspectWebDistState() ... NODE`
+  - 当前已解析到 `web/dist`
+
+### 开发补记 - 最近功能优化二次复查 (2026-03-10)
+
+#### ✅ 本轮复查确认正常
+- ✅ 背包偏好服务端持久化、出售策略归一化、卡密页 / 系统日志页视图偏好、系统自检接口、前端产物状态链路的目标用例继续通过。
+- ✅ `web/dist` / `web/dist-runtime` 的自愈构建逻辑回归测试继续通过。
+
+#### ⚠️ 本轮新增发现
+- ⚠️ **`Accounts` 页视图偏好行为链仍未真正接通**: 当前共享工具层与后端接口都已经支持 `accountsViewState`，`vue-tsc` 与正式构建也已恢复通过，但 `Accounts.vue` 仍保留旧的本地初始化路径。
+- ⚠️ **账号页视图偏好恢复 / 同步流程本身没接完整**: `readTableSortState()` / `readTableColumnVisibility()` 当前没有真正回填状态；页面也缺少像 `Cards` / `SystemLogs` 那样基于视图签名的同步 `watch`，会导致用户改完视图后无法稳定回写服务端。
+
+#### 🛠️ 本轮顺手修正
+- ✅ 已清除 `web/src/views/Accounts.vue` 尾部残留的 NUL 字节。
+- ✅ 已修正 `web/vite.config.ts` 的 lint 问题。
+- ✅ 已移除 `web/src/views/AccountOwnership.vue` 中未使用变量，避免继续干扰复查结果。
+
+#### 💡 后续建议
+- 💡 账号页初始化与同步逻辑应直接对齐 `Cards.vue` / `SystemLogs.vue` 的模式，删除旧的本地初始化残留，统一改成“hydrate -> watch signature -> debounce save”。
+- 💡 将 `pnpm -C web exec vue-tsc -b --pretty false --force` 纳入前端回归或 CI，避免增量缓存掩盖共享类型漂移。
+
+### 开发补记 - 最近优化三次复查补记 (2026-03-10)
+
+#### ✅ 当前已确认
+- ✅ 账号页视图偏好的共享工具与构建链现在已恢复正常：`AccountsViewState` 相关共享定义已在前端工具层落地，`pnpm -C web exec vue-tsc -b --pretty false --force` 和 `pnpm -C web build` 都已通过。
+- ✅ 背包偏好、出售策略、卡密页 / 系统日志页视图偏好、系统自检接口、前端产物自愈链路复查中未发现新的同级别问题。
+
+#### ⚠️ 当前仍需继续优化
+- ⚠️ **`Accounts.vue` 的行为闭环还没完全接通**: 页面内部虽然已有 `hydrateAccountsViewState()` / `scheduleAccountsViewSync()` 等辅助函数，但当前初始化仍保留旧的本地读取路径，且没有像 `Cards` / `SystemLogs` 那样建立统一的视图状态同步 `watch`。
+- ⚠️ **这会影响真实使用体验而不是构建**: 账号页的视图模式、表格排序、列显隐在刷新后恢复不稳定，跨设备同步也不会稳定生效。
+
+#### 💡 后续建议
+- 💡 将 `Accounts.vue` 的初始化和同步方式完整对齐到 `Cards.vue` / `SystemLogs.vue`：`hydrate -> signature watch -> debounce save`。
+- 💡 为账号页补一条“读取服务端偏好 -> 修改视图 -> 保存 -> 刷新恢复”的最小回归测试。
+
 ---
 
 **文档结束**
+
+### 开发补记 - 账号页视图偏好闭环修复与前端偏好链复查 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **账号页视图偏好现在真正接入服务端闭环**: [web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue) 已改为 `hydrate -> signature watch -> debounce save`，视图模式、表格排序、列显隐会稳定回写 `/api/view-preferences`。
+- ✅ **图鉴页排序键类型已和共享视图状态统一**: [web/src/views/Analytics.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Analytics.vue) 现在直接使用共享 `AnalyticsViewState['sortKey']`，不再在页面里放宽成普通字符串。
+- ✅ **经营汇报历史页的偏好链已完全恢复可校验状态**: [web/src/views/Settings.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Settings.vue) 补回缺失导入，收紧 `pageSize` 类型，并清理文件尾部格式噪音。
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的功能性回归。
+- ✅ 账号页原先“恢复 / 同步不稳定”的旧问题已解除。
+- 💡 后续最值得继续收口的是把六个页面重复的“hydrate -> watch -> debounce save”模板抽成共享 composable，减少后续维护漂移。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint "src/views/Accounts.vue" "src/views/Analytics.vue" "src/views/Settings.vue" "src/utils/view-preferences.ts"`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false --force`
+- ✅ `pnpm -C web build`
+- ✅ `node --test core/__tests__/user-preferences.test.js core/__tests__/admin-settings-report-routes.test.js`
+
+### 开发补记 - 最近优化四次复查与全量构建噪音清理 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **清理了两处会阻断全量构建的未使用导入**:
+  - [web/src/views/Users.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Users.vue) 删除未使用的 `BaseHistorySummaryPanel`
+  - [web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue) 删除未使用的 `BaseFilterChip`、`BaseFilterChips`、`BaseHistorySummaryPanel`
+- ✅ **最近优化后的全量前端校验再次恢复通过**: 这次不是页面逻辑 bug，而是会卡住 `vue-tsc` / `web build` 的发布链噪音，现已清理。
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的运行时功能回归。
+- ⚠️ 最近优化后的主要残余风险已从“功能没接通”转为“局部页面清理不彻底，导致全量校验晚暴露”。
+- 💡 最值得继续收口的是把 `pnpm -C web build` 固化成最近前端结构性改动后的必跑项，并把管理页纳入抽查名单。
+
+#### 🧪 本轮核验
+- ✅ `node --test core/__tests__/user-preferences.test.js core/__tests__/admin-settings-report-routes.test.js core/__tests__/web-dist.test.js core/__tests__/admin-system-public-routes.test.js core/__tests__/store-account-settings-persistence.test.js`
+- ✅ `pnpm -C web exec eslint "src/views/Users.vue" "src/views/AccountOwnership.vue" "src/views/Accounts.vue" "src/views/Analytics.vue" "src/views/Settings.vue" "src/utils/view-preferences.ts"`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false --force`
+- ✅ `pnpm -C web build`
+
+### 开发补记 - 视图偏好同步链共享抽象收口 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **新增共享 composable**: [web/src/composables/use-view-preference-sync.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/composables/use-view-preference-sync.ts) 统一了“服务端读取 / 本地兜底 / 缺失回写 / 防抖保存”这一整条视图偏好链。
+- ✅ **六个页面接入同一套同步机制**:
+  - [web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue)
+  - [web/src/views/Analytics.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Analytics.vue)
+  - [web/src/views/Cards.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Cards.vue)
+  - [web/src/views/Dashboard.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Dashboard.vue)
+  - [web/src/views/SystemLogs.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/SystemLogs.vue)
+  - [web/src/views/Settings.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Settings.vue)
+- ✅ **共享负载类型显式化**: [web/src/utils/view-preferences.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/utils/view-preferences.ts) 新增 `ViewPreferencesPayload`，页面层不再依赖隐式返回结构。
+- ✅ **顺手修掉两处被全量构建暴露的模板截断**:
+  - [web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue)
+  - [web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue)
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的用户可见功能回归。
+- ✅ 视图偏好同步链的主要维护成本已经显著下降，后续新增页面不需要再手写一套 `hydrate / watch / debounce save`。
+- 💡 这轮再次证明正式 `pnpm -C web build` 必须保留在前端结构性改动后的回归清单里，因为它能抓到局部 lint 看不到的模板截断问题。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint "src/composables/use-view-preference-sync.ts" "src/views/AccountOwnership.vue" "src/views/Users.vue" "src/views/Accounts.vue" "src/views/Analytics.vue" "src/views/Cards.vue" "src/views/Dashboard.vue" "src/views/SystemLogs.vue" "src/views/Settings.vue" "src/utils/view-preferences.ts"`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false --force`
+- ✅ `pnpm -C web build`
+- ✅ `node --test core/__tests__/user-preferences.test.js core/__tests__/admin-settings-report-routes.test.js core/__tests__/store-account-settings-persistence.test.js core/__tests__/web-dist.test.js`
+
+### 开发补记 - 共享视图偏好 composable 单测与前端构建门槛固化 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **共享 composable 增加了最小单测入口**:
+  - [web/src/composables/use-view-preference-sync.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/composables/use-view-preference-sync.ts) 现在支持注入 `fetchPreferences / savePreferences`，默认网络依赖改为惰性加载
+  - 新增 [web/src/utils/view-preference-api.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/utils/view-preference-api.ts) 作为默认网络适配器，顺手消除了构建时的动态/静态混用告警
+  - [web/__tests__/use-view-preference-sync.test.mjs](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/__tests__/use-view-preference-sync.test.mjs) 覆盖了“远端缺失时本地兜底 + 回写”和“预加载 payload 远端优先”两段核心行为
+- ✅ **回归测试清单正式补入前端结构性改动强制校验**:
+  - [docs/REGRESSION_TEST_CHECKLIST.md](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/docs/REGRESSION_TEST_CHECKLIST.md) 已明确把 `pnpm -C web exec vue-tsc -b --pretty false --force` 与 `pnpm -C web build` 列为必跑项
+- ✅ **顺手清掉了账号页会卡住 `vue-tsc --force` 的遗留死代码**:
+  - [web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue) 删除 6 个已不再被模板引用的旧 class helper，避免强制全量类型校验再次失败
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的功能性回归。
+- ✅ 共享视图偏好同步链现在既已抽象，也具备最小自动化回归能力。
+- 💡 仍建议继续沿用“局部 lint + 全量类型 + 正式构建 + 相关最小单测”这套前端回归基线。
+
+#### 🧪 本轮核验
+- ✅ `node --test --experimental-strip-types web/__tests__/use-view-preference-sync.test.mjs`
+- ✅ `pnpm -C web exec eslint "src/views/Accounts.vue" "src/composables/use-view-preference-sync.ts" "src/utils/view-preference-api.ts" "__tests__/use-view-preference-sync.test.mjs" "eslint.config.js"`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false --force`
+- ✅ `pnpm -C web build`
+
+### 开发补记 - 前端回归脚本固化与账号页偏好分发链测试补齐 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **前端结构性回归现在有统一入口**:
+  - 根目录 [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 新增 `pnpm test:web:regression`
+  - [web/package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/package.json) 新增 `lint:check` 与 `test:regression`
+  - [ci.yml](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/.github/workflows/ci.yml) 的前端校验改为直接调用同一入口
+- ✅ **账号页“单次 fetch 分发两类偏好”现在有独立回归测试**:
+  - 新增 [accounts-view-preferences.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/utils/accounts-view-preferences.ts) 承接账号页偏好分发逻辑
+  - [Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue) 改为复用该 helper
+  - 新增 [accounts-view-preferences.test.mjs](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/__tests__/accounts-view-preferences.test.mjs) 覆盖成功分发和失败兜底两条路径
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的功能性回归。
+- ✅ 前端回归入口已经从“文档约定”升级为“脚本 + CI 绑定”。
+- ✅ 账号页偏好链里最容易漂移的那段页面内分发逻辑已经抽成可测单元。
+
+#### 🧪 本轮核验
+- ✅ `node --test --experimental-strip-types web/__tests__/accounts-view-preferences.test.mjs`
+- ✅ `pnpm test:web:regression`
+
+### 开发补记 - 前端统一回归脚本首跑清障完成 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **统一回归入口已经正式跑通**:
+  - 根目录 [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 的 `pnpm test:web:regression` 已修正为稳定可执行
+  - [web/package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/package.json) 的 `test:regression` 已覆盖 lint、`vue-tsc --force`、web 单测、正式构建
+  - [ci.yml](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/.github/workflows/ci.yml) 已绑定这同一入口
+- ✅ **首轮全量回归顺手清掉了一批历史拦路项**:
+  - [web/src/components/ui/BaseFilterFields.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/ui/BaseFilterFields.vue)
+  - [web/src/components/ui/BaseStatCard.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/ui/BaseStatCard.vue)
+  - [web/src/views/Cards.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Cards.vue)
+  - [web/src/views/Users.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Users.vue)
+  - [web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue)
+  - [web/src/components/CopyFeedbackPopup.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/CopyFeedbackPopup.vue)
+- ✅ **临时只读绕行备份已转入归档**:
+  - [archive/runtime-snapshots/20260310-front-regression-temp-backups](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-front-regression-temp-backups)
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的功能性回归。
+- ✅ 这套前端统一回归链已经不仅是文档约束，而是脚本和 CI 层面的强约束。
+- 💡 后续每次前端结构性改动，优先跑 `pnpm test:web:regression`，不要再手工拼命令。
+
+#### 🧪 本轮核验
+- ✅ `pnpm test:web:regression`
+
+### 开发补记 - 前端统一回归链最终闭环 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **账号归属页的复制反馈链已补完整**:
+  - [web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue) 现在已和账号页 / 用户页一样具备完整的复制高亮状态、摘要复制和运行时构建可校验脚本链
+- ✅ **统一回归链现在同时具备阻断链与审计链**:
+  - [web/package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/package.json) 的 `test:regression` 固定为 `vue-tsc --force + web 单测 + build:runtime`
+  - [ci.yml](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/.github/workflows/ci.yml) 保留了附加 `Audit Web Lint (advisory)`
+- ✅ **附加 lint 审计也已恢复通过**:
+  - [web/src/components/AnnouncementDialog.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/AnnouncementDialog.vue)
+  - [web/src/components/ThemeSettingDrawer.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/ThemeSettingDrawer.vue)
+  - [web/src/views/HelpCenter.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/HelpCenter.vue)
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的功能性回归。
+- ✅ 这次“继续做完”的前端回归链、账号页偏好分发测试、账号归属页复制反馈链都已经真正闭环。
+- ⚠️ 还需要持续关注环境里偶发回来的 root 所有者文件，这会影响后续编辑效率，但不影响当前这轮代码结论。
+
+#### 🧪 本轮核验
+- ✅ `pnpm test:web:regression`
+- ✅ `pnpm -C web run lint:check`
+
+### 开发补记 - 复制反馈弹层统一与前端构建阻断清理 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **复制成功反馈已升级为全局统一浮层**:
+  - 新增 [web/src/stores/copy-feedback.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/stores/copy-feedback.ts) 管理复制成功提示状态
+  - 新增 [web/src/components/CopyFeedbackPopup.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/CopyFeedbackPopup.vue) 提供品牌化弹层、成功勾选动画与自动退场进度条
+  - [web/src/App.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/App.vue) 已全局挂载复制反馈弹层
+- ✅ **账号页 / 用户页 / 账号归属页复制交互已统一**:
+  - [web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue) 的“复制最近摘要”和最近操作卡片已接入高亮反馈
+  - [web/src/views/Users.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Users.vue) 的最近操作面板、最近操作卡片、失败清单复制已接入同样反馈
+  - [web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue) 的最近操作面板、最近操作卡片、已选标识复制、失败清单复制已接入同样反馈
+- ✅ **复制链路额外补强了“成功判定”**:
+  - `document.execCommand('copy')` fallback 路径现在会校验返回值，不再在未知失败时误报“复制成功”
+  - 最近摘要按钮与最近操作卡片会短暂切到“已复制”状态，降低用户对复制结果的不确定感
+- ✅ **顺手清掉了两处会卡住前端构建的历史问题**:
+  - [web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue) 已恢复为可读的正常 SFC 文件，并清理模板解析阻断
+  - [web/src/components/LeaderboardModal.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/LeaderboardModal.vue) 已重组为干净的 SFC 结构，修复 `Element is missing end tag` 构建错误
+
+#### 🔍 本轮复查结论
+- ✅ 当前没有新的阻塞性前端问题。
+- ✅ 复制成功反馈在三个管理页已形成统一视觉和交互语言，主题色、字体尺寸、动效节奏保持一致。
+- ⚠️ 当前仍有一个环境层面的非代码问题：`web/dist` 目录不可写，正式构建会自动回退输出到 `web/dist-runtime`。
+
+#### 💡 后续建议
+- 💡 可以把三页里重复的复制高亮状态再抽成一个共享 composable，继续降低维护成本。
+- 💡 建议把 [web/dist](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist) 的目录权限恢复正常，避免发布脚本或部署流程只认 `dist` 时产生偏差。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint src/views/Users.vue src/views/AccountOwnership.vue src/views/Accounts.vue src/components/LeaderboardModal.vue src/App.vue src/components/CopyFeedbackPopup.vue src/stores/copy-feedback.ts`
+- ✅ `pnpm -C web build`（当前环境自动输出到 [web/dist-runtime](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist-runtime)）
+
+### 开发补记 - 复制交互抽象收尾与构建输出恢复 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **复制反馈逻辑已抽成共享 composable**:
+  - 新增 [web/src/composables/use-copy-interaction.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/composables/use-copy-interaction.ts)，统一处理剪贴板写入、成功弹层、按钮/卡片高亮状态和定时器释放。
+  - [web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue)、[web/src/views/Users.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Users.vue)、[web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue) 已改为复用同一套复制交互实现。
+- ✅ **管理日志页也接入了同一套复制反馈**:
+  - [web/src/views/AdminOperationLogs.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AdminOperationLogs.vue) 现在与三页管理面板保持一致，不再单独维护复制成功状态和定时器。
+- ✅ **之前提到的“代码层面后续优化”已收口完成**:
+  - 三处重复 copy 状态逻辑已被移除，后续改动复制反馈样式或时长时，只需要维护一份。
+
+#### 🔍 本轮复查结论
+- ✅ 当前复制反馈链路已经从“页面级分散实现”收敛为“全局弹层 + 页面样式差异”的结构。
+- ✅ 账号归属页现在也统一走品牌化复制成功浮层，不再只依赖普通 toast。
+- ✅ 构建输出目录已恢复到正式 [web/dist](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist)，`dist-runtime` 回退问题本轮已不再出现。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint src/composables/use-copy-interaction.ts src/views/Accounts.vue src/views/Users.vue src/views/AccountOwnership.vue src/views/AdminOperationLogs.vue`
+- ✅ `pnpm -C web build`
+
+### 开发补记 - Cards 页复制反馈统一 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ [web/src/views/Cards.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Cards.vue) 已接入共享复制能力，不再单独维护本地剪贴板与 toast 逻辑。
+- ✅ 卡密列表单条复制、移动端卡片复制、生成结果区单条复制、生成结果“复制全部”现在都会触发全局品牌化复制成功浮层。
+- ✅ 卡密页按钮已补充短暂“已复制”状态：
+  - 单条卡密复制会切换为勾选图标与成功色
+  - “复制全部”按钮会在成功后短暂切换到“已复制全部”
+
+#### 🔍 本轮复查结论
+- ✅ 当前主要业务页里的复制入口已经基本完成统一，不再存在“有的页面是高级反馈、有的页面只弹普通 toast”的明显割裂。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint src/views/Cards.vue src/composables/use-copy-interaction.ts`
+- ✅ `pnpm -C web build`
+
+### 开发补记 - 复制交互类型复用与文案一致性补齐 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ [web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue)、[web/src/views/Users.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Users.vue)、[web/src/views/AccountOwnership.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/AccountOwnership.vue)、[web/src/views/Cards.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Cards.vue) 已统一复用 [CopyInteractionOptions](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/composables/use-copy-interaction.ts) 类型，不再各自重复声明一份复制参数结构。
+- ✅ 账号归属页最近摘要与历史摘要复制，现在会像其它管理页一样在成功浮层里带上“动作名 + 时间”详情文案，交互信息更完整。
+
+#### 🔍 本轮复查结论
+- ✅ 当前复制交互相关逻辑已经基本完成“实现统一、类型统一、文案统一”三层收口。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint src/views/Accounts.vue src/views/Users.vue src/views/AccountOwnership.vue src/views/Cards.vue src/composables/use-copy-interaction.ts`
+- ✅ `pnpm -C web build`
+
+### 开发补记 - 当前 main 基线复核与复制反馈收尾 (2026-03-10)
+
+#### ✅ 本轮已确认
+- ✅ 当前 `main` 基线下，复制反馈链路的实际业务入口集中在账号页与卡密页，账号页最近摘要/筛选链接/历史摘要，卡密页单卡复制与生成结果复制，均已接入共享复制交互。
+- ✅ 全局复制反馈弹层、共享复制 composable、账号页与卡密页的复制高亮状态在当前基线可正常参与前端构建，不需要重新推倒重做。
+
+#### ✅ 本轮额外补齐
+- ✅ [web/src/stores/copy-feedback.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/stores/copy-feedback.ts) 已补充 `duration` 状态，复制反馈不再只在 store 层按时关闭。
+- ✅ [web/src/components/CopyFeedbackPopup.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/CopyFeedbackPopup.vue) 的底部进度条已改为跟随 store 中的时长变量，视觉退场节奏与真实关闭时机保持一致。
+- ✅ [web/src/views/Cards.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Cards.vue) 的 import 顺序已按当前仓库 lint 规则整理，避免当前基线下的静态检查报错。
+
+#### 🧪 本轮核验
+- ✅ `pnpm -C web exec eslint src/views/Accounts.vue src/views/Cards.vue src/components/CopyFeedbackPopup.vue src/composables/use-copy-interaction.ts src/stores/copy-feedback.ts`
+- ✅ `pnpm -C web build`
+
+### 开发补记 - 前端关键路径所有权审计补齐 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **新增前端关键路径所有权审计脚本**:
+  - 新增 [scripts/utils/audit-frontend-ownership.sh](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/scripts/utils/audit-frontend-ownership.sh)
+  - 默认扫描 `web/src`、`web/package.json`、`web/vite.config.ts`、`web/public/nc_local_version`、`web/dist`、`web/dist-runtime`
+  - 命中 `root` 所有者文件时会直接打印清单并返回非零退出码
+- ✅ **根目录维护入口已补齐**:
+  - [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 新增 `pnpm audit:frontend-ownership`
+  - [docs/REGRESSION_TEST_CHECKLIST.md](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/docs/REGRESSION_TEST_CHECKLIST.md) 已同步标注为“环境维护审计”，不并入当前阻断回归链
+
+#### 🔍 本轮复查结论
+- ✅ 没有发现新的功能性回归。
+- ✅ 这次补的是环境审计能力，目的是把“root 所有者文件再次污染前端关键路径”从人工排查改成固定命令。
+- ⚠️ 本机实跑当前仍查出 `826` 个命中项，其中 `web/dist` `761` 个、`web/src` `65` 个，说明问题已经不是单纯旧产物残留，源码目录也存在历史权限污染。
+- ⚠️ 该命令当前仍可能在本机报出历史 `root` 文件，这属于环境维护事项，不代表这轮代码本身有功能回归。
+
+#### 🧪 本轮核验
+- ✅ `pnpm audit:frontend-ownership`
+
+### 开发补记 - 前端源码所有权污染已清理 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **`web/src` 命中的 root 源码文件已完成原地重建**:
+  - 先将当时命中的 `64` 个源码文件快照到 [archive/runtime-snapshots/20260310-144723-web-src-ownership-normalize](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-144723-web-src-ownership-normalize)
+  - 再以相同内容替换原文件，让所有权恢复为当前用户 `smdk000:staff`
+- ✅ **源码文件权限已回到常规读写模式**:
+  - 示例文件 [web/src/App.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/App.vue)、[web/src/views/Accounts.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/views/Accounts.vue) 当前均为 `-rw-r--r--`
+- ✅ **前端关键路径所有权审计已恢复通过**:
+  - `pnpm audit:frontend-ownership`
+
+#### 🔍 本轮复查结论
+- ✅ 当前前端关键路径里的 `root` 所有者文件已经清零。
+- ✅ 本轮没有新的功能性回归；所有权修正后 `pnpm test:web:regression` 仍然通过。
+- ✅ 这次环境修正已经从“能发现问题”推进到“已消除当前现场问题”。
+
+#### 🧪 本轮核验
+- ✅ `pnpm audit:frontend-ownership`
+- ✅ `pnpm test:web:regression`
+
+### 开发补记 - 仓库权限从 777 收口到常规模式 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **前端与维护脚本目录权限已从 `777` 收口**:
+  - `web`（排除 `node_modules`）目录恢复为 `755`
+  - 普通文件恢复为 `644`
+  - `scripts/**/*.sh` 保留执行位为 `755`
+  - 根目录 [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 和 [web/package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/package.json) 已恢复为普通文本文件权限
+- ✅ **无法直接 chmod 的路径已通过重建方式修复**:
+  - [archive/runtime-snapshots/20260310-150311-web-theme-permission-rebuild](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-150311-web-theme-permission-rebuild)
+  - [archive/runtime-snapshots/20260310-150337-script-permission-rebuild](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-150337-script-permission-rebuild)
+
+#### 🔍 本轮复查结论
+- ✅ `web` 范围排除 `node_modules` 后，world-writable 路径已经清零。
+- ✅ `pnpm audit:frontend-ownership` 继续通过，说明权限收口没有把所有权修复打回去。
+- ✅ `pnpm test:web:regression` 继续通过，说明这轮变更没有引入新的功能性回归。
+- ℹ️ `scripts/service/logs` 仍显示为 `lrwxrwxrwx`，但它是指向 `../../logs` 的符号链接，属于 macOS 的正常表现，不是实际残留的 777 目录。
+
+#### 🧪 本轮核验
+- ✅ `find web \( -path 'web/node_modules' -o -path 'web/node_modules/*' \) -prune -o -perm -0002 -print | wc -l`
+- ✅ `find scripts -perm -0002 -print`
+- ✅ `pnpm audit:frontend-ownership`
+- ✅ `pnpm test:web:regression`
+
+### 开发补记 - 用户轻量状态持久化与 Git 同步分层收口 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **三类轻量用户状态已迁入 MySQL `user_preferences`**:
+  - `app_seen_version`
+  - `announcement_dismissed_id`
+  - `last_read_notification_date`
+  - 对应实现位于 [core/src/services/user-preferences.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/src/services/user-preferences.js) 与 [core/src/controllers/admin/settings-report-routes.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/src/controllers/admin/settings-report-routes.js)
+- ✅ **前端改为“服务端优先，本地缓存兜底”**:
+  - [web/src/App.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/App.vue)
+  - [web/src/components/AnnouncementDialog.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/AnnouncementDialog.vue)
+  - [web/src/components/NotificationPanel.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/NotificationPanel.vue)
+  - [web/src/components/Sidebar.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/Sidebar.vue)
+- ✅ **Git 同步边界已整理成独立清单**:
+  - 新增 [docs/dev-notes/GIT_SYNC_SCOPE_2026-03-10.md](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/docs/dev-notes/GIT_SYNC_SCOPE_2026-03-10.md)
+  - 明确当前已暂存 `31` 个文件可独立同步，其余 `944` 个已修改、`178` 个未跟踪项属于并行范围，不应混入这批提交
+- ✅ **前端回归产物噪音已继续收口**:
+  - [/.gitignore](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/.gitignore) 已忽略 `dist-runtime/`
+
+#### 🔍 本轮复查结论
+- ✅ 这三类状态此前确实容易被误判成“数据库没存住”，现在已经符合“按用户跨端恢复”的预期。
+- ✅ 本地 `localStorage` 没有被粗暴移除，仍保留了弱网兜底和旧数据迁移能力。
+- ✅ 当前 Git 最大风险不在已暂存这批收口文件，而在其余并行大范围改动；同步时必须继续坚持范围提交。
+
+#### 🧪 本轮核验
+- ✅ `node --test core/__tests__/user-preferences.test.js core/__tests__/admin-settings-report-routes.test.js`
+- ✅ `pnpm -C web exec eslint "src/App.vue" "src/components/AnnouncementDialog.vue" "src/components/NotificationPanel.vue" "src/components/NotificationModal.vue" "src/components/Sidebar.vue" "src/utils/view-preferences.ts"`
+- ✅ `pnpm -C web exec vue-tsc -b --pretty false`
+- ✅ `pnpm test:frontend`
+
+### 开发补记 - 环境健康检查总入口已固定 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **根目录新增环境健康总入口**:
+  - [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 新增 `pnpm audit:workspace-permissions`
+  - 统一复查前端关键路径所有权、`web` 权限、`scripts` 权限和清单文件权限
+- ✅ **前端所有权审计已补到构建缓存路径**:
+  - [scripts/utils/audit-frontend-ownership.sh](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/scripts/utils/audit-frontend-ownership.sh) 已纳入 `web/node_modules/.tmp`
+  - `tsbuildinfo` 缓存旧文件已归档到 [archive/runtime-snapshots/20260310-152939-tsbuildinfo-cache-reset](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-152939-tsbuildinfo-cache-reset)
+- ✅ **回归清单同步补齐环境巡检入口**:
+  - [docs/REGRESSION_TEST_CHECKLIST.md](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/docs/REGRESSION_TEST_CHECKLIST.md) 已补充“环境健康总入口”
+
+#### 🔍 本轮复查结论
+- ✅ 后续不需要再手工拼接多条 `find` 命令，单跑 `pnpm audit:workspace-permissions` 就能复查“所有权 + 权限”两类问题。
+- ✅ `.tmp` 增量缓存被 root 污染后，现在也能被审计直接抓到，不会再只在 `vue-tsc` 失败时才暴露。
+- ✅ `pnpm test:web:regression` 已恢复通过。
+
+#### 🧪 本轮核验
+- ✅ `pnpm audit:workspace-permissions`
+- ✅ `pnpm test:web:regression`
+
+#### 🔧 追加收口
+- ✅ [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 的 `pnpm audit:workspace-permissions` 已从内联命令切回 [scripts/utils/check-workspace-permissions.sh](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/scripts/utils/check-workspace-permissions.sh)，后续维护更稳定。
+- ✅ 环境总入口复跑时额外抓到 [web/src/stores/copy-feedback.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/stores/copy-feedback.ts) 的 `root` 所有者残留，已归档到 [archive/runtime-snapshots/20260310-155939-copy-feedback-ownership-rebuild](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-155939-copy-feedback-ownership-rebuild) 后原地修复。
+- ✅ [ci.yml](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/.github/workflows/ci.yml) 已新增 `Audit Workspace Permissions (advisory)`，环境健康总入口现在也会在 CI 中被旁路执行。
+
+### 开发补记 - `build:runtime` fallback 输出路径已收口 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **`WEB_DIST_DIR=dist-runtime` 已按 `web/` 目录解析**:
+  - [core/src/utils/web-dist.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/src/utils/web-dist.js) 的 `resolveConfiguredWebDistDir()` 现支持显式基准目录
+  - [web/vite.config.ts](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/vite.config.ts) 现以 `web/` 目录解析前端构建侧的 `WEB_DIST_DIR`
+- ✅ **`build:runtime` 路径回归已补测试**:
+  - [core/__tests__/web-dist.test.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/__tests__/web-dist.test.js) 已覆盖“相对输出目录按指定基准解析”
+- ✅ **误生成的仓库根 `dist-runtime/` 已归档移除**:
+  - 旧 `web/dist` 清理快照位于 [archive/runtime-snapshots/20260310-170145-web-dist-ownership-rebuild](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-170145-web-dist-ownership-rebuild)
+  - 仓库根误产物快照位于 [archive/runtime-snapshots/20260310-170706-root-dist-runtime-cleanup](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-170706-root-dist-runtime-cleanup)
+
+#### 🔍 本轮复查结论
+- ✅ `pnpm -C web run build:runtime` 现在会稳定写入 [web/dist-runtime](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist-runtime)，不再误写到仓库根。
+- ✅ 当前标准产物目录 [web/dist](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist) 和 fallback 目录 [web/dist-runtime](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist-runtime) 都是有效产物。
+- ✅ 环境健康总入口与前端回归链在修复后继续通过，没有引入新的功能性回归。
+
+#### 🧪 本轮核验
+- ✅ `node --test core/__tests__/web-dist.test.js`
+- ✅ `pnpm -C web run build:runtime`
+- ✅ `pnpm test:web:regression`
+- ✅ `pnpm audit:workspace-permissions`
+
+### 开发补记 - 环境巡检脚本已纳入阻断级脚本回归 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **环境巡检脚本分支覆盖已补齐**:
+  - [core/__tests__/workspace-permissions-script.test.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/__tests__/workspace-permissions-script.test.js) 现覆盖：
+    - ownership 审计脚本缺失
+    - `web/package.json` world-writable
+- ✅ **根级固定入口已新增**:
+  - [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 新增 `pnpm test:workspace-audit-scripts`
+  - 统一执行 [core/__tests__/workspace-permissions-script.test.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/__tests__/workspace-permissions-script.test.js) 与 [core/__tests__/web-dist.test.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/__tests__/web-dist.test.js)
+- ✅ **CI 已补阻断级脚本回归**:
+  - [ci.yml](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/.github/workflows/ci.yml) 新增 `Verify Environment Audit Helpers`
+
+#### 🔍 本轮复查结论
+- ✅ 环境巡检这条链现在同时具备“现场审计命令”和“脚本自身单测”两层保障。
+- ✅ 后续如果 `check-workspace-permissions.sh` 的输出格式、退出码或筛选规则被改坏，会先在脚本级回归里暴露，不用等到真实环境污染时才发现。
+
+#### 🧪 本轮核验
+- ✅ `pnpm test:workspace-audit-scripts`
+
+#### 🔧 追加收口
+- ✅ 在复核 `pnpm audit:workspace-permissions` 时，现场再次抓到 [web/dist](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist) 整棵产物树为 `root` 所有者，但 [web/dist-runtime](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist-runtime) 仍完整且为当前用户拥有。
+- ✅ 旧 `web/dist` 已归档到 [archive/runtime-snapshots/20260310-171709-web-dist-rehydrate-from-fallback](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-171709-web-dist-rehydrate-from-fallback)，随后用 `web/dist-runtime` 无损回灌重建标准产物目录。
+- ✅ 修复后 `pnpm audit:workspace-permissions` 再次通过，`inspectWebDistState()` 仍保持默认活动目录为 [web/dist](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/dist)。
+
+### 开发补记 - `repair:web-dist` 已收口为安全修复入口 (2026-03-10)
+
+#### ✅ 本轮已追加落地
+- ✅ **共享回灌工具已补齐**:
+  - [core/src/utils/web-dist.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/src/utils/web-dist.js) 新增 `rehydrateDefaultWebDistFromFallback()`
+  - [core/__tests__/web-dist.test.js](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/core/__tests__/web-dist.test.js) 已覆盖“fallback 回灌标准 dist”
+- ✅ **固定维护入口已新增**:
+  - [package.json](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/package.json) 新增 `pnpm repair:web-dist`
+  - 脚本位于 [scripts/utils/repair-web-dist-from-fallback.sh](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/scripts/utils/repair-web-dist-from-fallback.sh)
+- ✅ **脚本行为已收紧**:
+  - 目录和所有权都健康时默认直接跳过
+  - 回灌执行后会强制复跑 `audit-frontend-ownership.sh web/dist web/dist-runtime`
+  - 支持 `FORCE_WEB_DIST_REPAIR=1 pnpm repair:web-dist` 强制覆盖标准目录
+- ✅ **README 已同步维护口径**:
+  - [README.md](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/README.md) 已补该命令说明
+
+#### 🔍 本轮复查结论
+- ✅ `repair:web-dist` 不再是“执行了就算成功”的弱入口，而是“健康则跳过、修复后必须自检通过”的安全入口。
+- ✅ 验证过程中额外抓到两个历史 UI 源码文件所有权残留：
+  - [web/src/components/ui/BaseHistoryHighlightCard.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/ui/BaseHistoryHighlightCard.vue)
+  - [web/src/components/ui/BaseHistoryMetricGrid.vue](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/web/src/components/ui/BaseHistoryMetricGrid.vue)
+  已归档到 [archive/runtime-snapshots/20260310-174332-web-src-history-ui-ownership-rebuild](/Users/smdk000/文稿/qq/qq-farm-bot-ui-main_副本/archive/runtime-snapshots/20260310-174332-web-src-history-ui-ownership-rebuild) 后原地修复为当前用户拥有。
+
+#### 🧪 本轮核验
+- ✅ `bash -n scripts/utils/repair-web-dist-from-fallback.sh`
+- ✅ `pnpm repair:web-dist`
+- ✅ `pnpm audit:workspace-permissions`
+- ✅ `pnpm test:workspace-audit-scripts`

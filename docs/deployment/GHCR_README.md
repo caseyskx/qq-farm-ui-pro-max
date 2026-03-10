@@ -7,8 +7,8 @@
 QQ 农场助手 Docker 镜像已同步推送到 GitHub Container Registry：
 
 ```
-ghcr.io/smdk000/qq-farm-bot-ui:latest
-ghcr.io/smdk000/qq-farm-bot-ui:3.6.0
+ghcr.io/smdk000/qq-farm-ui-pro-max:latest
+ghcr.io/smdk000/qq-farm-ui-pro-max:4.5.17
 ```
 
 ## 🔐 认证方式
@@ -36,7 +36,7 @@ version: '3.8'
 
 services:
   qq-farm-bot-ui:
-    image: ghcr.io/smdk000/qq-farm-bot-ui:latest
+    image: ghcr.io/smdk000/qq-farm-ui-pro-max:latest
     container_name: qq-farm-bot-ui
     restart: unless-stopped
     ports:
@@ -62,7 +62,7 @@ docker run -d \
   -v ./backup:/app/core/backup \
   -e ADMIN_PASSWORD=your_password \
   -e TZ=Asia/Shanghai \
-  ghcr.io/smdk000/qq-farm-bot-ui:latest
+  ghcr.io/smdk000/qq-farm-ui-pro-max:latest
 ```
 
 ## 📊 多平台支持
@@ -80,7 +80,7 @@ docker stop qq-farm-bot-ui
 docker rm qq-farm-bot-ui
 
 # 拉取 GHCR 镜像
-docker pull ghcr.io/smdk000/qq-farm-bot-ui:latest
+docker pull ghcr.io/smdk000/qq-farm-ui-pro-max:latest
 
 # 使用相同配置启动（数据卷保持不变）
 docker run -d \
@@ -89,7 +89,7 @@ docker run -d \
   -p 3080:3000 \
   -v ./data:/app/core/data \
   -e ADMIN_PASSWORD=your_password \
-  ghcr.io/smdk000/qq-farm-bot-ui:latest
+  ghcr.io/smdk000/qq-farm-ui-pro-max:latest
 ```
 
 ## 📋 版本标签
@@ -97,13 +97,13 @@ docker run -d \
 | 标签 | 说明 |
 |------|------|
 | `latest` | 最新稳定版本 |
-| `3.6.0` | 特定版本 |
+| `4.5.17` | 特定版本 |
 | `main` | 主分支最新构建 |
 
 ## 🔗 相关链接
 
-- **GitHub Packages**: https://github.com/users/smdk000/packages/container/package/qq-farm-bot-ui
-- **GitHub 仓库**: https://github.com/smdk000/qq-farm-bot-ui
+- **GitHub Packages**: https://github.com/users/smdk000/packages/container/package/qq-farm-ui-pro-max
+- **GitHub 仓库**: https://github.com/smdk000/qq-farm-ui-pro-max
 - **Docker Hub**: https://hub.docker.com/r/smdk000/qq-farm-bot-ui
 
 ## ⚠️ 注意事项

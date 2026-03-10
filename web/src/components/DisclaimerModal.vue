@@ -39,31 +39,31 @@ const disclaimerHtml = `
     <div v-if="show" class="fixed inset-0 z-[9999] flex items-center justify-center overflow-hidden px-4">
       <!-- Apple风格超强高斯模糊背景遮罩 -->
       <div
-        class="absolute inset-0 bg-white/20 backdrop-blur-md transition-opacity dark:bg-black/40"
+        class="disclaimer-overlay absolute inset-0 transition-opacity"
         @click.stop
       />
 
       <!-- 弹窗本体 (仿苹果空间悬浮感) -->
       <div
-        class="relative max-h-[90vh] max-w-2xl w-full flex flex-col transform overflow-hidden border border-white/50 rounded-3xl bg-white/80 shadow-2xl shadow-black/10 backdrop-blur-2xl transition-all dark:border-white/10 dark:bg-[#1C1C1E]/80 dark:shadow-black/50"
+        class="disclaimer-shell relative max-h-[90vh] max-w-2xl w-full flex flex-col transform overflow-hidden border rounded-3xl shadow-2xl backdrop-blur-2xl transition-all"
         @click.stop
       >
         <!-- 头部标题 -->
-        <div class="shrink-0 border-b border-gray-200/50 px-6 pb-4 pt-6 text-center dark:border-gray-800/50">
-          <div class="mx-auto mb-3 h-12 w-12 flex items-center justify-center rounded-xl from-blue-500 to-indigo-500 bg-gradient-to-tr shadow-lg">
-            <div class="i-carbon-warning-alt text-2xl text-white drop-shadow-md" />
+        <div class="disclaimer-header shrink-0 px-6 pb-4 pt-6 text-center">
+          <div class="disclaimer-badge-shell mx-auto mb-3 h-12 w-12 flex items-center justify-center rounded-xl shadow-lg">
+            <div class="disclaimer-warning-icon i-carbon-warning-alt text-2xl drop-shadow-md" />
           </div>
-          <h3 class="text-xl text-gray-900 font-bold tracking-tight dark:text-white">
+          <h3 class="glass-text-main text-xl font-bold tracking-tight">
             软件使用免责声明与条款
           </h3>
-          <p class="mt-1.5 text-xs text-gray-500 font-medium dark:text-gray-400">
+          <p class="glass-text-muted mt-1.5 text-xs font-medium">
             请仔细阅读并同意以下条款以继续使用
           </p>
         </div>
 
         <!-- 可滚动内容区 -->
         <div class="custom-scrollbar flex-1 overflow-y-auto overscroll-contain px-6 py-4">
-          <div class="prose dark:prose-invert prose-sm max-w-none text-[14px] text-gray-700 leading-relaxed space-y-3 dark:text-gray-300">
+          <div class="disclaimer-prose prose prose-sm max-w-none text-[14px] leading-relaxed space-y-3">
             <template v-for="(paragraph, index) in disclaimerHtml.split('\n\n')" :key="index">
               <p v-if="paragraph.trim()" class="apple-text mb-4 text-justify" v-html="paragraph.replace(/\n/g, '<br/>')" />
             </template>
@@ -71,32 +71,32 @@ const disclaimerHtml = `
         </div>
 
         <!-- 底部作者版权声明 -->
-        <div class="shrink-0 border-t border-gray-200/50 bg-gray-50/50 px-6 py-2.5 text-center dark:border-gray-800/50 dark:bg-black/20">
-          <p class="text-xs text-gray-500 font-medium tracking-wide dark:text-gray-400/80">
-            © {{ new Date().getFullYear() }} 御农 System | 架构与开发：<span class="text-blue-500 font-semibold dark:text-blue-400">smdk000</span>
+        <div class="disclaimer-meta shrink-0 px-6 py-2.5 text-center">
+          <p class="glass-text-muted text-xs font-medium tracking-wide">
+            © {{ new Date().getFullYear() }} 御农 System | 架构与开发：<span class="text-primary font-semibold">smdk000</span>
           </p>
         </div>
 
         <!-- 底部毛玻璃悬浮操作栏 -->
-        <div class="flex shrink-0 flex-col items-center justify-between gap-3 border-t border-gray-200/50 bg-white/50 px-6 py-4 sm:flex-row dark:border-gray-800/50 dark:bg-[#1C1C1E]/50">
+        <div class="disclaimer-footer-bar flex shrink-0 flex-col items-center justify-between gap-3 border-t px-6 py-4 sm:flex-row">
           <!-- 左侧：社区互动卡片 -->
           <div class="order-last w-full flex items-center justify-between gap-3 sm:order-first sm:w-auto sm:justify-start">
             <a
               href="https://qm.qq.com/cgi-bin/qm/qr?k=&group_code=227916149"
               target="_blank"
               rel="noopener noreferrer"
-              class="group flex flex-1 items-center justify-center gap-1.5 border border-gray-200/50 rounded-xl bg-white/60 px-3 py-2 text-xs text-gray-500 font-semibold no-underline shadow-sm transition-all sm:flex-none dark:border-gray-700/50 dark:bg-gray-800/50 hover:bg-gray-100 dark:text-gray-400 hover:text-gray-900 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+              class="disclaimer-link group flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold no-underline shadow-sm transition-all sm:flex-none"
             >
-              <div class="i-carbon-chat text-sm text-blue-500 transition-transform group-hover:scale-110 dark:text-blue-400" />
+              <div class="disclaimer-link-icon disclaimer-link-icon--chat i-carbon-chat text-sm transition-transform group-hover:scale-110" />
               <span>加入技术群</span>
             </a>
             <a
               href="https://github.com/smdk000/qq-farm-bot-ui"
               target="_blank"
               rel="noopener noreferrer"
-              class="group flex flex-1 items-center justify-center gap-1.5 border border-gray-200/50 rounded-xl bg-white/60 px-3 py-2 text-xs text-gray-500 font-semibold no-underline shadow-sm transition-all sm:flex-none dark:border-gray-700/50 dark:bg-gray-800/50 hover:bg-gray-100 dark:text-gray-400 hover:text-gray-900 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+              class="disclaimer-link group flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold no-underline shadow-sm transition-all sm:flex-none"
             >
-              <div class="i-carbon-star text-sm text-yellow-500 transition-transform group-hover:scale-110 dark:text-yellow-400" />
+              <div class="disclaimer-link-icon disclaimer-link-icon--star i-carbon-star text-sm transition-transform group-hover:scale-110" />
               <span>给作者点赞</span>
             </a>
           </div>
@@ -105,14 +105,14 @@ const disclaimerHtml = `
           <div class="w-full flex flex-1 items-center gap-3 sm:w-auto sm:flex-none">
             <button
               type="button"
-              class="order-2 w-full flex-1 rounded-2xl bg-gray-100/80 px-6 py-2.5 text-sm text-gray-600 font-semibold transition-colors sm:order-1 sm:w-auto dark:bg-gray-800/80 hover:bg-gray-200 sm:py-3 sm:text-[15px] dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:hover:bg-gray-700"
+              class="disclaimer-secondary order-2 w-full flex-1 rounded-2xl px-6 py-2.5 text-sm font-semibold transition-colors sm:order-1 sm:w-auto sm:py-3 sm:text-[15px] focus:outline-none"
               @click="emit('decline')"
             >
               拒绝并退出
             </button>
             <button
               type="button"
-              class="order-1 w-full flex-1 rounded-2xl bg-blue-600 px-6 py-2.5 text-sm text-white font-semibold shadow-blue-500/20 shadow-md transition-all sm:order-2 sm:w-auto active:scale-[0.98] dark:bg-blue-600 hover:bg-blue-500 sm:py-3 sm:text-[15px] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:hover:bg-blue-500 dark:focus:ring-offset-gray-900"
+              class="disclaimer-primary order-1 w-full flex-1 rounded-2xl px-6 py-2.5 text-sm font-semibold shadow-md transition-all sm:order-2 sm:w-auto active:scale-[0.98] sm:py-3 sm:text-[15px] focus:outline-none"
               @click="emit('agree')"
             >
               同意并继续
@@ -144,14 +144,14 @@ const disclaimerHtml = `
   display: block;
   font-size: 15px;
   font-weight: 700;
-  color: #111827; /* 针对浅色模式 */
+  color: var(--ui-text-1); /* 针对浅色模式 */
   margin-top: 1rem;
   margin-bottom: 0.25rem;
   letter-spacing: -0.01em;
 }
 
 .dark .apple-text :deep(b) {
-  color: #f9fafb; /* 针对深色模式 */
+  color: var(--ui-text-1); /* 针对深色模式 */
 }
 
 /* iOS 风格的滚动条 */
@@ -164,12 +164,106 @@ const disclaimerHtml = `
   margin-bottom: 8px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
+  background-color: var(--ui-scrollbar-thumb);
   border-radius: 20px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.5);
+  background-color: var(--ui-scrollbar-thumb-hover);
+}
+
+.disclaimer-overlay {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 18%, var(--ui-overlay-backdrop));
+  backdrop-filter: blur(14px);
+}
+
+.disclaimer-shell {
+  background: color-mix(in srgb, var(--ui-bg-surface) 88%, transparent);
+  border-color: color-mix(in srgb, var(--ui-border-subtle) 92%, transparent);
+  box-shadow: 0 28px 56px var(--ui-shadow-panel-strong);
+}
+
+.dark .disclaimer-shell {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent);
+}
+
+.disclaimer-header,
+.disclaimer-meta,
+.disclaimer-footer-bar {
+  border-color: var(--ui-border-subtle);
+}
+
+.disclaimer-badge-shell {
+  background: linear-gradient(
+    135deg,
+    var(--ui-brand-600),
+    color-mix(in srgb, var(--ui-brand-500) 62%, var(--ui-status-info) 38%)
+  );
+}
+
+.disclaimer-warning-icon {
+  color: var(--ui-text-on-brand);
+}
+
+.disclaimer-prose {
+  color: var(--ui-text-2);
+}
+
+.disclaimer-meta {
+  background: color-mix(in srgb, var(--ui-bg-surface) 64%, transparent);
+}
+
+.disclaimer-footer-bar {
+  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent);
+}
+
+.dark .disclaimer-footer-bar {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 72%, transparent);
+}
+
+.disclaimer-link {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 76%, transparent);
+  color: var(--ui-text-2);
+}
+
+.disclaimer-link-icon--chat {
+  color: var(--ui-status-info);
+}
+
+.disclaimer-link-icon--star {
+  color: var(--ui-status-warning);
+}
+
+.disclaimer-link:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 92%, transparent);
+  color: var(--ui-text-1);
+}
+
+.disclaimer-link:focus-visible,
+.disclaimer-secondary:focus-visible,
+.disclaimer-primary:focus-visible {
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.disclaimer-secondary {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+  color: var(--ui-text-2);
+}
+
+.disclaimer-secondary:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 96%, transparent);
+  color: var(--ui-text-1);
+}
+
+.disclaimer-primary {
+  background: linear-gradient(135deg, var(--ui-brand-600), var(--ui-brand-500));
+  color: var(--ui-text-on-brand);
+  box-shadow: 0 14px 24px color-mix(in srgb, var(--ui-brand-500) 24%, transparent);
+}
+
+.disclaimer-primary:hover {
+  filter: brightness(1.04);
 }
 </style>

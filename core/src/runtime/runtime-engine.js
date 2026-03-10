@@ -24,6 +24,7 @@ function createRuntimeEngine(options = {}) {
   const onLog = typeof options.onLog === 'function' ? options.onLog : null
   const onAccountLog = typeof options.onAccountLog === 'function' ? options.onAccountLog : null
   const startAdminServer = typeof options.startAdminServer === 'function' ? options.startAdminServer : null
+  const stopAdminServer = typeof options.stopAdminServer === 'function' ? options.stopAdminServer : null
 
   const workerControls = { startWorker: null, restartWorker: null }
   const runtimeState = createRuntimeState({
@@ -130,7 +131,7 @@ function createRuntimeEngine(options = {}) {
       return await reportService.sendHourlyReport(accountRef)
     if (mode === 'daily')
       return await reportService.sendDailyReport(accountRef)
-    throw new Error('Unsupported report mode')
+    throw new Error('不支持的经营汇报模式')
   }
 
   runtimeEvents.on('log', (entry) => {
@@ -195,7 +196,7 @@ function createRuntimeEngine(options = {}) {
     const shouldAutoStartAccounts = options.autoStartAccounts !== false
 
     if (shouldStartAdminServer && startAdminServer) {
-      startAdminServer(dataProvider)
+      await Promise.resolve(startAdminServer(dataProvider))
       reportService.start()
     }
 
@@ -210,12 +211,31 @@ function createRuntimeEngine(options = {}) {
     }
   }
 
+  async function stop(options = {}) {
+    const shouldStopAccounts = options.stopAccounts !== false
+    const shouldStopReports = options.stopReportService !== false
+    const shouldStopAdminServer = options.stopAdminServer !== false
+
+    if (shouldStopReports) {
+      reportService.stop()
+    }
+
+    if (shouldStopAccounts) {
+      stopAllAccounts()
+    }
+
+    if (shouldStopAdminServer && stopAdminServer) {
+      await Promise.resolve(stopAdminServer())
+    }
+  }
+
   return {
     store,
     runtimeEvents,
     workers,
     dataProvider,
     start,
+    stop,
     startAllAccounts,
     stopAllAccounts,
     broadcastConfigToWorkers,

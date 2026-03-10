@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import LeaderboardModal from '@/components/LeaderboardModal.vue'
 import NotificationBell from '@/components/NotificationBell.vue'
 import Sidebar from '@/components/Sidebar.vue'
@@ -8,11 +9,18 @@ import ThemeSettingDrawer from '@/components/ThemeSettingDrawer.vue'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()
+const route = useRoute()
 const { sidebarOpen } = storeToRefs(appStore)
 
 const showThemeDrawer = ref(false)
 const showLeaderboard = ref(false)
 const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspaceVisualPreset}`)
+const workspaceContentClass = computed(() => {
+  const mode = String(route.meta?.layoutMode || 'fluid')
+  return ['standard', 'wide', 'fluid'].includes(mode)
+    ? `workspace-content-shell--${mode}`
+    : 'workspace-content-shell--fluid'
+})
 </script>
 
 <template>
@@ -23,7 +31,7 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
     <!-- Mobile Sidebar Overlay -->
     <div
       v-if="sidebarOpen"
-      class="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm transition-opacity xl:hidden"
+      class="layout-overlay fixed inset-0 z-40 backdrop-blur-sm transition-opacity xl:hidden"
       @click="appStore.closeSidebar"
     />
 
@@ -31,9 +39,9 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
 
     <main class="relative z-10 h-full min-w-0 flex flex-1 flex-col overflow-hidden">
       <!-- Top Bar (Mobile/Tablet only or for additional actions) -->
-      <header class="glass-panel h-14 flex shrink-0 items-center justify-between border-b border-gray-100/50 px-4 xl:hidden dark:border-gray-700/50">
+      <header class="layout-mobile-header glass-panel h-14 flex shrink-0 items-center justify-between border-b xl:hidden">
         <button
-          class="flex items-center justify-center rounded-lg p-2 text-gray-500 hover:bg-gray-100/50 dark:text-gray-400 dark:hover:bg-gray-700/50"
+          class="layout-mobile-menu-btn flex items-center justify-center rounded-lg p-2"
           @click="appStore.toggleSidebar"
         >
           <div class="i-carbon-menu text-xl" />
@@ -48,13 +56,13 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
       <!-- Main Content Area -->
       <div class="relative flex flex-1 flex-col overflow-hidden">
         <!-- 浮动操作区域 (配置与通知) -->
-        <div class="absolute right-4 top-4 z-40 flex items-center gap-3">
+        <div class="workspace-floating-actions absolute z-40 flex items-center gap-3">
           <button
-            class="glass-panel h-10 w-10 flex items-center justify-center border border-amber-200/50 rounded-full from-amber-50 to-orange-100 bg-gradient-to-br shadow-md transition-all duration-300 hover:rotate-12 hover:scale-110 dark:border-amber-700/50 dark:from-amber-900/40 dark:to-orange-900/40 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 dark:focus:ring-offset-gray-900"
+            class="layout-trophy-btn glass-panel h-10 w-10 flex items-center justify-center border rounded-full shadow-md transition-all duration-300 hover:rotate-12 hover:scale-110 focus:outline-none"
             title="平台排行榜"
             @click="showLeaderboard = true"
           >
-            <div class="i-carbon-trophy text-xl text-amber-600 dark:text-amber-400" />
+            <div class="i-carbon-trophy layout-trophy-icon text-xl" />
           </button>
           <NotificationBell />
           <button
@@ -66,15 +74,17 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
           </button>
         </div>
 
-        <div class="workspace-scroll custom-scrollbar mt-12 flex flex-1 flex-col overflow-y-auto p-3 md:mt-0 md:p-6 sm:p-4 xl:p-7">
-          <RouterView v-slot="{ Component, route }">
-            <Transition name="slide-fade" mode="out-in">
-              <component :is="Component" v-if="Component" :key="route.fullPath" />
-              <div v-else :key="`loading-${route.fullPath}`" class="flex flex-1 items-center justify-center py-20 text-gray-400">
-                <div class="i-svg-spinners-ring-resize text-3xl" />
-              </div>
-            </Transition>
-          </RouterView>
+        <div class="workspace-scroll custom-scrollbar flex flex-1 flex-col overflow-y-auto">
+          <div class="workspace-content-shell w-full" :class="workspaceContentClass">
+            <RouterView v-slot="{ Component, route: currentRoute }">
+              <Transition name="slide-fade" mode="out-in">
+                <component :is="Component" v-if="Component" :key="currentRoute.fullPath" />
+                <div v-else :key="`loading-${currentRoute.fullPath}`" class="ui-text-3 flex flex-1 items-center justify-center py-20">
+                  <div class="i-svg-spinners-ring-resize text-3xl" />
+                </div>
+              </Transition>
+            </RouterView>
+          </div>
         </div>
       </div>
     </main>
@@ -90,70 +100,82 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
 <style scoped>
 .workspace-shell {
   position: relative;
-  --workspace-panel-bg: rgba(255, 255, 255, 0.74);
-  --workspace-panel-border: rgba(255, 255, 255, 0.22);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 82%, transparent);
+  --workspace-panel-border: var(--ui-border-subtle);
   --workspace-panel-blur: 18px;
-  --workspace-panel-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
-  --workspace-field-bg: rgba(255, 255, 255, 0.14);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.24);
+  --workspace-panel-shadow: 0 18px 48px var(--ui-shadow-panel);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 62%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent);
+}
+
+.workspace-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.42;
+  background:
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--ui-brand-500) 10%, transparent), transparent 20%),
+    radial-gradient(circle at 88% 78%, color-mix(in srgb, var(--ui-brand-500) 8%, transparent), transparent 24%);
 }
 
 :global(.dark) .workspace-shell {
-  --workspace-panel-bg: rgba(15, 23, 42, 0.62);
-  --workspace-panel-border: rgba(255, 255, 255, 0.12);
-  --workspace-panel-shadow: 0 18px 48px rgba(2, 6, 23, 0.32);
-  --workspace-field-bg: rgba(255, 255, 255, 0.08);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.14);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 74%, transparent);
+  --workspace-panel-border: var(--ui-border-subtle);
+  --workspace-panel-shadow: 0 18px 48px var(--ui-shadow-panel-strong);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 56%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 72%, transparent);
 }
 
 .workspace-shell--console {
-  --workspace-panel-bg: rgba(255, 255, 255, 0.68);
-  --workspace-panel-border: rgba(255, 255, 255, 0.22);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 78%, transparent);
+  --workspace-panel-border: var(--ui-border-subtle);
   --workspace-panel-blur: 18px;
-  --workspace-field-bg: rgba(255, 255, 255, 0.14);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.24);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 62%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent);
 }
 
 :global(.dark) .workspace-shell--console {
-  --workspace-panel-bg: rgb(var(--color-primary-950) / 0.5);
-  --workspace-panel-border: rgb(var(--color-primary-300) / 0.12);
-  --workspace-panel-shadow: 0 20px 52px rgba(2, 6, 23, 0.32);
-  --workspace-field-bg: rgba(255, 255, 255, 0.08);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.14);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 70%, transparent);
+  --workspace-panel-border: color-mix(in srgb, var(--ui-border-subtle) 76%, var(--ui-brand-500) 24%);
+  --workspace-panel-shadow: 0 20px 52px var(--ui-shadow-panel-strong);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 56%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 72%, transparent);
 }
 
 .workspace-shell--poster {
-  --workspace-panel-bg: rgba(255, 255, 255, 0.42);
-  --workspace-panel-border: rgba(255, 255, 255, 0.34);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 64%, transparent);
+  --workspace-panel-border: color-mix(in srgb, var(--ui-border-subtle) 64%, var(--ui-border-strong) 36%);
   --workspace-panel-blur: 22px;
-  --workspace-panel-shadow: 0 22px 60px rgba(15, 23, 42, 0.14);
-  --workspace-field-bg: rgba(255, 255, 255, 0.12);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.22);
+  --workspace-panel-shadow: 0 22px 60px var(--ui-shadow-panel);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 56%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 76%, transparent);
 }
 
 :global(.dark) .workspace-shell--poster {
-  --workspace-panel-bg: rgb(var(--color-primary-950) / 0.36);
-  --workspace-panel-border: rgb(var(--color-primary-200) / 0.18);
-  --workspace-panel-shadow: 0 22px 68px rgba(2, 6, 23, 0.34);
-  --workspace-field-bg: rgba(255, 255, 255, 0.06);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.12);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 60%, transparent);
+  --workspace-panel-border: color-mix(in srgb, var(--ui-border-subtle) 72%, var(--ui-brand-500) 28%);
+  --workspace-panel-shadow: 0 22px 68px var(--ui-shadow-panel-strong);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 52%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 68%, transparent);
 }
 
 .workspace-shell--pure_glass {
-  --workspace-panel-bg: rgba(255, 255, 255, 0.28);
-  --workspace-panel-border: rgba(255, 255, 255, 0.4);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 52%, transparent);
+  --workspace-panel-border: color-mix(in srgb, var(--ui-border-subtle) 58%, var(--ui-border-strong) 42%);
   --workspace-panel-blur: 28px;
-  --workspace-panel-shadow: 0 24px 72px rgba(15, 23, 42, 0.12);
-  --workspace-field-bg: rgba(255, 255, 255, 0.1);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.18);
+  --workspace-panel-shadow: 0 24px 72px var(--ui-shadow-panel);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 50%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 66%, transparent);
 }
 
 :global(.dark) .workspace-shell--pure_glass {
-  --workspace-panel-bg: rgba(10, 14, 24, 0.28);
-  --workspace-panel-border: rgb(var(--color-primary-200) / 0.22);
-  --workspace-panel-shadow: 0 24px 72px rgba(2, 6, 23, 0.38);
-  --workspace-field-bg: rgba(255, 255, 255, 0.05);
-  --workspace-field-focus-bg: rgba(255, 255, 255, 0.1);
+  --workspace-panel-bg: color-mix(in srgb, var(--ui-bg-surface) 50%, transparent);
+  --workspace-panel-border: color-mix(in srgb, var(--ui-border-subtle) 70%, var(--ui-brand-500) 30%);
+  --workspace-panel-shadow: 0 24px 72px var(--ui-shadow-panel-strong);
+  --workspace-field-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 48%, transparent);
+  --workspace-field-focus-bg: color-mix(in srgb, var(--ui-bg-surface-raised) 62%, transparent);
 }
 
 .workspace-shell__wash {
@@ -162,14 +184,26 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
   z-index: 0;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 18%, transparent 72%, rgba(0, 0, 0, 0.1)),
-    radial-gradient(circle at 12% 12%, rgba(255, 255, 255, 0.1), transparent 26%);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-text-1) 6%, transparent),
+      transparent 18%,
+      transparent 72%,
+      color-mix(in srgb, var(--ui-overlay-backdrop) 30%, transparent)
+    ),
+    radial-gradient(circle at 12% 12%, color-mix(in srgb, var(--ui-text-1) 8%, transparent), transparent 26%);
 }
 
 :global(.dark) .workspace-shell__wash {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 18%, transparent 70%, rgba(2, 6, 23, 0.16)),
-    radial-gradient(circle at 12% 12%, rgb(var(--color-primary-300) / 0.08), transparent 26%);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-text-1) 5%, transparent),
+      transparent 18%,
+      transparent 70%,
+      color-mix(in srgb, var(--ui-overlay-backdrop) 42%, transparent)
+    ),
+    radial-gradient(circle at 12% 12%, color-mix(in srgb, var(--ui-brand-500) 10%, transparent), transparent 26%);
 }
 
 .workspace-shell__glow {
@@ -179,7 +213,7 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
   border-radius: 9999px;
   filter: blur(64px);
   opacity: 0.34;
-  background: rgb(var(--color-primary-400) / 0.16);
+  background: color-mix(in srgb, var(--ui-brand-500) 20%, transparent);
 }
 
 .workspace-shell__glow--left {
@@ -228,6 +262,37 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
 .workspace-scroll {
   position: relative;
   z-index: 1;
+  padding: calc(var(--workspace-gutter-block) + env(safe-area-inset-top, 0px))
+    calc(var(--workspace-gutter-inline) + env(safe-area-inset-right, 0px))
+    calc(var(--workspace-gutter-block) + env(safe-area-inset-bottom, 0px))
+    calc(var(--workspace-gutter-inline) + env(safe-area-inset-left, 0px));
+  scrollbar-gutter: stable;
+}
+
+.workspace-content-shell {
+  width: 100%;
+  min-height: 100%;
+  margin: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-content-shell--standard {
+  max-width: var(--workspace-content-max-width-standard, 82rem);
+}
+
+.workspace-content-shell--wide {
+  max-width: var(--workspace-content-max-width-wide, 104rem);
+}
+
+.workspace-content-shell--fluid {
+  max-width: none;
+  margin: 0;
+}
+
+.workspace-content-shell > * {
+  width: 100%;
+  min-width: 0;
 }
 
 /* Slide Fade Transition */
@@ -254,10 +319,106 @@ const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspac
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
+  background-color: var(--ui-scrollbar-thumb);
   border-radius: 3px;
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.5);
+  background-color: var(--ui-scrollbar-thumb-hover);
+}
+
+.layout-overlay {
+  background: color-mix(in srgb, var(--ui-bg-canvas) 45%, var(--ui-overlay-backdrop) 55%);
+}
+
+.layout-mobile-header {
+  border-color: var(--ui-border-subtle);
+  padding-inline: calc(var(--workspace-gutter-inline) + env(safe-area-inset-left, 0px))
+    calc(var(--workspace-gutter-inline) + env(safe-area-inset-right, 0px));
+}
+
+.layout-mobile-menu-btn {
+  color: var(--ui-text-2);
+}
+
+.layout-mobile-menu-btn:hover {
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-1);
+}
+
+.layout-trophy-btn {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 30%, var(--ui-border-subtle));
+  background:
+    radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--ui-text-on-brand) 32%, transparent), transparent 60%),
+    color-mix(in srgb, var(--ui-status-warning-soft) 70%, transparent);
+  box-shadow: 0 10px 20px -10px color-mix(in srgb, var(--ui-status-warning) 45%, transparent);
+}
+
+.layout-trophy-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.layout-trophy-icon {
+  color: var(--ui-status-warning);
+}
+
+.workspace-floating-actions {
+  top: calc(var(--workspace-floating-offset) + env(safe-area-inset-top, 0px));
+  right: calc(var(--workspace-floating-offset) + env(safe-area-inset-right, 0px));
+  pointer-events: none;
+}
+
+.workspace-floating-actions > * {
+  pointer-events: auto;
+}
+
+@media (max-width: 1279px) {
+  .workspace-scroll {
+    padding-top: calc(
+      var(--workspace-gutter-block) + var(--workspace-floating-clearance) + env(safe-area-inset-top, 0px)
+    );
+  }
+}
+
+@media (min-width: 1440px) {
+  .workspace-shell::after {
+    opacity: 0.56;
+    background:
+      radial-gradient(circle at 80% 16%, color-mix(in srgb, var(--ui-brand-500) 11%, transparent), transparent 21%),
+      radial-gradient(circle at 90% 76%, color-mix(in srgb, var(--ui-brand-500) 9%, transparent), transparent 26%),
+      radial-gradient(circle at 62% 92%, color-mix(in srgb, var(--ui-brand-500) 6%, transparent), transparent 24%);
+  }
+
+  .workspace-shell__glow--left {
+    width: 24rem;
+    height: 24rem;
+  }
+
+  .workspace-shell__glow--right {
+    right: 3%;
+    width: 22rem;
+    height: 22rem;
+  }
+}
+
+@media (min-width: 1920px) {
+  .workspace-shell::after {
+    opacity: 0.64;
+    background:
+      radial-gradient(circle at 80% 15%, color-mix(in srgb, var(--ui-brand-500) 12%, transparent), transparent 22%),
+      radial-gradient(circle at 92% 74%, color-mix(in srgb, var(--ui-brand-500) 10%, transparent), transparent 28%),
+      radial-gradient(circle at 66% 88%, color-mix(in srgb, var(--ui-brand-500) 7%, transparent), transparent 26%);
+  }
+
+  .workspace-shell__glow--left {
+    left: 3%;
+    width: 26rem;
+    height: 26rem;
+  }
+
+  .workspace-shell__glow--right {
+    right: 2%;
+    width: 24rem;
+    height: 24rem;
+  }
 }
 </style>

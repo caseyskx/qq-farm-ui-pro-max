@@ -26,7 +26,7 @@
 
 ```bash
 cd deploy/scripts
-bash build-all-and-push.sh 4.5.17
+bash build-all-and-push.sh 4.5.18
 ```
 
 脚本中选择：
@@ -37,13 +37,13 @@ bash build-all-and-push.sh 4.5.17
 生成结果在：
 
 ```bash
-deploy/offline/qq-farm-bot-v4.5.17-offline.tar.gz
+deploy/offline/qq-farm-bot-v4.5.18-offline.tar.gz
 ```
 
 上传到服务器后执行：
 
 ```bash
-tar xzf qq-farm-bot-v4.5.17-offline.tar.gz
+tar xzf qq-farm-bot-v4.5.18-offline.tar.gz
 cd qq-farm-bot-release
 cp .env.example .env
 vi .env
@@ -66,7 +66,7 @@ curl http://127.0.0.1:3080/api/ping
 
 ```bash
 cd deploy/scripts
-bash build-all-and-push.sh 4.5.17
+bash build-all-and-push.sh 4.5.18
 ```
 
 需要的文件：
@@ -106,7 +106,7 @@ curl http://127.0.0.1:3080/api/ping
 
 ```bash
 cd /opt/qq-farm-bot-current
-SKIP_DOCKER_PULL=1 ./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.17
+SKIP_DOCKER_PULL=1 ./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.18
 
 # 如果只想先补旧数据库结构
 ./repair-mysql.sh --backup
@@ -129,16 +129,16 @@ cd /opt/qq-farm-bot-current 2>/dev/null || cd /opt
 curl -fsSLo repair-deploy.sh https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/repair-deploy.sh
 chmod +x repair-deploy.sh
 ./repair-deploy.sh --backup
-./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.17
+./update-app.sh --image smdk000/qq-farm-bot-ui:4.5.18
 ```
 
 如果服务器不能访问 GitHub，就把本地生成的部署包中的 `repair-deploy.sh`、`update-app.sh`、`repair-mysql.sh` 一并传上去执行。
 
 补充说明：
 
-- 从 `v4.5.17` 开始，部署目录会额外提供 `repair-deploy.sh`，用于补齐旧部署目录缺失的脚本、编排文件、初始化 SQL 和 current 链接。
+- 从 `v4.5.18` 开始，部署目录会额外提供 `repair-deploy.sh`，用于补齐旧部署目录缺失的脚本、编排文件、初始化 SQL 和 current 链接。
 - `repair-deploy.sh` 只修部署包本身；需要修数据库结构时，用 `repair-mysql.sh`。
-- 所以旧服务器要彻底消除“添加账号后切换/刷新消失”、体验卡异常，以及卡密管理结构缺失问题，关键是修完部署包后再把主程序镜像升级到 `v4.5.17+`。
+- 所以旧服务器要彻底消除“添加账号后切换/刷新消失”、体验卡异常，以及卡密管理结构缺失问题，关键是修完部署包后再把主程序镜像升级到 `v4.5.18+`。
 
 ## 如果服务器可以直连官方源
 

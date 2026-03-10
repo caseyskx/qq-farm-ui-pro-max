@@ -3,12 +3,15 @@ const process = require('node:process');
  * 运行时存储 - 自动化开关、种子偏好、账号管理
  */
 
-const { getDataFile, ensureDataDir } = require('../config/runtime-paths');
-const { getPool, transaction } = require('../services/mysql-db');
-const { readTextFile, readJsonFile, writeJsonFileAtomic } = require('../services/json-db');
+const { getDataFile } = require('../config/runtime-paths');
+const { getPool, transaction, isMysqlInitialized } = require('../services/mysql-db');
+const { createModuleLogger } = require('../services/logger');
+const { getSystemSettings, setSystemSettings, SYSTEM_SETTING_KEYS } = require('../services/system-settings');
+const { readJsonFile } = require('../services/json-db');
+const { DEFAULT_UI_CONFIG, normalizeUIConfig } = require('../utils/ui-config');
 
 const STORE_FILE = getDataFile('store.json');
-const ACCOUNTS_FILE = getDataFile('accounts.json');
+const GLOBAL_CONFIG_SYSTEM_SETTING_KEY = SYSTEM_SETTING_KEYS.GLOBAL_CONFIG;
 const ALLOWED_PLANTING_STRATEGIES = ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit'];
 const PUSHOO_CHANNELS = new Set([
     'webhook', 'qmsg', 'serverchan', 'pushplus', 'pushplushxtrip',
@@ -112,20 +115,6 @@ const DEFAULT_TRADE_CONFIG = {
         batchSize: 15,
         previewBeforeManualSell: false,
     },
-};
-const DEFAULT_UI_CONFIG = {
-    theme: 'dark',
-    loginBackground: '',
-    backgroundScope: 'login_only',
-    loginBackgroundOverlayOpacity: 30,
-    loginBackgroundBlur: 2,
-    workspaceVisualPreset: 'console',
-    appBackgroundOverlayOpacity: 54,
-    appBackgroundBlur: 8,
-    colorTheme: 'default',
-    performanceMode: true,
-    themeBackgroundLinked: false,
-    timestamp: 0,
 };
 // ============ 全局配置 ============
 const DEFAULT_ACCOUNT_CONFIG = {
@@ -232,77 +221,6 @@ const DEFAULT_CLUSTER_CONFIG = {
     dispatcherStrategy: 'round_robin',
 };
 
-function clampUiNumber(value, fallback, min, max) {
-    const num = Number(value);
-    if (!Number.isFinite(num)) return fallback;
-    return Math.min(max, Math.max(min, Math.round(num)));
-}
-
-function normalizeUIConfig(input, fallback = DEFAULT_UI_CONFIG) {
-    const src = (input && typeof input === 'object') ? input : {};
-    const base = (fallback && typeof fallback === 'object') ? fallback : DEFAULT_UI_CONFIG;
-    const rawTheme = String(src.theme !== undefined ? src.theme : base.theme || DEFAULT_UI_CONFIG.theme).toLowerCase();
-    const theme = rawTheme === 'light' || rawTheme === 'auto' ? rawTheme : 'dark';
-    const rawScope = String(src.backgroundScope !== undefined ? src.backgroundScope : base.backgroundScope || DEFAULT_UI_CONFIG.backgroundScope).toLowerCase();
-    const backgroundScope = new Set(['login_only', 'login_and_app', 'global']).has(rawScope)
-        ? rawScope
-        : DEFAULT_UI_CONFIG.backgroundScope;
-    const loginBackground = (src.loginBackground !== undefined && src.loginBackground !== null)
-        ? String(src.loginBackground).trim().slice(0, 2048)
-        : String(base.loginBackground || DEFAULT_UI_CONFIG.loginBackground);
-    const rawColorTheme = (src.colorTheme !== undefined && src.colorTheme !== null)
-        ? String(src.colorTheme).trim()
-        : String(base.colorTheme || DEFAULT_UI_CONFIG.colorTheme);
-    const colorTheme = rawColorTheme || DEFAULT_UI_CONFIG.colorTheme;
-    const rawWorkspaceVisualPreset = String(
-        src.workspaceVisualPreset !== undefined
-            ? src.workspaceVisualPreset
-            : (base.workspaceVisualPreset || DEFAULT_UI_CONFIG.workspaceVisualPreset),
-    ).toLowerCase();
-    const workspaceVisualPreset = new Set(['console', 'poster', 'pure_glass']).has(rawWorkspaceVisualPreset)
-        ? rawWorkspaceVisualPreset
-        : DEFAULT_UI_CONFIG.workspaceVisualPreset;
-    const rawTimestamp = Number.parseInt(src.timestamp, 10);
-    const fallbackTimestamp = Number.parseInt(base.timestamp, 10);
-
-    return {
-        theme,
-        loginBackground,
-        backgroundScope,
-        loginBackgroundOverlayOpacity: clampUiNumber(
-            src.loginBackgroundOverlayOpacity,
-            clampUiNumber(base.loginBackgroundOverlayOpacity, DEFAULT_UI_CONFIG.loginBackgroundOverlayOpacity, 0, 80),
-            0,
-            80,
-        ),
-        loginBackgroundBlur: clampUiNumber(
-            src.loginBackgroundBlur,
-            clampUiNumber(base.loginBackgroundBlur, DEFAULT_UI_CONFIG.loginBackgroundBlur, 0, 12),
-            0,
-            12,
-        ),
-        workspaceVisualPreset,
-        appBackgroundOverlayOpacity: clampUiNumber(
-            src.appBackgroundOverlayOpacity,
-            clampUiNumber(base.appBackgroundOverlayOpacity, DEFAULT_UI_CONFIG.appBackgroundOverlayOpacity, 20, 90),
-            20,
-            90,
-        ),
-        appBackgroundBlur: clampUiNumber(
-            src.appBackgroundBlur,
-            clampUiNumber(base.appBackgroundBlur, DEFAULT_UI_CONFIG.appBackgroundBlur, 0, 18),
-            0,
-            18,
-        ),
-        colorTheme,
-        performanceMode: src.performanceMode !== undefined ? !!src.performanceMode : !!base.performanceMode,
-        themeBackgroundLinked: src.themeBackgroundLinked !== undefined ? !!src.themeBackgroundLinked : !!base.themeBackgroundLinked,
-        timestamp: Number.isFinite(rawTimestamp) && rawTimestamp >= 0
-            ? rawTimestamp
-            : (Number.isFinite(fallbackTimestamp) && fallbackTimestamp >= 0 ? fallbackTimestamp : DEFAULT_UI_CONFIG.timestamp),
-    };
-}
-
 function normalizeOfflineReminder(input) {
     const src = (input && typeof input === 'object') ? input : {};
     const offlineDeleteEnabled = src.offlineDeleteEnabled !== undefined
@@ -366,6 +284,17 @@ function clampInteger(value, fallback, min, max) {
     const base = Number.isFinite(parsed) ? parsed : Number.parseInt(fallback, 10);
     const next = Number.isFinite(base) ? base : min;
     return Math.max(min, Math.min(max, next));
+}
+
+function normalizeTradeKeepFruitIds(list, fallbackList = []) {
+    const source = Array.isArray(list)
+        ? list
+        : (Array.isArray(fallbackList) ? fallbackList : []);
+    return Array.from(new Set(
+        source
+            .map(Number)
+            .filter(id => Number.isFinite(id) && id > 0),
+    ));
 }
 
 function normalizeReportConfig(rawConfig, fallbackConfig = DEFAULT_REPORT_CONFIG) {
@@ -545,9 +474,7 @@ function normalizeTradeConfig(rawTrade, fallbackTrade = DEFAULT_TRADE_CONFIG) {
         sell: {
             scope: 'fruit_only',
             keepMinEachFruit: clampInteger(rawSell.keepMinEachFruit, fallbackSell.keepMinEachFruit, 0, 999999),
-            keepFruitIds: Array.isArray(rawSell.keepFruitIds)
-                ? rawSell.keepFruitIds.map(Number).filter(id => Number.isFinite(id) && id > 0)
-                : (Array.isArray(fallbackSell.keepFruitIds) ? fallbackSell.keepFruitIds.map(Number).filter(id => Number.isFinite(id) && id > 0) : []),
+            keepFruitIds: normalizeTradeKeepFruitIds(rawSell.keepFruitIds, fallbackSell.keepFruitIds),
             rareKeep: {
                 enabled: rawRareKeep.enabled !== undefined ? !!rawRareKeep.enabled : !!fallbackRareKeep.enabled,
                 judgeBy,
@@ -768,12 +695,14 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
 }
 
 function getAccountConfigSnapshot(accountId) {
+    ensureStoreFallbackLoaded();
     const id = resolveAccountId(accountId);
     if (!id) return cloneAccountConfig(accountFallbackConfig);
     return normalizeAccountConfig(globalConfig.accountConfigs[id], accountFallbackConfig);
 }
 
 function setAccountConfigSnapshot(accountId, nextConfig, persist = true) {
+    ensureStoreFallbackLoaded();
     const id = resolveAccountId(accountId);
     if (!id) {
         accountFallbackConfig = normalizeAccountConfig(nextConfig, accountFallbackConfig);
@@ -787,6 +716,7 @@ function setAccountConfigSnapshot(accountId, nextConfig, persist = true) {
 }
 
 function removeAccountConfig(accountId) {
+    ensureStoreFallbackLoaded();
     const id = resolveAccountId(accountId);
     if (!id) return;
     if (globalConfig.accountConfigs[id]) {
@@ -796,6 +726,7 @@ function removeAccountConfig(accountId) {
 }
 
 function ensureAccountConfig(accountId, options = {}) {
+    ensureStoreFallbackLoaded();
     const id = resolveAccountId(accountId);
     if (!id) return null;
     if (globalConfig.accountConfigs[id]) {
@@ -812,9 +743,23 @@ function ensureAccountConfig(accountId, options = {}) {
 
 // 加载全局配置
 async function loadGlobalConfigFromDB() {
+    if (typeof isMysqlInitialized === 'function' && !isMysqlInitialized()) {
+        return false;
+    }
+
     try {
         const pool = getPool();
         const [rows] = await pool.query('SELECT * FROM account_configs');
+        const systemSettings = await getSystemSettings([GLOBAL_CONFIG_SYSTEM_SETTING_KEY]);
+        const persistedGlobalConfig = systemSettings[GLOBAL_CONFIG_SYSTEM_SETTING_KEY];
+        const hasPersistedGlobalConfig = !!persistedGlobalConfig && typeof persistedGlobalConfig === 'object';
+
+        if (hasPersistedGlobalConfig) {
+            applyLoadedGlobalConfig(persistedGlobalConfig);
+        } else {
+            applyLoadedGlobalConfig(buildSystemGlobalConfigSnapshot());
+        }
+
         const existingAccountConfigs = (globalConfig.accountConfigs && typeof globalConfig.accountConfigs === 'object')
             ? { ...globalConfig.accountConfigs }
             : {};
@@ -847,7 +792,7 @@ async function loadGlobalConfigFromDB() {
 
             let adv = {};
             if (r.advanced_settings) {
-                try { adv = JSON.parse(r.advanced_settings); } catch (err) { }
+                try { adv = JSON.parse(r.advanced_settings); } catch { }
             }
             if (adv.automation && typeof adv.automation === 'object') {
                 automation = { ...automation, ...adv.automation };
@@ -875,82 +820,103 @@ async function loadGlobalConfigFromDB() {
                 skipStealRadish: adv.skipStealRadish,
                 forceGetAll: adv.forceGetAll,
                 workflowConfig: adv.workflowConfig,
+                tradeConfig: adv.tradeConfig,
                 reportConfig: adv.reportConfig,
                 reportState: adv.reportState,
             }, accountFallbackConfig);
 
-            if (adv.ui) {
+            if (!hasPersistedGlobalConfig && adv.ui) {
                 globalConfig.ui = normalizeUIConfig({ ...globalConfig.ui, ...adv.ui }, globalConfig.ui);
             }
 
             // 兼容历史上写进 advanced_settings 的全局字段。
-            if (adv.offlineReminder) {
+            if (!hasPersistedGlobalConfig && adv.offlineReminder) {
                 globalConfig.offlineReminder = normalizeOfflineReminder({ ...globalConfig.offlineReminder, ...adv.offlineReminder });
             }
-            if (adv.timingConfig) {
+            if (!hasPersistedGlobalConfig && adv.timingConfig) {
                 globalConfig.timingConfig = normalizeTimingConfig(adv.timingConfig, getTimingConfig());
             }
-            if (adv.trialCardConfig) {
+            if (!hasPersistedGlobalConfig && adv.trialCardConfig) {
                 globalConfig.trialCardConfig = normalizeTrialCardConfig(adv.trialCardConfig, getTrialCardConfig());
             }
-            if (adv.thirdPartyApi && typeof adv.thirdPartyApi === 'object') {
+            if (!hasPersistedGlobalConfig && adv.thirdPartyApi && typeof adv.thirdPartyApi === 'object') {
                 globalConfig.thirdPartyApi = { ...globalConfig.thirdPartyApi, ...adv.thirdPartyApi };
             }
 
             // Cluster Config (optional backwards compat from adv)
-            if (adv.clusterConfig) {
+            if (!hasPersistedGlobalConfig && adv.clusterConfig) {
                 globalConfig.clusterConfig = normalizeClusterConfig({ ...globalConfig.clusterConfig, ...adv.clusterConfig }, globalConfig.clusterConfig);
             }
         }
 
+        if (!hasPersistedGlobalConfig) {
+            await setSystemSettings({
+                [GLOBAL_CONFIG_SYSTEM_SETTING_KEY]: buildSystemGlobalConfigSnapshot(),
+            });
+        }
+
     } catch (e) {
-        console.error('加载全局配置失败:', e.message);
+        if (isMysqlPoolUninitializedError(e)) {
+            return false;
+        }
+        logStoreError('加载全局配置失败', e);
+        return false;
     }
+
+    return true;
 }
 let _globalConfigRefreshPromise = null;
+let _globalConfigFileLoaded = false;
 
 function loadGlobalConfigFromFile() {
     const stored = readJsonFile(STORE_FILE, () => ({}));
-    const persistedDefault = (stored.defaultAccountConfig && typeof stored.defaultAccountConfig === 'object')
-        ? stored.defaultAccountConfig
+    applyLoadedGlobalConfig(stored, { includeAccountConfigs: true });
+}
+
+function applyLoadedGlobalConfig(stored = {}, options = {}) {
+    const source = (stored && typeof stored === 'object') ? stored : {};
+    const includeAccountConfigs = options.includeAccountConfigs === true;
+    const defaultFallback = (globalConfig.defaultAccountConfig && typeof globalConfig.defaultAccountConfig === 'object')
+        ? globalConfig.defaultAccountConfig
         : DEFAULT_ACCOUNT_CONFIG;
+    const persistedDefault = (source.defaultAccountConfig && typeof source.defaultAccountConfig === 'object')
+        ? source.defaultAccountConfig
+        : defaultFallback;
+
     accountFallbackConfig = normalizeAccountConfig(persistedDefault, DEFAULT_ACCOUNT_CONFIG);
     globalConfig.defaultAccountConfig = cloneAccountConfig(accountFallbackConfig);
 
-    const persistedAccountConfigs = (stored.accountConfigs && typeof stored.accountConfigs === 'object')
-        ? stored.accountConfigs
-        : {};
-    const nextAccountConfigs = {};
-    for (const [id, cfg] of Object.entries(persistedAccountConfigs)) {
-        const sid = String(id || '').trim();
-        if (!sid) continue;
-        nextAccountConfigs[sid] = normalizeAccountConfig(cfg, accountFallbackConfig);
+    if (includeAccountConfigs) {
+        const persistedAccountConfigs = (source.accountConfigs && typeof source.accountConfigs === 'object')
+            ? source.accountConfigs
+            : {};
+        const nextAccountConfigs = {};
+        for (const [id, cfg] of Object.entries(persistedAccountConfigs)) {
+            const sid = String(id || '').trim();
+            if (!sid) continue;
+            nextAccountConfigs[sid] = normalizeAccountConfig(cfg, accountFallbackConfig);
+        }
+        globalConfig.accountConfigs = nextAccountConfigs;
     }
-    globalConfig.accountConfigs = nextAccountConfigs;
-    globalConfig.ui = normalizeUIConfig(stored.ui, DEFAULT_UI_CONFIG);
-    globalConfig.offlineReminder = normalizeOfflineReminder(stored.offlineReminder);
-    globalConfig.adminPasswordHash = String(stored.adminPasswordHash || '');
-    globalConfig.thirdPartyApi = (stored.thirdPartyApi && typeof stored.thirdPartyApi === 'object')
-        ? { ...stored.thirdPartyApi }
-        : {};
-    globalConfig.timingConfig = normalizeTimingConfig(stored.timingConfig, DEFAULT_TIMING_CONFIG);
-    globalConfig.trialCardConfig = normalizeTrialCardConfig(stored.trialCardConfig, DEFAULT_TRIAL_CARD_CONFIG);
-    globalConfig.clusterConfig = normalizeClusterConfig(stored.clusterConfig, DEFAULT_CLUSTER_CONFIG);
-    globalConfig.suspendUntilMap = (stored.suspendUntilMap && typeof stored.suspendUntilMap === 'object')
-        ? { ...stored.suspendUntilMap }
-        : {};
+
+    globalConfig.ui = normalizeUIConfig(source.ui, globalConfig.ui || DEFAULT_UI_CONFIG);
+    globalConfig.offlineReminder = normalizeOfflineReminder(source.offlineReminder !== undefined ? source.offlineReminder : globalConfig.offlineReminder);
+    globalConfig.adminPasswordHash = source.adminPasswordHash !== undefined
+        ? String(source.adminPasswordHash || '')
+        : String(globalConfig.adminPasswordHash || '');
+    globalConfig.thirdPartyApi = (source.thirdPartyApi && typeof source.thirdPartyApi === 'object')
+        ? { ...source.thirdPartyApi }
+        : ((globalConfig.thirdPartyApi && typeof globalConfig.thirdPartyApi === 'object') ? { ...globalConfig.thirdPartyApi } : {});
+    globalConfig.timingConfig = normalizeTimingConfig(source.timingConfig, globalConfig.timingConfig || DEFAULT_TIMING_CONFIG);
+    globalConfig.trialCardConfig = normalizeTrialCardConfig(source.trialCardConfig, globalConfig.trialCardConfig || DEFAULT_TRIAL_CARD_CONFIG);
+    globalConfig.clusterConfig = normalizeClusterConfig(source.clusterConfig, globalConfig.clusterConfig || DEFAULT_CLUSTER_CONFIG);
+    globalConfig.suspendUntilMap = (source.suspendUntilMap && typeof source.suspendUntilMap === 'object')
+        ? { ...source.suspendUntilMap }
+        : ((globalConfig.suspendUntilMap && typeof globalConfig.suspendUntilMap === 'object') ? { ...globalConfig.suspendUntilMap } : {});
 }
 
-function buildPersistedGlobalConfigSnapshot() {
-    const accountConfigs = {};
-    for (const [id, cfg] of Object.entries(globalConfig.accountConfigs || {})) {
-        const sid = String(id || '').trim();
-        if (!sid) continue;
-        accountConfigs[sid] = cloneAccountConfig(normalizeAccountConfig(cfg, accountFallbackConfig));
-    }
-
+function buildSystemGlobalConfigSnapshot() {
     return {
-        accountConfigs,
         defaultAccountConfig: cloneAccountConfig(accountFallbackConfig),
         ui: getUI(),
         offlineReminder: getOfflineReminder(),
@@ -963,8 +929,59 @@ function buildPersistedGlobalConfigSnapshot() {
     };
 }
 
-function loadGlobalConfig() {
+function ensureGlobalConfigFileLoaded() {
+    if (_globalConfigFileLoaded) {
+        return false;
+    }
     loadGlobalConfigFromFile();
+    _globalConfigFileLoaded = true;
+    return true;
+}
+
+function ensureStoreFallbackLoaded() {
+    ensureGlobalConfigFileLoaded();
+}
+
+function isMysqlPoolUninitializedError(error) {
+    const message = String(error && error.message ? error.message : '');
+    return message.includes('MySQL pool is not initialized');
+}
+
+let storeLogger = null;
+
+function getStoreLogger() {
+    if (storeLogger) {
+        return storeLogger;
+    }
+
+    try {
+        storeLogger = createModuleLogger('store');
+    } catch {
+        storeLogger = {
+            info() { },
+            warn() { },
+            error() { },
+            debug() { },
+        };
+    }
+
+    return storeLogger;
+}
+
+function logStoreError(message, error, meta = {}) {
+    getStoreLogger().error(message, {
+        ...meta,
+        error: error && error.message ? error.message : String(error || ''),
+    });
+}
+
+function initStoreRuntime(options = {}) {
+    ensureGlobalConfigFileLoaded();
+
+    if (options.refreshFromDb === false) {
+        return Promise.resolve(false);
+    }
+
     if (!_globalConfigRefreshPromise) {
         _globalConfigRefreshPromise = loadGlobalConfigFromDB()
             .catch(() => undefined)
@@ -972,6 +989,8 @@ function loadGlobalConfig() {
                 _globalConfigRefreshPromise = null;
             });
     }
+
+    return _globalConfigRefreshPromise;
 }
 
 function sanitizeGlobalConfigBeforeSave() {
@@ -1018,92 +1037,123 @@ function sanitizeGlobalConfigBeforeSave() {
 
 // 保存全局配置 (加入 3000ms 防抖，避免狂刷数据库事务阻塞连接池)
 let _globalConfigSaveTimer = null;
-function saveGlobalConfigImmediate() {
-    sanitizeGlobalConfigBeforeSave();
-    try {
-        writeJsonFileAtomic(STORE_FILE, buildPersistedGlobalConfigSnapshot());
-    } catch (e) {
-        console.error('保存全局配置文件失败:', e.message);
+let _globalConfigSavePromise = null;
+let _globalConfigDirty = false;
+async function saveGlobalConfigImmediate() {
+    if (_globalConfigSavePromise) {
+        return await _globalConfigSavePromise;
     }
 
+    _globalConfigSavePromise = (async () => {
+        while (_globalConfigDirty) {
+            _globalConfigDirty = false;
+            sanitizeGlobalConfigBeforeSave();
+            await transaction(async (conn) => {
+                for (const [id, cfg] of Object.entries(globalConfig.accountConfigs)) {
+                    const advSetting = JSON.stringify({
+                        riskPromptEnabled: cfg.riskPromptEnabled !== false,
+                        modeScope: normalizeModeScope(cfg.modeScope, DEFAULT_MODE_SCOPE),
+                        automation: cfg.automation || {},
+                        plantingFallbackStrategy: normalizePlantingFallbackStrategy(cfg.plantingFallbackStrategy),
+                        inventoryPlanting: normalizeInventoryPlanting(cfg.inventoryPlanting, DEFAULT_INVENTORY_PLANTING),
+                        intervals: cfg.intervals || {},
+                        friendQuietHours: cfg.friendQuietHours || {},
+                        friendBlacklist: cfg.friendBlacklist || [],
+                        stealFilter: cfg.stealFilter || { enabled: false, mode: 'blacklist', plantIds: [] },
+                        stealFriendFilter: cfg.stealFriendFilter || { enabled: false, mode: 'blacklist', friendIds: [] },
+                        stakeoutSteal: cfg.stakeoutSteal || { enabled: false, delaySec: 3 },
+                        skipStealRadish: cfg.skipStealRadish || { enabled: false },
+                        forceGetAll: cfg.forceGetAll || { enabled: false },
+                        workflowConfig: normalizeWorkflowConfig(cfg.workflowConfig, DEFAULT_ACCOUNT_CONFIG.workflowConfig),
+                        tradeConfig: normalizeTradeConfig(cfg.tradeConfig, DEFAULT_ACCOUNT_CONFIG.tradeConfig),
+                        reportConfig: normalizeReportConfig(cfg.reportConfig, DEFAULT_ACCOUNT_CONFIG.reportConfig),
+                        reportState: normalizeReportState(cfg.reportState, DEFAULT_ACCOUNT_CONFIG.reportState),
+                    });
+                    const automationKeys = cfg.automation || {};
+                    await conn.query(`
+                        INSERT INTO account_configs (account_id, account_mode, harvest_delay_min, harvest_delay_max, planting_strategy, preferred_seed_id,
+                        automation_farm, automation_farm_push, automation_land_upgrade,
+                        automation_friend, automation_friend_steal, automation_friend_help,
+                        automation_friend_bad, automation_task, automation_email,
+                        automation_free_gifts, automation_share_reward, automation_vip_gift,
+                        automation_month_card, automation_sell, automation_fertilizer,
+                        advanced_settings)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE
+                        account_mode=VALUES(account_mode), harvest_delay_min=VALUES(harvest_delay_min), harvest_delay_max=VALUES(harvest_delay_max),
+                        planting_strategy=VALUES(planting_strategy), preferred_seed_id=VALUES(preferred_seed_id),
+                        automation_farm=VALUES(automation_farm), automation_farm_push=VALUES(automation_farm_push), automation_land_upgrade=VALUES(automation_land_upgrade),
+                        automation_friend=VALUES(automation_friend), automation_friend_steal=VALUES(automation_friend_steal), automation_friend_help=VALUES(automation_friend_help),
+                        automation_friend_bad=VALUES(automation_friend_bad), automation_task=VALUES(automation_task), automation_email=VALUES(automation_email),
+                        automation_free_gifts=VALUES(automation_free_gifts), automation_share_reward=VALUES(automation_share_reward), automation_vip_gift=VALUES(automation_vip_gift),
+                        automation_month_card=VALUES(automation_month_card), automation_sell=VALUES(automation_sell), automation_fertilizer=VALUES(automation_fertilizer),
+                        advanced_settings=VALUES(advanced_settings)
+                    `, [
+                        id,
+                        cfg.accountMode || DEFAULT_ACCOUNT_CONFIG.accountMode,
+                        cfg.harvestDelay?.min || 0,
+                        cfg.harvestDelay?.max || 0,
+                        cfg.plantingStrategy || 'preferred',
+                        cfg.preferredSeedId || 0,
+                        automationKeys.farm === false ? 0 : 1, automationKeys.farm_push === false ? 0 : 1, automationKeys.land_upgrade === false ? 0 : 1,
+                        automationKeys.friend === false ? 0 : 1, automationKeys.friend_steal === false ? 0 : 1, automationKeys.friend_help === false ? 0 : 1,
+                        automationKeys.friend_bad === true ? 1 : 0, automationKeys.task === false ? 0 : 1, automationKeys.email === false ? 0 : 1,
+                        automationKeys.free_gifts === false ? 0 : 1, automationKeys.share_reward === false ? 0 : 1, automationKeys.vip_gift === false ? 0 : 1,
+                        automationKeys.month_card === false ? 0 : 1, automationKeys.sell === false ? 0 : 1, automationKeys.fertilizer || 'none',
+                        advSetting
+                    ]);
+                }
+
+                await setSystemSettings({
+                    [GLOBAL_CONFIG_SYSTEM_SETTING_KEY]: buildSystemGlobalConfigSnapshot(),
+                }, { conn });
+            });
+        }
+    })();
     try {
-        transaction(async (conn) => {
-            for (const [id, cfg] of Object.entries(globalConfig.accountConfigs)) {
-                const advSetting = JSON.stringify({
-                    riskPromptEnabled: cfg.riskPromptEnabled !== false,
-                    modeScope: normalizeModeScope(cfg.modeScope, DEFAULT_MODE_SCOPE),
-                    automation: cfg.automation || {},
-                    plantingFallbackStrategy: normalizePlantingFallbackStrategy(cfg.plantingFallbackStrategy),
-                    inventoryPlanting: normalizeInventoryPlanting(cfg.inventoryPlanting, DEFAULT_INVENTORY_PLANTING),
-                    intervals: cfg.intervals || {},
-                    friendQuietHours: cfg.friendQuietHours || {},
-                    friendBlacklist: cfg.friendBlacklist || [],
-                    stealFilter: cfg.stealFilter || { enabled: false, mode: 'blacklist', plantIds: [] },
-                    stealFriendFilter: cfg.stealFriendFilter || { enabled: false, mode: 'blacklist', friendIds: [] },
-                    stakeoutSteal: cfg.stakeoutSteal || { enabled: false, delaySec: 3 },
-                    skipStealRadish: cfg.skipStealRadish || { enabled: false },
-                    forceGetAll: cfg.forceGetAll || { enabled: false },
-                    workflowConfig: normalizeWorkflowConfig(cfg.workflowConfig, DEFAULT_ACCOUNT_CONFIG.workflowConfig),
-                    reportConfig: normalizeReportConfig(cfg.reportConfig, DEFAULT_ACCOUNT_CONFIG.reportConfig),
-                    reportState: normalizeReportState(cfg.reportState, DEFAULT_ACCOUNT_CONFIG.reportState),
-                    ui: normalizeUIConfig(globalConfig.ui, DEFAULT_UI_CONFIG),
-                    offlineReminder: normalizeOfflineReminder(globalConfig.offlineReminder),
-                    timingConfig: getTimingConfig(),
-                    trialCardConfig: getTrialCardConfig(),
-                    thirdPartyApi: { ...(globalConfig.thirdPartyApi || {}) },
-                    clusterConfig: normalizeClusterConfig(globalConfig.clusterConfig, DEFAULT_CLUSTER_CONFIG),
-                });
-                const automationKeys = cfg.automation || {};
-                await conn.query(`
-                    INSERT INTO account_configs (account_id, account_mode, harvest_delay_min, harvest_delay_max, planting_strategy, preferred_seed_id,
-                    automation_farm, automation_farm_push, automation_land_upgrade,
-                    automation_friend, automation_friend_steal, automation_friend_help,
-                    automation_friend_bad, automation_task, automation_email,
-                    automation_free_gifts, automation_share_reward, automation_vip_gift,
-                    automation_month_card, automation_sell, automation_fertilizer,
-                    advanced_settings) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE 
-                    account_mode=VALUES(account_mode), harvest_delay_min=VALUES(harvest_delay_min), harvest_delay_max=VALUES(harvest_delay_max),
-                    planting_strategy=VALUES(planting_strategy), preferred_seed_id=VALUES(preferred_seed_id),
-                    automation_farm=VALUES(automation_farm), automation_farm_push=VALUES(automation_farm_push), automation_land_upgrade=VALUES(automation_land_upgrade),
-                    automation_friend=VALUES(automation_friend), automation_friend_steal=VALUES(automation_friend_steal), automation_friend_help=VALUES(automation_friend_help),
-                    automation_friend_bad=VALUES(automation_friend_bad), automation_task=VALUES(automation_task), automation_email=VALUES(automation_email),
-                    automation_free_gifts=VALUES(automation_free_gifts), automation_share_reward=VALUES(automation_share_reward), automation_vip_gift=VALUES(automation_vip_gift),
-                    automation_month_card=VALUES(automation_month_card), automation_sell=VALUES(automation_sell), automation_fertilizer=VALUES(automation_fertilizer),
-                    advanced_settings=VALUES(advanced_settings)
-                `, [
-                    id,
-                    cfg.accountMode || DEFAULT_ACCOUNT_CONFIG.accountMode,
-                    cfg.harvestDelay?.min || 0,
-                    cfg.harvestDelay?.max || 0,
-                    cfg.plantingStrategy || 'preferred',
-                    cfg.preferredSeedId || 0,
-                    automationKeys.farm === false ? 0 : 1, automationKeys.farm_push === false ? 0 : 1, automationKeys.land_upgrade === false ? 0 : 1,
-                    automationKeys.friend === false ? 0 : 1, automationKeys.friend_steal === false ? 0 : 1, automationKeys.friend_help === false ? 0 : 1,
-                    automationKeys.friend_bad === true ? 1 : 0, automationKeys.task === false ? 0 : 1, automationKeys.email === false ? 0 : 1,
-                    automationKeys.free_gifts === false ? 0 : 1, automationKeys.share_reward === false ? 0 : 1, automationKeys.vip_gift === false ? 0 : 1,
-                    automationKeys.month_card === false ? 0 : 1, automationKeys.sell === false ? 0 : 1, automationKeys.fertilizer || 'none',
-                    advSetting
-                ]);
-            }
-        }).catch(err => console.error("Update Global Config DB Error: ", err.message));
-    } catch (e) { console.error('保存全局配置失败:', e.message); }
+        return await _globalConfigSavePromise;
+    } catch (e) {
+        logStoreError('保存全局配置失败', e);
+        throw e;
+    } finally {
+        if (_globalConfigSavePromise) {
+            _globalConfigSavePromise = null;
+        }
+    }
 }
 
 function saveGlobalConfig() {
+    _globalConfigDirty = true;
     if (_globalConfigSaveTimer) clearTimeout(_globalConfigSaveTimer);
     _globalConfigSaveTimer = setTimeout(() => {
         _globalConfigSaveTimer = null;
-        saveGlobalConfigImmediate();
+        void saveGlobalConfigImmediate().catch((err) => {
+            logStoreError('保存全局配置失败', err);
+        });
     }, 3000);
 }
 
+async function flushGlobalConfigSave() {
+    if (_globalConfigSaveTimer) {
+        clearTimeout(_globalConfigSaveTimer);
+        _globalConfigSaveTimer = null;
+    }
+
+    if (!_globalConfigDirty && !_globalConfigSavePromise) {
+        return false;
+    }
+
+    await saveGlobalConfigImmediate();
+    return true;
+}
+
 function getAdminPasswordHash() {
+    ensureStoreFallbackLoaded();
     return String(globalConfig.adminPasswordHash || '');
 }
 
 function setAdminPasswordHash(hash) {
+    ensureStoreFallbackLoaded();
     globalConfig.adminPasswordHash = String(hash || '');
     saveGlobalConfig();
     return globalConfig.adminPasswordHash;
@@ -1128,6 +1178,11 @@ function getConfigSnapshot(accountId) {
         intervals: { ...cfg.intervals },
         friendQuietHours: { ...cfg.friendQuietHours },
         friendBlacklist: [...(cfg.friendBlacklist || [])],
+        stealFilter: { ...(cfg.stealFilter || DEFAULT_ACCOUNT_CONFIG.stealFilter) },
+        stealFriendFilter: { ...(cfg.stealFriendFilter || DEFAULT_ACCOUNT_CONFIG.stealFriendFilter) },
+        stakeoutSteal: { ...(cfg.stakeoutSteal || DEFAULT_ACCOUNT_CONFIG.stakeoutSteal) },
+        skipStealRadish: { ...(cfg.skipStealRadish || DEFAULT_ACCOUNT_CONFIG.skipStealRadish) },
+        forceGetAll: { ...(cfg.forceGetAll || DEFAULT_ACCOUNT_CONFIG.forceGetAll) },
         workflowConfig: normalizeWorkflowConfig(cfg.workflowConfig, DEFAULT_ACCOUNT_CONFIG.workflowConfig),
         tradeConfig: normalizeTradeConfig(cfg.tradeConfig, DEFAULT_ACCOUNT_CONFIG.tradeConfig),
         reportConfig: normalizeReportConfig(cfg.reportConfig, DEFAULT_ACCOUNT_CONFIG.reportConfig),
@@ -1492,6 +1547,7 @@ function setReportState(accountId, state) {
 }
 
 function getUI() {
+    ensureStoreFallbackLoaded();
     return { ...normalizeUIConfig(globalConfig.ui, DEFAULT_UI_CONFIG) };
 }
 
@@ -1502,10 +1558,12 @@ function setUITheme(theme) {
 }
 
 function getOfflineReminder() {
+    ensureStoreFallbackLoaded();
     return normalizeOfflineReminder(globalConfig.offlineReminder);
 }
 
 function setOfflineReminder(cfg) {
+    ensureStoreFallbackLoaded();
     const current = normalizeOfflineReminder(globalConfig.offlineReminder);
     globalConfig.offlineReminder = normalizeOfflineReminder({ ...current, ...(cfg || {}) });
     saveGlobalConfig();
@@ -1525,6 +1583,64 @@ function parseAccountAuthData(raw) {
     return {};
 }
 
+function normalizeAccountRuntimeSnapshot(raw) {
+    const input = (raw && typeof raw === 'object') ? raw : {};
+    return {
+        level: Math.max(0, Number(input.level) || 0),
+        gold: Math.max(0, Number(input.gold) || 0),
+        exp: Math.max(0, Number(input.exp) || 0),
+        coupon: Math.max(0, Number(input.coupon) || 0),
+        uptime: Math.max(0, Number(input.uptime) || 0),
+        lastStatusAt: Math.max(0, Number(input.lastStatusAt) || 0),
+        lastOnlineAt: Math.max(0, Number(input.lastOnlineAt) || 0),
+    };
+}
+
+function normalizeAccountIdentityFields(raw) {
+    const input = (raw && typeof raw === 'object') ? raw : {};
+    const platform = String(input.platform || 'qq').trim() || 'qq';
+    const uin = String(input.uin || '').trim();
+    const qq = platform === 'qq'
+        ? String(input.qq || uin || '').trim()
+        : '';
+    return {
+        platform,
+        uin,
+        qq,
+        code: String(input.code || ''),
+        authTicket: String(input.authTicket || '').trim(),
+    };
+}
+
+function buildAccountAuthData(acc) {
+    const existing = parseAccountAuthData(acc && acc.authData);
+    const identity = normalizeAccountIdentityFields({
+        platform: (acc && acc.platform) || existing.platform || 'qq',
+        uin: (acc && acc.uin) || existing.uin || '',
+        qq: (acc && acc.qq) || existing.qq || '',
+        code: (acc && acc.code) || existing.code || '',
+        authTicket: (acc && acc.authTicket) || existing.authTicket || '',
+    });
+    const runtimeSource = {
+        ...((existing && typeof existing.runtimeSnapshot === 'object') ? existing.runtimeSnapshot : {}),
+    };
+
+    ['level', 'gold', 'exp', 'coupon', 'uptime', 'lastStatusAt', 'lastOnlineAt'].forEach((key) => {
+        if (acc && acc[key] !== undefined) {
+            runtimeSource[key] = acc[key];
+        }
+    });
+
+    return {
+        ...existing,
+        uin: identity.uin,
+        qq: identity.qq,
+        code: identity.code,
+        authTicket: identity.authTicket,
+        runtimeSnapshot: normalizeAccountRuntimeSnapshot(runtimeSource),
+    };
+}
+
 // ============ 账号管理 ============
 async function loadAccountsFromDB() {
     try {
@@ -1533,21 +1649,33 @@ async function loadAccountsFromDB() {
         const [rows] = await pool.query('SELECT * FROM accounts');
         const mapped = rows.map((r) => {
             const authData = parseAccountAuthData(r.auth_data);
-            const platform = r.platform || 'qq';
-            const uin = String(r.uin || authData.uin || '').trim();
-            const qq = String(authData.qq || (platform === 'qq' ? uin : '')).trim();
+            const runtimeSnapshot = normalizeAccountRuntimeSnapshot(authData.runtimeSnapshot);
+            const identity = normalizeAccountIdentityFields({
+                platform: r.platform || 'qq',
+                uin: decodePersistedAccountUin(r.uin) || authData.uin || '',
+                qq: authData.qq || '',
+                code: r.code || authData.code || '',
+                authTicket: authData.authTicket || '',
+            });
             return {
                 id: r.id,
-                uin,
-                code: r.code || authData.code || '',
+                uin: identity.uin,
+                code: identity.code,
                 nick: r.nick || '',
                 name: r.name || '',
-                platform,
+                platform: identity.platform,
                 running: r.running === 1,
                 avatar: r.avatar || '',
-                qq,
-                authTicket: String(authData.authTicket || '').trim(),
+                qq: identity.qq,
+                authTicket: identity.authTicket,
                 username: r.username || '',
+                level: runtimeSnapshot.level,
+                gold: runtimeSnapshot.gold,
+                exp: runtimeSnapshot.exp,
+                coupon: runtimeSnapshot.coupon,
+                uptime: runtimeSnapshot.uptime,
+                lastStatusAt: runtimeSnapshot.lastStatusAt,
+                lastOnlineAt: runtimeSnapshot.lastOnlineAt,
                 createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
                 updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
             };
@@ -1558,7 +1686,7 @@ async function loadAccountsFromDB() {
         cachedAccountsData = normalizeAccountsData({ accounts: mapped, nextId: 1000 + mapped.length });
         _accountsLoadedAt = Date.now();
         return cachedAccountsData;
-    } catch (e) { console.error('加载账号数据失败:', e.message); }
+    } catch (e) { logStoreError('加载账号数据失败', e); }
     return cachedAccountsData;
 }
 
@@ -1566,6 +1694,23 @@ let cachedAccountsData = { accounts: [], nextId: 1 };
 let _accountsLoadedAt = 0;
 let _accountsRefreshPromise = null;
 let _accountsMutationVersion = 0;
+const EMPTY_ACCOUNT_UIN_DB_PREFIX = '__ACCOUNT_ID__:';
+
+function encodePersistedAccountUin(accountId, value) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+    const normalizedId = String(accountId || '').trim() || '0';
+    return `${EMPTY_ACCOUNT_UIN_DB_PREFIX}${normalizedId}`;
+}
+
+function decodePersistedAccountUin(value) {
+    const normalized = String(value || '').trim();
+    if (!normalized.startsWith(EMPTY_ACCOUNT_UIN_DB_PREFIX)) {
+        return normalized;
+    }
+    return '';
+}
+
 function loadAccounts() {
     return cachedAccountsData;
 }
@@ -1616,28 +1761,28 @@ async function persistPendingAccounts(options = {}) {
             continue;
         }
 
-        const platform = acc.platform || 'qq';
+        const identity = normalizeAccountIdentityFields(acc);
+        const platform = identity.platform;
         const primaryUin = platform === 'qq'
-            ? String(acc.uin || acc.qq || '').trim()
-            : String(acc.uin || '').trim();
-        const authData = JSON.stringify({
-            uin: String(acc.uin || '').trim(),
-            qq: String(acc.qq || '').trim(),
-            code: acc.code || '',
-            authTicket: String(acc.authTicket || '').trim(),
-        });
+            ? String(identity.uin || identity.qq || '').trim()
+            : String(identity.uin || '').trim();
+        const persistedUin = encodePersistedAccountUin(acc.id, primaryUin);
+        const authData = JSON.stringify(buildAccountAuthData({
+            ...acc,
+            ...identity,
+        }));
 
         try {
             await pool.query(
-                "INSERT INTO accounts (id, uin, nick, name, platform, running, code, username, avatar, auth_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE uin=COALESCE(NULLIF(VALUES(uin),''), uin), nick=VALUES(nick), name=VALUES(name), platform=VALUES(platform), running=VALUES(running), code=COALESCE(NULLIF(VALUES(code),''), code), username=COALESCE(NULLIF(VALUES(username),''), username), avatar=COALESCE(NULLIF(VALUES(avatar),''), avatar), auth_data=COALESCE(NULLIF(VALUES(auth_data),''), auth_data)",
+                "INSERT INTO accounts (id, uin, nick, name, platform, running, code, username, avatar, auth_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE uin=COALESCE(NULLIF(VALUES(uin),''), uin), nick=VALUES(nick), name=VALUES(name), platform=VALUES(platform), running=VALUES(running), code=COALESCE(NULLIF(VALUES(code),''), code), username=VALUES(username), avatar=COALESCE(NULLIF(VALUES(avatar),''), avatar), auth_data=COALESCE(NULLIF(VALUES(auth_data),''), auth_data)",
                 [
                     acc.id,
-                    primaryUin,
+                    persistedUin,
                     acc.nick || '',
                     acc.name || '',
                     platform,
                     acc.running ? 1 : 0,
-                    acc.code || '',
+                    identity.code,
                     acc.username || '',
                     acc.avatar || '',
                     authData,
@@ -1647,7 +1792,7 @@ async function persistPendingAccounts(options = {}) {
             const failedId = String(accountId);
             failedIds.push(failedId);
             failures.push({ accountId: failedId, message: e.message });
-            console.error("DB Async Insert Account Failed", e.message);
+            logStoreError('异步写入账号数据库失败', e, { accountId: failedId });
         }
     }
 
@@ -1673,7 +1818,7 @@ function saveAccounts(data, touchedAccountIds) {
     _accountsSaveTimer = setTimeout(() => {
         _accountsSaveTimer = null;
         void persistPendingAccounts().catch((e) => {
-            console.error('保存账号数据失败:', e.message);
+            logStoreError('保存账号数据失败', e);
         });
     }, 2000);
 }
@@ -1727,22 +1872,37 @@ async function getAccountFull(accountId) {
         if (typeof authData === 'string' && authData) {
             try { authData = JSON.parse(authData); } catch { authData = null; }
         }
-        return {
-            id: row.id,
-            uin: row.uin ? String(row.uin) : String((authData && authData.uin) || ''),
-            qq: String((authData && authData.qq) || (row.platform === 'qq' ? (row.uin ? String(row.uin) : '') : '')),
+        const runtimeSnapshot = normalizeAccountRuntimeSnapshot(authData && authData.runtimeSnapshot);
+        const identity = normalizeAccountIdentityFields({
+            platform: row.platform || 'qq',
+            uin: decodePersistedAccountUin(row.uin) || String((authData && authData.uin) || ''),
+            qq: String((authData && authData.qq) || ''),
             code: row.code || (authData && authData.code) || '',
             authTicket: String((authData && authData.authTicket) || ''),
+        });
+        return {
+            id: row.id,
+            uin: identity.uin,
+            qq: identity.qq,
+            code: identity.code,
+            authTicket: identity.authTicket,
             nick: row.nick || '',
             name: row.name || '',
-            platform: row.platform || 'qq',
+            platform: identity.platform,
             running: row.running === 1 || row.running === true,
             avatar: row.avatar || '',
             username: row.username || '',
+            level: runtimeSnapshot.level,
+            gold: runtimeSnapshot.gold,
+            exp: runtimeSnapshot.exp,
+            coupon: runtimeSnapshot.coupon,
+            uptime: runtimeSnapshot.uptime,
+            lastStatusAt: runtimeSnapshot.lastStatusAt,
+            lastOnlineAt: runtimeSnapshot.lastOnlineAt,
             createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
             updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
         };
-    } catch (e) {
+    } catch {
         const data = getAccounts();
         const list = Array.isArray(data.accounts) ? data.accounts : [];
         const found = list.find(a => String(a.id || '') === id);
@@ -1761,38 +1921,94 @@ function normalizeAccountsData(raw) {
     return { accounts, nextId };
 }
 
+function createAccountRecord(acc, forcedId) {
+    const now = Date.now();
+    const accountId = String(forcedId || acc.id || '').trim();
+    const numericId = Number.parseInt(accountId, 10);
+    const defaultName = acc.name || (accountId ? `账号${Number.isFinite(numericId) ? numericId : accountId}` : '新账号');
+    const identity = normalizeAccountIdentityFields(acc);
+    return {
+        id: accountId,
+        name: defaultName,
+        code: identity.code,
+        nick: acc.nick || '',
+        platform: identity.platform,
+        uin: identity.uin,
+        qq: identity.qq,
+        authTicket: identity.authTicket,
+        avatar: acc.avatar || acc.avatarUrl || '',
+        username: acc.username || '',
+        running: !!acc.running,
+        connected: !!acc.connected,
+        wsError: acc.wsError || null,
+        level: Math.max(0, Number(acc.level) || 0),
+        gold: Math.max(0, Number(acc.gold) || 0),
+        exp: Math.max(0, Number(acc.exp) || 0),
+        coupon: Math.max(0, Number(acc.coupon) || 0),
+        uptime: Math.max(0, Number(acc.uptime) || 0),
+        lastStatusAt: Math.max(0, Number(acc.lastStatusAt) || 0),
+        lastOnlineAt: Math.max(0, Number(acc.lastOnlineAt) || 0),
+        createdAt: Math.max(0, Number(acc.createdAt) || 0) || now,
+        updatedAt: Math.max(0, Number(acc.updatedAt) || 0) || now,
+    };
+}
+
 function addOrUpdateAccount(acc) {
+    const payload = (acc && typeof acc === 'object') ? { ...acc } : {};
+    const createIfMissing = !!payload.__createIfMissing;
+    delete payload.__createIfMissing;
     const data = normalizeAccountsData(loadAccounts());
     let touchedAccountId = '';
-    if (acc.id) {
-        const accIdStr = String(acc.id).trim();
+    if (payload.id) {
+        const accIdStr = String(payload.id).trim();
         const idx = data.accounts.findIndex(a => String(a.id).trim() === accIdStr);
-        if (idx >= 0) {
-            data.accounts[idx] = { ...data.accounts[idx], ...acc, name: acc.name !== undefined ? acc.name : data.accounts[idx].name, updatedAt: Date.now() };
+        if (idx >= 0 && createIfMissing) {
+            const maxId = data.accounts.reduce((max, account) => {
+                const numericId = Number.parseInt(account && account.id, 10);
+                return Number.isFinite(numericId) ? Math.max(max, numericId) : max;
+            }, 0);
+            let nextCreateId = Number.parseInt(data.nextId, 10);
+            if (!Number.isFinite(nextCreateId) || nextCreateId <= maxId) {
+                nextCreateId = maxId + 1;
+            }
+            touchedAccountId = String(Math.max(nextCreateId, 1));
+            data.accounts.push(createAccountRecord(payload, touchedAccountId));
+            const numericTouchedId = Number.parseInt(touchedAccountId, 10);
+            if (Number.isFinite(numericTouchedId) && data.nextId <= numericTouchedId) {
+                data.nextId = numericTouchedId + 1;
+            }
+        } else if (idx >= 0) {
+            const merged = {
+                ...data.accounts[idx],
+                ...payload,
+                name: payload.name !== undefined ? payload.name : data.accounts[idx].name,
+            };
+            data.accounts[idx] = {
+                ...merged,
+                ...normalizeAccountIdentityFields(merged),
+                updatedAt: Date.now(),
+            };
             touchedAccountId = String(data.accounts[idx].id || '');
+        } else if (createIfMissing) {
+            touchedAccountId = accIdStr;
+            data.accounts.push(createAccountRecord(payload, accIdStr));
+            const numericId = Number.parseInt(accIdStr, 10);
+            if (Number.isFinite(numericId) && data.nextId <= numericId) {
+                data.nextId = numericId + 1;
+            }
         }
     } else {
-        const id = data.nextId++;
-        touchedAccountId = String(id);
-        data.accounts.push({
-            id: touchedAccountId,
-            name: acc.name || `账号${id}`,
-            code: acc.code || '',
-            platform: acc.platform || 'qq',
-            uin: acc.uin ? String(acc.uin) : '',
-            qq: acc.qq ? String(acc.qq) : ((acc.platform || 'qq') === 'qq' && acc.uin ? String(acc.uin) : ''),
-            authTicket: acc.authTicket ? String(acc.authTicket) : '',
-            avatar: acc.avatar || acc.avatarUrl || '',
-            username: acc.username || '',
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-        });
+        touchedAccountId = String(data.nextId++);
+        data.accounts.push(createAccountRecord(payload, touchedAccountId));
     }
     saveAccounts(data, touchedAccountId);
     if (touchedAccountId) {
         ensureAccountConfig(touchedAccountId);
     }
-    return data;
+    return {
+        ...data,
+        touchedAccountId,
+    };
 }
 
 function deleteAccount(id) {
@@ -1807,9 +2023,9 @@ function deleteAccount(id) {
     // 修复 bug：仅 saveAccounts(data) 会触发 UPSERT（更新或插入），但不会对被 filter 剔除的数据做 DELETE，必须单独在 DB 中删除该行
     const pool = getPool();
     if (pool) {
-        pool.query('DELETE FROM accounts WHERE id = ?', [String(id)]).catch(e => console.error("DB Delete Account Failed:", e.message));
+        pool.query('DELETE FROM accounts WHERE id = ?', [String(id)]).catch(e => logStoreError('删除账号数据库记录失败', e, { accountId: String(id) }));
         // 同时清理可能关联的 config 数据
-        pool.query('DELETE FROM account_configs WHERE account_id = ?', [String(id)]).catch(e => console.error("DB Delete Account Configs Failed:", e.message));
+        pool.query('DELETE FROM account_configs WHERE account_id = ?', [String(id)]).catch(e => logStoreError('删除账号配置数据库记录失败', e, { accountId: String(id) }));
     }
 
     return data;
@@ -1905,6 +2121,7 @@ function normalizeClusterConfig(cfg, fallback = DEFAULT_CLUSTER_CONFIG) {
  * 获取系统级时间参数配置（合并默认值）
  */
 function getTimingConfig() {
+    ensureStoreFallbackLoaded();
     return normalizeTimingConfig(globalConfig.timingConfig, DEFAULT_TIMING_CONFIG);
 }
 
@@ -1922,6 +2139,7 @@ function setTimingConfig(cfg) {
  * 获取体验卡配置（合并默认值）
  */
 function getTrialCardConfig() {
+    ensureStoreFallbackLoaded();
     return normalizeTrialCardConfig(globalConfig.trialCardConfig, DEFAULT_TRIAL_CARD_CONFIG);
 }
 
@@ -1940,6 +2158,7 @@ function setTrialCardConfig(cfg) {
  * 记录账号休眠到期时间戳（持久化到 store.json）
  */
 function recordSuspendUntil(accountId, timestamp) {
+    ensureStoreFallbackLoaded();
     const id = resolveAccountId(accountId);
     if (!id) return;
     if (!globalConfig.suspendUntilMap) globalConfig.suspendUntilMap = {};
@@ -1951,19 +2170,24 @@ function recordSuspendUntil(accountId, timestamp) {
  * 读取账号的休眠到期时间戳
  */
 function getSuspendUntil(accountId) {
+    ensureStoreFallbackLoaded();
     const id = resolveAccountId(accountId);
     if (!id) return 0;
     if (!globalConfig.suspendUntilMap) return 0;
     return Number(globalConfig.suspendUntilMap[id]) || 0;
 }
 
-async function loadAllFromDB() {
+async function loadAllFromDB(options = {}) {
+    await initStoreRuntime({ refreshFromDb: false });
     await loadAccountsFromDB();
-    await loadGlobalConfigFromDB();
+    if (options.refreshGlobalConfig !== false) {
+        await initStoreRuntime();
+    }
 }
 
 
 module.exports = {
+    initStoreRuntime,
     loadAllFromDB,
     DEFAULT_ACCOUNT_CONFIG,
     DEFAULT_TIMING_CONFIG,
@@ -2017,6 +2241,7 @@ module.exports = {
     deleteAccount,
     getAdminPasswordHash,
     setAdminPasswordHash,
+    flushGlobalConfigSave,
     getAccounts,
     getAccountsFresh,
     getAccountFull,
@@ -2027,10 +2252,12 @@ module.exports = {
     setTrialCardConfig,
 
     getClusterConfig: () => {
+        ensureStoreFallbackLoaded();
         globalConfig.clusterConfig = normalizeClusterConfig(globalConfig.clusterConfig, DEFAULT_CLUSTER_CONFIG);
         return { ...globalConfig.clusterConfig };
     },
     setClusterConfig: (cfg) => {
+        ensureStoreFallbackLoaded();
         globalConfig.clusterConfig = normalizeClusterConfig({ ...globalConfig.clusterConfig, ...(cfg || {}) }, DEFAULT_CLUSTER_CONFIG);
         saveGlobalConfig();
         return { ...globalConfig.clusterConfig };
@@ -2063,18 +2290,17 @@ function getAccountsFullPaged(page = 1, pageSize = 20) {
 }
 
 function getThirdPartyApiConfig() {
+    ensureStoreFallbackLoaded();
     return { ...(globalConfig.thirdPartyApi || {}) };
 }
 
 function setThirdPartyApiConfig(cfg) {
+    ensureStoreFallbackLoaded();
     const current = getThirdPartyApiConfig();
     globalConfig.thirdPartyApi = { ...current, ...(cfg || {}) };
     saveGlobalConfig();
     return getThirdPartyApiConfig();
 }
-
-// 初始化加载
-loadGlobalConfig();
 
 module.exports.getAccountsFullPaged = getAccountsFullPaged;
 module.exports.getThirdPartyApiConfig = getThirdPartyApiConfig;

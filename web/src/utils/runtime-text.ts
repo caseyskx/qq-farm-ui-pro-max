@@ -1,0 +1,98 @@
+const DIRECT_REPLACEMENTS: Array<[string, string]> = [
+  ['Missing x-account-id', '缺少账号标识 (x-account-id)'],
+  ['Invalid account mode', '无效的账号模式'],
+  ['Unsupported report mode', '不支持的经营汇报模式'],
+  ['Unknown method', '未知调用方法'],
+  ['Unknown error', '未知错误'],
+  ['Worker exited', '工作进程已退出'],
+  ['Worker API error', '子进程接口错误'],
+  ['API Timeout', '接口超时'],
+  ['Operation timeout', '操作超时'],
+  ['operation timeout', '操作超时'],
+  ['No refresh token', '缺少刷新令牌'],
+  ['Invalid or expired refresh token', '刷新令牌无效或已过期'],
+  ['User not found', '未找到用户'],
+  ['Server error', '服务器内部错误'],
+  ['DataProvider does not support scheduler status', '当前运行环境不支持调度器状态查询'],
+  ['Missing gid', '缺少好友 GID'],
+  ['Missing gids', '缺少好友 GID 列表'],
+  ['Missing opType', '缺少操作类型'],
+  ['Missing account ID', '缺少账号 ID'],
+  ['Missing itemId', '缺少物品 ID'],
+  ['Missing goodsId', '缺少商品 ID'],
+  ['Missing remark', '缺少备注内容'],
+  ['Missing code', '缺少登录码'],
+  ['Failed to fetch dynamically imported module', '动态模块加载失败'],
+  ['Importing a module script failed', '模块脚本加载失败'],
+  ['MySQL pool is not initialized. Call initMysql() first.', 'MySQL 连接池未初始化，请先执行初始化'],
+  ['JWT secret not initialized. Call initJwtSecretPersistence() before issuing or verifying tokens.', 'JWT 密钥未初始化，请先完成密钥持久化初始化'],
+  ['Account not found', '未找到账号'],
+  ['Shop purchase not supported', '当前账号暂不支持商店购买'],
+  ['Month card reward not supported', '当前账号暂不支持月卡领奖'],
+  ['unknown_zone', '未知分区'],
+  ['signal=none', 'signal=无'],
+  ['signal=null', 'signal=无'],
+  ['None', '空'],
+  ['N/A', '未设置'],
+  ['pending=', '待处理='],
+  ['platform=', '平台='],
+  ['url=', '地址='],
+  ['refresh failed:', '刷新登录态失败:'],
+  ['Unexpected server response:', '服务器返回异常状态:'],
+  ['Unauthorized', '未授权'],
+  ['Forbidden', '无权访问'],
+  ['Not Found', '资源不存在'],
+  ['expires_at', '过期时间'],
+  ['Card 类型', '卡密类型'],
+  ['.env ADMIN_PASSWORD', '环境变量 ADMIN_PASSWORD'],
+  ['mode 仅支持 hourly 或 daily', '汇报模式仅支持小时汇报或日报'],
+  ['仅管理员可查看 system_settings 自检结果', '仅管理员可查看系统设置自检结果'],
+  ['scan-account-reports', '经营汇报扫描'],
+  ['daily-stats-job', '每日收益归档'],
+  ['log-cleanup-job', '日志自动清理'],
+  ['status_sync', '状态同步'],
+  ['heartbeat_interval', '心跳保活'],
+  ['auto_reconnect', '自动重连'],
+  ['login_error_exit', '登录失败退出'],
+  ['daily_routine_interval', '跨日礼包检测'],
+  ['daily_routine_immediate', '日常任务快速执行'],
+  ['ws_error_cleanup', '连接错误清理'],
+  ['kickout_stop', '掉线停止处理'],
+  ['task_claim_debounce', '任务领取防抖'],
+  ['task_init_bootstrap', '任务初始化'],
+  ['task_scan', '任务扫描'],
+  ['farm_check_loop', '农场巡查'],
+  ['farm_push_check', '收获推送'],
+  ['friend_check_loop', '好友巡查'],
+  ['friend_check_bootstrap_applications', '好友申请处理'],
+  ['friend_cycle', '好友巡查'],
+  ['farm_cycle', '农场巡查'],
+  ['unified_next_tick', '统一调度'],
+]
+
+const REGEX_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/\bunknown\b/gi, '未知'],
+  [/\bCLOSED\b/g, '闭合'],
+  [/\bHALF_OPEN\b/g, '半开'],
+  [/restart_broadcast_retry_[\w-]+/g, '重启提醒重试任务'],
+  [/force_kill_(\d+)/g, '强制结束进程 #$1'],
+  [/restart_fallback_(\d+)/g, '重启兜底 #$1'],
+  [/api_timeout_[\w-]+/g, '接口超时保护'],
+  [/request_timeout_[\w.:/-]+/g, '请求超时保护'],
+  [/anti_steal_land_(\d+)/g, '防偷抢收 #$1'],
+  [/stakeout_steal_[\w.:/-]+/g, '蹲守偷菜'],
+  [/stake_[\w.:/-]+/g, '蹲守偷菜'],
+]
+
+export function localizeRuntimeText(input: unknown) {
+  const text = String(input ?? '')
+  if (!text)
+    return ''
+
+  let result = text
+  for (const [from, to] of DIRECT_REPLACEMENTS)
+    result = result.split(from).join(to)
+  for (const [pattern, to] of REGEX_REPLACEMENTS)
+    result = result.replace(pattern, to)
+  return result
+}

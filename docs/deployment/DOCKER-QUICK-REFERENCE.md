@@ -78,20 +78,20 @@ docker push qq-farm-bot-ui:latest
 
 ```bash
 # 启动
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f deploy/docker-compose.yml up -d
 
 # 查看状态
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f deploy/docker-compose.yml ps
 
 # 查看日志
-docker-compose -f docker-compose.prod.yml logs -f
+docker compose -f deploy/docker-compose.yml logs -f
 
 # 停止
-docker-compose -f docker-compose.prod.yml down
+docker compose -f deploy/docker-compose.yml down
 
 # 更新
-docker-compose -f docker-compose.prod.yml pull
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f deploy/docker-compose.yml pull
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
 ---
@@ -284,16 +284,16 @@ docker --help
 docker run --help
 
 # 查看 Compose 帮助
-docker-compose --help
+docker compose --help
 ```
 
 **文档资源：**
-- [RELEASE-NOTES.md](RELEASE-NOTES.md) - 版本说明
+- [RELEASE-NOTES.md](../archive/RELEASE-NOTES.md) - 版本说明
 - [DOCKER-DEPLOYMENT.md](DOCKER-DEPLOYMENT.md) - 完整指南
-- [DOCKER-UPDATE-SUMMARY.md](DOCKER-UPDATE-SUMMARY.md) - 更新说明
+- [DOCKER-UPDATE-SUMMARY.md](archive/DOCKER-UPDATE-SUMMARY.md) - 历史更新说明
 
 **技术支持：**
-- GitHub: https://github.com/Penty-d/qq-farm-bot-ui/issues
+- GitHub: https://github.com/smdk000/qq-farm-ui-pro-max/issues
 - QQ 群：227916149
 
 ---

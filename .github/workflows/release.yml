@@ -9,7 +9,7 @@ on:
       version:
         description: 'Version'
         required: false
-        default: 'v4.5.17'
+        default: 'v4.5.18'
       latest:
         description: 'Latest'
         required: false
@@ -51,6 +51,9 @@ jobs:
 
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Check Announcements
+        run: pnpm check:announcements
 
       - name: Build
         run: pnpm package:release

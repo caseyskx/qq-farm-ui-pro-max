@@ -56,7 +56,7 @@
 
 ```bash
 # 1. 确认在项目根目录
-cd /path/to/qq-farm-bot-ui-main_副本
+cd /path/to/qq-farm-ui-pro-max
 
 # 2. 安装依赖
 pnpm install --frozen-lockfile
@@ -244,16 +244,20 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 十、服务器一键部署命令
 
-### 10.1 x86 服务器
+### 10.1 推荐入口：标准完整部署
 
 ```bash
-curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy-x86.sh && chmod +x deploy-x86.sh && ./deploy-x86.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
 ```
 
-### 10.2 ARM 服务器（如树莓派、Oracle ARM）
+### 10.2 x86 / ARM 包装脚本（按架构显式调用时使用）
 
 ```bash
-curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy-arm.sh && chmod +x deploy-arm.sh && ./deploy-arm.sh
+# x86
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-x86.sh && chmod +x deploy-x86.sh && ./deploy-x86.sh
+
+# ARM
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-arm.sh && chmod +x deploy-arm.sh && ./deploy-arm.sh
 ```
 
 ### 10.3 Docker 方式部署
@@ -297,12 +301,16 @@ docker run -d --name qq-farm-bot -p 3000:3000 smdk000/qq-farm-bot-ui:latest
 ### 12.2 Docker 构建失败
 
 - 确认 Dockerfile 路径：`core/Dockerfile`
-- 确认构建上下文包含 `web/dist`（需先执行 `pnpm build:web`）
+- 先执行 `pnpm build:web`
+- 前端默认输出 `web/dist`；若默认目录不可写，会自动回退到 `web/dist-runtime`
+- 当前 Docker builder 会把实际可用的前端产物镜像回标准 `web/dist`，因此无需手工判断回退目录
+- 若需要安全归档旧 `dist` 并恢复标准目录，可执行 `pnpm maintain:web-dist`
+- 管理员可通过 `/api/system-settings/health` 查看当前静态产物选路摘要；健康探针 `/api/ping` 也会返回轻量版 `webAssets` 信息
 
 ### 12.3 部署脚本 404
 
 - 确认仓库名与分支：`smdk000/qq-farm-ui-pro-max`、`main`
-- 确认 `scripts/deploy/` 下存在 `deploy-x86.sh`、`deploy-arm.sh`
+- 确认 `scripts/deploy/` 下存在 `fresh-install.sh`、`update-app.sh`、`deploy-x86.sh`、`deploy-arm.sh`
 
 ---
 
@@ -322,4 +330,4 @@ docker run -d --name qq-farm-bot -p 3000:3000 smdk000/qq-farm-bot-ui:latest
 
 ---
 
-*文档版本：v1.0 | 最后更新：2025-03-03*
+*文档版本：v1.1 | 最后更新：2026-03-10*

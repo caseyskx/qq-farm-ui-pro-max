@@ -154,7 +154,7 @@ watch(adminToken, async (token) => {
         <div class="announcement-dialog-header flex shrink-0 items-center justify-between px-6 py-5">
           <div class="flex items-center gap-2.5">
             <div class="announcement-dialog-icon h-8 w-8 flex items-center justify-center rounded-full">
-              <div class="i-carbon-information text-lg text-amber-500" />
+              <div class="announcement-dialog-info-icon i-carbon-information text-lg" />
             </div>
             <h3 class="glass-text-main text-xl font-bold tracking-wide">
               系统公告
@@ -273,6 +273,10 @@ watch(adminToken, async (token) => {
 .announcement-dialog-footer {
   border-left: none !important;
   border-right: none !important;
+}
+
+.announcement-dialog-info-icon {
+  color: var(--ui-status-warning) !important;
 }
 
 .announcement-dialog-header {

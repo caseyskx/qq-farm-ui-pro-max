@@ -4,27 +4,39 @@
  */
 
 const axios = require('axios');
-const logger = require('./utils/logger');
+const { createModuleLogger } = require('./logger');
 const { contextManager } = require('./contextManager');
+
+const logger = createModuleLogger('qwen-ai-assistant');
 
 class QwenAIAssistant {
   constructor() {
     this.apiKey = process.env.DASHSCOPE_API_KEY;
     this.baseURL = 'https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1';
     this.model = 'qwen3.5-plus';
-    
-    if (!this.apiKey) {
-      logger.error('[QwenAIAssistant] 未配置 DASHSCOPE_API_KEY');
-    }
+    this.missingApiKeyLogged = false;
     
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 60000,
       headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
+        'Authorization': this.apiKey ? `Bearer ${this.apiKey}` : '',
         'Content-Type': 'application/json'
       }
     });
+  }
+
+  ensureApiKeyConfigured() {
+    if (this.apiKey) {
+      return;
+    }
+
+    if (!this.missingApiKeyLogged) {
+      logger.error('[QwenAIAssistant] 未配置 DASHSCOPE_API_KEY');
+      this.missingApiKeyLogged = true;
+    }
+
+    throw new Error('未配置 DASHSCOPE_API_KEY');
   }
 
   /**
@@ -33,6 +45,8 @@ class QwenAIAssistant {
    * @param {object} options - 选项
    */
   async generateWithContext(prompt, options = {}) {
+    this.ensureApiKeyConfigured();
+
     try {
       // 获取相关上下文
       let systemContext = '';

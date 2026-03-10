@@ -33,8 +33,8 @@ const UPDATE_MODAL_SYNC_NOTE = '当前版本的已读状态会跟随当前登录
         <!-- 头部 -->
         <div class="notification-modal-header flex shrink-0 items-center justify-between px-6 py-5">
           <div class="flex items-center gap-2.5">
-            <div class="h-8 w-8 flex items-center justify-center rounded-full bg-blue-50/50 dark:bg-blue-900/30">
-              <div class="i-carbon-notification-new text-lg text-blue-500" />
+            <div class="notification-modal-icon-shell h-8 w-8 flex items-center justify-center rounded-full">
+              <div class="notification-modal-icon i-carbon-notification-new text-lg" />
             </div>
             <h3 class="glass-text-main text-xl font-bold tracking-wide">
               更新公告
@@ -55,7 +55,7 @@ const UPDATE_MODAL_SYNC_NOTE = '当前版本的已读状态会跟随当前登录
 
         <!-- 底部动作条 -->
         <div class="notification-modal-footer glass-panel shrink-0 px-6 py-4">
-          <p class="mb-3 text-xs text-sky-600 leading-5 dark:text-sky-300">
+          <p class="notification-modal-sync-note mb-3 text-xs leading-5">
             {{ UPDATE_MODAL_SYNC_NOTE }}
           </p>
           <!-- 作者信息流水 -->
@@ -124,6 +124,18 @@ const UPDATE_MODAL_SYNC_NOTE = '当前版本的已读状态会跟随当前登录
 
 .notification-modal-confirm:hover {
   filter: brightness(0.98);
+}
+
+.notification-modal-icon-shell {
+  background: color-mix(in srgb, var(--ui-brand-500) 14%, transparent);
+}
+
+.notification-modal-icon {
+  color: var(--ui-brand-500) !important;
+}
+
+.notification-modal-sync-note {
+  color: color-mix(in srgb, var(--ui-brand-600) 72%, var(--ui-text-2) 28%) !important;
 }
 
 .custom-scrollbar::-webkit-scrollbar {

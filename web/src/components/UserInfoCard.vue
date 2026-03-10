@@ -6,6 +6,7 @@ import BaseInput from '@/components/ui/BaseInput.vue'
 import { useAppStore } from '@/stores/app'
 import { useSettingStore } from '@/stores/setting'
 import { clearAuth } from '@/utils/auth'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 const currentUser = ref<any>(null)
 const appStore = useAppStore()
@@ -119,14 +120,14 @@ const remainingTime = computed(() => {
 // 用户状态
 const userStatus = computed(() => {
   if (!currentUser.value?.card)
-    return { label: '正常', class: 'bg-primary-100 text-primary-800' }
+    return { label: '正常', class: 'user-info-status user-info-status-brand' }
   if (currentUser.value.card.enabled === false) {
-    return { label: '已封禁', class: 'bg-red-100 text-red-800' }
+    return { label: '已封禁', class: 'user-info-status user-info-status-danger' }
   }
   if (currentUser.value.card.expiresAt && currentUser.value.card.expiresAt < Date.now()) {
-    return { label: '已过期', class: 'bg-orange-100 text-orange-800' }
+    return { label: '已过期', class: 'user-info-status user-info-status-warning' }
   }
-  return { label: '正常', class: 'bg-primary-100 text-primary-800' }
+  return { label: '正常', class: 'user-info-status user-info-status-brand' }
 })
 
 // 到期预警
@@ -141,13 +142,13 @@ const expiryWarning = computed(() => {
   const diff = expires - now
 
   if (diff <= 0) {
-    return { message: '您的账号已过期，请尽快续费', bgClass: 'bg-red-50 dark:bg-red-900/20', textClass: 'text-red-700 dark:text-red-400' }
+    return { message: '您的账号已过期，请尽快续费', class: 'user-info-warning-danger' }
   }
   else if (diff < 3 * 24 * 60 * 60 * 1000) {
-    return { message: '您的账号即将过期，请及时续费', bgClass: 'bg-orange-50 dark:bg-orange-900/20', textClass: 'text-orange-700 dark:text-orange-400' }
+    return { message: '您的账号即将过期，请及时续费', class: 'user-info-warning-warning' }
   }
   else if (diff < 7 * 24 * 60 * 60 * 1000) {
-    return { message: '您的账号将在7天内到期', bgClass: 'bg-yellow-50 dark:bg-yellow-900/20', textClass: 'text-yellow-700 dark:text-yellow-400' }
+    return { message: '您的账号将在7天内到期', class: 'user-info-warning-warning' }
   }
   return null
 })
@@ -209,11 +210,11 @@ async function handleTrialSelfRenew() {
       saveCurrentUser(user)
     }
     else {
-      console.warn(res.data.error || '续费失败')
+      console.warn(localizeRuntimeText(res.data.error || '续费失败'))
     }
   }
   catch (e: any) {
-    console.warn(e.response?.data?.error || e.message || '续费异常')
+    console.warn(localizeRuntimeText(e.response?.data?.error || e.message || '续费异常'))
   }
   finally {
     trialRenewing.value = false
@@ -233,11 +234,11 @@ async function handleRenew() {
       renewCardCode.value = ''
     }
     else {
-      renewError.value = res.data.error || '续费失败'
+      renewError.value = localizeRuntimeText(res.data.error || '续费失败')
     }
   }
   catch (e: any) {
-    renewError.value = e.response?.data?.error || e.message || '续费异常'
+    renewError.value = localizeRuntimeText(e.response?.data?.error || e.message || '续费异常')
   }
   finally {
     renewLoading.value = false
@@ -278,11 +279,11 @@ async function handleChangePassword() {
       console.warn('密码修改成功！')
     }
     else {
-      passwordError.value = res.data.error || '修改失败'
+      passwordError.value = localizeRuntimeText(res.data.error || '修改失败')
     }
   }
   catch (e: any) {
-    passwordError.value = e.response?.data?.error || e.message || '修改失败'
+    passwordError.value = localizeRuntimeText(e.response?.data?.error || e.message || '修改失败')
   }
   finally {
     passwordLoading.value = false
@@ -291,26 +292,26 @@ async function handleChangePassword() {
 </script>
 
 <template>
-  <div v-if="currentUser" class="glass-panel overflow-hidden border border-white/20 rounded-xl shadow-md dark:border-white/10">
+  <div v-if="currentUser" class="user-info-card glass-panel overflow-hidden rounded-xl shadow-md">
     <!-- 卡片头部及详情合并 -->
-    <div class="from-blue-500/80 to-indigo-600/80 bg-gradient-to-r px-4 py-3 backdrop-blur-sm sm:px-6 sm:py-4">
+    <div class="user-info-card-header px-4 py-3 backdrop-blur-sm sm:px-6 sm:py-4">
       <div class="flex flex-col items-start justify-between gap-4 xl:flex-row xl:items-center">
         <!-- 第1部分：头像和用户名 -->
         <div class="flex shrink-0 items-center gap-3">
-          <div class="h-10 w-10 flex items-center justify-center rounded-full bg-white/20">
-            <svg class="h-6 w-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+          <div class="user-info-avatar h-10 w-10 flex items-center justify-center rounded-full">
+            <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
             </svg>
           </div>
           <div>
-            <h3 class="text-base text-white font-semibold leading-tight">
+            <h3 class="user-info-title text-base font-semibold leading-tight">
               {{ currentUser.username }}
             </h3>
             <div class="mt-1 flex items-center gap-2">
-              <span class="rounded-full px-1.5 py-0.5 text-[10px] leading-none" :class="[userStatus.class]">
+              <span class="rounded-full px-1.5 py-0.5 text-[10px] leading-none" :class="userStatus.class">
                 {{ userStatus.label }}
               </span>
-              <span class="text-[10px] text-white/80 leading-none">
+              <span class="user-info-role text-[10px] leading-none">
                 {{ currentUser.role === 'admin' ? '管理员' : '普通用户' }}
               </span>
             </div>
@@ -318,18 +319,18 @@ async function handleChangePassword() {
         </div>
 
         <!-- 第2部分：卡密详情 -->
-        <div class="flex flex-1 flex-wrap items-center gap-x-6 gap-y-2 text-sm text-white/90 xl:justify-center">
+        <div class="user-info-meta flex flex-1 flex-wrap items-center gap-x-6 gap-y-2 text-sm xl:justify-center">
           <div class="flex items-center gap-1.5">
-            <span class="text-white/70">卡密:</span>
-            <span class="text-white font-medium">{{ cardTypeDetail.label }}</span>
+            <span class="user-info-meta-label">卡密:</span>
+            <span class="user-info-meta-value font-medium">{{ cardTypeDetail.label }}</span>
           </div>
           <div class="flex items-center gap-1.5">
-            <span class="text-white/70">到期:</span>
-            <span class="text-white font-medium">{{ expiryDate }}</span>
+            <span class="user-info-meta-label">到期:</span>
+            <span class="user-info-meta-value font-medium">{{ expiryDate }}</span>
           </div>
           <div class="flex items-center gap-1.5">
-            <span class="text-white/70">剩余:</span>
-            <span class="font-medium" :class="remainingTime.includes('过期') || remainingTime.includes('即将') ? 'text-red-300' : 'text-primary-300'">
+            <span class="user-info-meta-label">剩余:</span>
+            <span class="font-medium" :class="remainingTime.includes('过期') || remainingTime.includes('即将') ? 'user-info-meta-value-danger' : 'user-info-meta-value-brand'">
               {{ remainingTime }}
             </span>
           </div>
@@ -337,25 +338,25 @@ async function handleChangePassword() {
 
         <!-- 第3部分：按钮组 -->
         <div class="flex shrink-0 items-center gap-2">
-          <button class="flex items-center gap-1 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white font-medium transition-colors hover:bg-white/20" @click="showRenewModal = true">
+          <button class="user-info-action flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors" @click="showRenewModal = true">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             续费
           </button>
-          <button class="flex items-center gap-1 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white font-medium transition-colors hover:bg-white/20" @click="showPasswordModal = true">
+          <button class="user-info-action flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors" @click="showPasswordModal = true">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
             改密
           </button>
           <!-- 主题切换按钮 -->
           <button
             :title="tooltip"
-            class="flex items-center gap-1 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white font-medium transition-colors hover:bg-white/20"
+            class="user-info-action flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
             @click="appStore.toggleDark()"
           >
             <div class="h-4 w-4" :class="[iconClass]" />
             <span>{{ modeLabel }}</span>
           </button>
-          <div class="mx-1 h-6 w-px bg-white/20" />
-          <button class="rounded-lg p-1.5 text-white/80 transition-colors hover:bg-white/10 hover:text-white" title="退出登录" @click="handleLogout">
+          <div class="user-info-divider mx-1 h-6 w-px" />
+          <button class="user-info-action-icon rounded-lg p-1.5 transition-colors" title="退出登录" @click="handleLogout">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
@@ -364,7 +365,7 @@ async function handleChangePassword() {
       </div>
 
       <!-- 到期预警提示 -->
-      <div v-if="expiryWarning" class="mt-3 flex items-center justify-between gap-2 border border-white/20 rounded-lg bg-white/10 px-3 py-2 text-xs text-white font-medium sm:text-sm">
+      <div v-if="expiryWarning" class="user-info-warning mt-3 flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs font-medium sm:text-sm" :class="expiryWarning.class">
         <div class="flex items-center gap-2">
           <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
@@ -374,7 +375,7 @@ async function handleChangePassword() {
         <button
           v-if="showTrialRenew"
           :disabled="trialRenewing"
-          class="shrink-0 rounded-md bg-white/20 px-3 py-1 text-xs text-white font-medium transition-colors hover:bg-white/30 disabled:opacity-50"
+          class="user-info-warning-action shrink-0 rounded-md px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50"
           @click="handleTrialSelfRenew"
         >
           {{ trialRenewing ? '续费中...' : '🔄 一键续费' }}
@@ -402,7 +403,7 @@ async function handleChangePassword() {
         required
       >
         <template #prefix>
-          <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="glass-text-muted h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
           </svg>
         </template>
@@ -460,3 +461,103 @@ async function handleChangePassword() {
     </div>
   </ConfirmModal>
 </template>
+
+<style scoped>
+.user-info-card {
+  border: 1px solid color-mix(in srgb, var(--ui-text-on-brand) 18%, var(--ui-border-subtle));
+  color: var(--ui-text-1);
+}
+
+.user-info-card-header {
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--ui-brand-600) 78%, rgba(15, 23, 42, 0.2)) 0%,
+    color-mix(in srgb, var(--ui-brand-800) 72%, rgba(30, 41, 59, 0.28)) 100%
+  );
+}
+
+.user-info-avatar,
+.user-info-action,
+.user-info-action-icon,
+.user-info-warning,
+.user-info-warning-action {
+  border: 1px solid color-mix(in srgb, var(--ui-text-on-brand) 22%, transparent);
+  background: color-mix(in srgb, var(--ui-text-on-brand) 14%, transparent);
+  color: color-mix(in srgb, var(--ui-text-on-brand) 94%, var(--ui-text-1) 6%);
+}
+
+.user-info-title,
+.user-info-meta-value,
+.user-info-action,
+.user-info-action-icon {
+  color: color-mix(in srgb, var(--ui-text-on-brand) 96%, var(--ui-text-1) 4%);
+}
+
+.user-info-role,
+.user-info-meta,
+.user-info-meta-label {
+  color: color-mix(in srgb, var(--ui-text-on-brand) 84%, var(--ui-text-2) 16%);
+}
+
+.user-info-meta-value-brand {
+  color: color-mix(in srgb, var(--ui-brand-200) 88%, white 12%);
+}
+
+.user-info-meta-value-danger {
+  color: color-mix(in srgb, var(--ui-status-danger-soft) 66%, white 34%);
+}
+
+.user-info-action:hover,
+.user-info-action-icon:hover,
+.user-info-warning-action:hover {
+  background: color-mix(in srgb, var(--ui-text-on-brand) 22%, transparent);
+}
+
+.user-info-divider {
+  background: color-mix(in srgb, var(--ui-text-on-brand) 24%, transparent);
+}
+
+.user-info-status {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.user-info-status-brand {
+  background: color-mix(in srgb, var(--ui-brand-100) 84%, transparent);
+  color: var(--ui-brand-800);
+}
+
+.user-info-status-danger {
+  background: color-mix(in srgb, var(--ui-status-danger-soft) 82%, transparent);
+  color: var(--ui-status-danger);
+}
+
+.user-info-status-warning {
+  background: color-mix(in srgb, var(--ui-status-warning-soft) 84%, transparent);
+  color: var(--ui-status-warning);
+}
+
+.user-info-warning {
+  color: color-mix(in srgb, var(--ui-text-on-brand) 94%, var(--ui-text-1) 6%);
+}
+
+.user-info-warning-danger {
+  border-color: color-mix(in srgb, var(--ui-status-danger) 26%, rgba(255, 255, 255, 0.18));
+  background: color-mix(in srgb, var(--ui-status-danger) 16%, rgba(255, 255, 255, 0.14));
+}
+
+.user-info-warning-warning {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 26%, rgba(255, 255, 255, 0.18));
+  background: color-mix(in srgb, var(--ui-status-warning) 16%, rgba(255, 255, 255, 0.14));
+}
+
+.user-info-warning-action {
+  color: color-mix(in srgb, var(--ui-text-on-brand) 98%, white 2%);
+}
+
+.user-info-card :is(.text-red-600, .dark\:text-red-400) {
+  color: var(--ui-status-danger);
+}
+</style>

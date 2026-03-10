@@ -7,10 +7,13 @@ const props = defineProps<{
   size?: 'sm' | 'md' | 'lg'
   loading?: boolean
   disabled?: boolean
+  stopPropagation?: boolean
   block?: boolean
   to?: string
   href?: string
   type?: 'button' | 'submit' | 'reset'
+  iconClass?: string
+  loadingLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -25,26 +28,33 @@ const componentTag = computed(() => {
   return 'button'
 })
 
-const baseClasses = 'inline-flex items-center justify-center rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60'
+const isTextLike = computed(() => props.variant === 'text')
+const hasVisualIcon = computed(() => props.loading || !!props.iconClass)
+const resolvedLoadingLabel = computed(() => props.loading && props.loadingLabel ? props.loadingLabel : '')
+
+const baseClasses = computed(() => [
+  'ui-btn inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all duration-200 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60',
+  !isTextLike.value && 'ui-action-button',
+])
 
 const variantClasses = computed(() => {
   switch (props.variant) {
     case 'primary':
-      return 'bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm dark:bg-primary-600 dark:hover:bg-primary-500'
+      return 'ui-btn-primary shadow-sm'
     case 'secondary':
-      return 'bg-gray-100 text-gray-700 hover:bg-gray-200 focus:ring-gray-500 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+      return 'ui-btn-secondary'
     case 'success':
-      return 'bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm dark:bg-primary-600 dark:hover:bg-primary-500'
+      return 'ui-btn-success shadow-sm'
     case 'danger':
-      return 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 shadow-sm dark:bg-red-600 dark:hover:bg-red-500'
+      return 'ui-btn-danger shadow-sm'
     case 'ghost':
-      return 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+      return 'ui-btn-ghost'
     case 'outline':
-      return 'border border-gray-300 bg-transparent text-gray-700 hover:bg-gray-50 focus:ring-gray-500 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+      return 'ui-btn-outline border'
     case 'text':
-      return 'text-primary-600 hover:underline p-0 bg-transparent shadow-none hover:bg-transparent dark:text-primary-400'
+      return 'ui-btn-text p-0 bg-transparent shadow-none hover:bg-transparent'
     default:
-      return 'bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm dark:bg-primary-600 dark:hover:bg-primary-500'
+      return 'ui-btn-primary shadow-sm'
   }
 })
 
@@ -63,6 +73,17 @@ const sizeClasses = computed(() => {
 })
 
 const widthClasses = computed(() => props.block ? 'w-full' : '')
+
+function handleClick(event: MouseEvent) {
+  if (props.stopPropagation)
+    event.stopPropagation()
+
+  if (props.disabled || props.loading) {
+    event.preventDefault()
+    return
+  }
+  emit('click', event)
+}
 </script>
 
 <template>
@@ -72,11 +93,92 @@ const widthClasses = computed(() => props.block ? 'w-full' : '')
     :href="href"
     :type="!to && !href ? (type || 'button') : undefined"
     :disabled="disabled || loading"
+    :aria-busy="loading ? 'true' : 'false'"
+    :aria-disabled="disabled || loading ? 'true' : 'false'"
     :class="[baseClasses, variantClasses, sizeClasses, widthClasses]"
     v-bind="$attrs"
-    @click="!disabled && !loading && emit('click', $event)"
+    @click="handleClick"
   >
-    <div v-if="loading" class="i-svg-spinners-ring-resize mr-2 animate-spin" />
-    <slot />
+    <span
+      v-if="hasVisualIcon"
+      class="ui-action-button__icon"
+      :class="loading ? 'i-svg-spinners-ring-resize' : iconClass"
+    />
+    <span class="ui-action-button__label">
+      <template v-if="resolvedLoadingLabel">
+        {{ resolvedLoadingLabel }}
+      </template>
+      <slot v-else />
+    </span>
   </component>
 </template>
+
+<style scoped>
+.ui-btn {
+  border-color: transparent;
+}
+
+.ui-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--ui-focus-ring);
+}
+
+.ui-btn-primary {
+  background: color-mix(in srgb, var(--ui-brand-600) 92%, var(--ui-bg-surface) 8%);
+  color: var(--ui-text-on-brand);
+}
+
+.ui-btn-primary:hover {
+  background: color-mix(in srgb, var(--ui-brand-700) 94%, var(--ui-bg-surface) 6%);
+}
+
+.ui-btn-secondary {
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-1);
+  border: 1px solid var(--ui-border-subtle);
+}
+
+.ui-btn-secondary:hover {
+  background: var(--ui-bg-surface-raised);
+}
+
+.ui-btn-success {
+  background: var(--ui-status-success);
+  color: var(--ui-text-on-brand);
+}
+
+.ui-btn-success:hover {
+  filter: brightness(0.96);
+}
+
+.ui-btn-danger {
+  background: var(--ui-status-danger);
+  color: var(--ui-text-on-brand);
+}
+
+.ui-btn-danger:hover {
+  filter: brightness(0.96);
+}
+
+.ui-btn-ghost {
+  color: var(--ui-text-2);
+}
+
+.ui-btn-ghost:hover {
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-1);
+}
+
+.ui-btn-outline {
+  border-color: var(--ui-border-strong);
+  color: var(--ui-text-1);
+  background: transparent;
+}
+
+.ui-btn-outline:hover {
+  background: var(--ui-bg-surface);
+}
+
+.ui-btn-text {
+  color: var(--ui-text-1);
+}
+</style>

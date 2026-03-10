@@ -8,8 +8,9 @@ async function runLogCleanup() {
         if (!db) return;
         const [info1] = await db.query(`DELETE FROM operation_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)`);
         const [info2] = await db.query(`DELETE FROM config_audit_log WHERE changed_at < DATE_SUB(NOW(), INTERVAL 7 DAY)`);
+        const [info3] = await db.query(`DELETE FROM admin_operation_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`);
 
-        logger.info(`日志清理完成: 删除了 ${info1.affectedRows} 条操作日志, ${info2.affectedRows} 条配置审计日志`);
+        logger.info(`日志清理完成: 删除了 ${info1.affectedRows} 条操作日志, ${info2.affectedRows} 条配置审计日志, ${info3.affectedRows} 条管理员操作摘要日志`);
     } catch (err) {
         logger.error('执行日志清理任务失败', { error: err.message });
     }

@@ -339,7 +339,7 @@ PRAGMA synchronous = NORMAL;
 
 #### 镜像仓库
 - **Docker Hub**: `smdk000/qq-farm-bot-ui`
-- **GitHub Container Registry**: `ghcr.io/smdk000/qq-farm-bot-ui`
+- **GitHub Container Registry**: `ghcr.io/smdk000/qq-farm-ui-pro-max`
 
 ### CI/CD
 
@@ -368,40 +368,27 @@ PRAGMA synchronous = NORMAL;
 
 ### 部署脚本
 
-#### 一键部署脚本
+#### 当前标准部署脚本
 
-**deploy-arm.sh** - ARM64 服务器部署
-```bash
-#!/bin/bash
-# 适用于树莓派、鲲鹏、飞腾等 ARM64 架构
-docker pull smdk000/qq-farm-bot-ui:latest
-docker run -d --name qq-farm-bot-ui \
-  -p 3080:3000 \
-  -v ./data:/app/core/data \
-  -e ADMIN_PASSWORD=your_password \
-  smdk000/qq-farm-bot-ui:latest
-```
-
-**deploy-x86.sh** - x86_64 服务器部署
-```bash
-#!/bin/bash
-# 适用于 Intel/AMD 处理器服务器
-docker pull smdk000/qq-farm-bot-ui:latest
-docker run -d --name qq-farm-bot-ui \
-  -p 3080:3000 \
-  -v ./data:/app/core/data \
-  -e ADMIN_PASSWORD=your_password \
-  smdkk000/qq-farm-bot-ui:latest
-```
+- `scripts/deploy/fresh-install.sh`
+  - 全新服务器标准入口，自动准备 `deploy/docker-compose.yml`、`.env`、初始化 SQL 与修复脚本
+- `scripts/deploy/update-app.sh`
+  - 已部署服务器仅更新主程序
+- `scripts/deploy/repair-deploy.sh`
+  - 修复旧部署目录缺失文件、错误链接与编排文件
+- `scripts/deploy/repair-mysql.sh`
+  - 修复旧数据库结构与历史数据
+- `scripts/deploy/deploy-arm.sh` / `scripts/deploy/deploy-x86.sh`
+  - 架构包装脚本，内部转发到 `fresh-install.sh`
 
 #### Docker Compose 部署
 
-**docker-compose.prod.yml** - 生产环境配置
+**deploy/docker-compose.yml** - 当前标准部署编排
 ```yaml
 version: '3.8'
 services:
   qq-farm-bot-ui:
-    image: smdkk000/qq-farm-bot-ui:latest
+    image: smdk000/qq-farm-bot-ui:latest
     container_name: qq-farm-bot-ui
     restart: unless-stopped
     ports:

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>主题全局统一最终报告 - 2026-03-09</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --line: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --ok: #16a34a;
+      --warn: #d97706;
+      --info: #0284c7;
+      --danger: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .wrap { max-width: 1120px; margin: 24px auto; padding: 0 16px 24px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    h2 { margin: 0 0 10px; font-size: 16px; }
+    p { margin: 6px 0; }
+    ul { margin: 8px 0 0 20px; }
+    .muted { color: var(--muted); }
+    .ok { color: var(--ok); font-weight: 600; }
+    .warn { color: var(--warn); font-weight: 600; }
+    .info { color: var(--info); font-weight: 600; }
+    .danger { color: var(--danger); font-weight: 600; }
+    code { background: #f1f5f9; border-radius: 6px; padding: 1px 6px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+    th { background: #f8fafc; font-weight: 600; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="card">
+      <h1>主题全局统一最终报告</h1>
+      <p class="muted">日期：2026-03-09（Asia/Shanghai）</p>
+      <p>目标：在不改业务逻辑的前提下，完成深色/浅色与主题色的语义化统一，减少硬编码、提升一致性与可维护性。</p>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <h2>核心成果</h2>
+        <ul>
+          <li><span class="ok">完成</span> 主题 token 运行时框架：<code>web/src/theme/tokens.ts</code>、<code>web/src/theme/apply-theme.ts</code>。</li>
+          <li><span class="ok">完成</span> 全局语义变量扩展：<code>--ui-bg-* / --ui-border-* / --ui-text-* / --ui-status-* / --ui-shadow-*</code>。</li>
+          <li><span class="ok">完成</span> 基础组件色板统一：Button/Input/Select/Switch/Toast。</li>
+          <li><span class="ok">完成</span> 高频页面收口：Accounts、Friends、FarmTools、BagPanel、Settings。</li>
+          <li><span class="ok">完成</span> iframe 页面（FarmTools）注入样式由绝对色改为语义变量驱动。</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>关键原则落地</h2>
+        <ul>
+          <li>主题色：统一来源于 <code>--color-primary-*</code>，避免局部独立主色。</li>
+          <li>文字色：统一到 <code>--ui-text-1/2/3</code>，降低明暗模式反转风险。</li>
+          <li>状态色：统一到 <code>--ui-status-success/warning/danger/info</code>。</li>
+          <li>面板色：统一到 <code>--ui-bg-surface / --ui-bg-surface-raised</code>。</li>
+          <li>阴影：统一到 <code>--ui-shadow-*</code>，发光强度按语义层级控制。</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>残留扫描（当前快照）</h2>
+      <p class="muted">统计口径：匹配 <code>#hex / rgb(a) / shadow-[...] / text-shadow</code>，用于定位仍可收敛项。</p>
+      <table>
+        <thead>
+          <tr><th>文件</th><th>匹配数</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>web/src/views/FarmTools.vue</code></td><td>109</td><td>主要为 iframe 动态注入样式中的必要兼容规则。</td></tr>
+          <tr><td><code>web/src/components/BagPanel.vue</code></td><td>33</td><td>少量视觉特效与分类强调色仍保留。</td></tr>
+          <tr><td><code>web/src/views/Settings.vue</code></td><td>8</td><td>主要为预览场景内联样式与遮罩参数表达。</td></tr>
+          <tr><td><strong>合计（上述三文件）</strong></td><td><strong>150</strong></td><td>可继续按优先级逐步收口。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>验收清单（建议）</h2>
+      <ul>
+        <li>浅色 + default/cyber/elegant/ocean/sakura：检查导航、卡片、按钮、状态提示是否同一视觉层级。</li>
+        <li>深色 + default/cyber/elegant/ocean/sakura：检查文本对比度、边框可见性、禁用态辨识度。</li>
+        <li>FarmTools iframe：切换主题时确认背景、按钮、徽章、表格条纹无白底闪烁。</li>
+        <li>Settings 预览区域：主题套装卡、背景范围卡、工作区视觉预设卡的高亮与阴影强度一致。</li>
+        <li>BagPanel 详情弹窗：遮罩层、主卡片、图片阴影、按钮激活态在浅/深色下都不过曝。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>风险与说明</h2>
+      <ul>
+        <li>本轮均为 UI 主题层改动，不涉及业务接口、状态计算和流程逻辑。</li>
+        <li>已反复运行 <code>cd web && npx vue-tsc -b</code>，当前通过。</li>
+        <li>若继续“全量去硬编码”，建议从 FarmTools 的动态注入段按模块拆分，避免单段样式过长导致维护困难。</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>本报告文件</h2>
+      <p><code>docs/theme-global-unification-final-report-2026-03-09.html</code></p>
+    </section>
+  </div>
+</body>
+</html>

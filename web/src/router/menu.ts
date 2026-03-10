@@ -5,6 +5,7 @@ export interface MenuItem {
   icon: string
   component: () => Promise<any>
   adminOnly?: boolean
+  layoutMode?: 'standard' | 'wide' | 'fluid'
 }
 
 export const menuRoutes: MenuItem[] = [
@@ -14,6 +15,7 @@ export const menuRoutes: MenuItem[] = [
     label: '概览',
     icon: 'i-carbon-chart-pie',
     component: () => import('@/views/Dashboard.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'overview',
@@ -21,6 +23,7 @@ export const menuRoutes: MenuItem[] = [
     label: '总览',
     icon: 'i-carbon-chart-multitype',
     component: () => import('@/views/AnalyticsEcharts.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'personal',
@@ -28,6 +31,7 @@ export const menuRoutes: MenuItem[] = [
     label: '农场预览',
     icon: 'i-carbon-sprout',
     component: () => import('@/views/Personal.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'friends',
@@ -35,6 +39,7 @@ export const menuRoutes: MenuItem[] = [
     label: '好友',
     icon: 'i-carbon-user-multiple',
     component: () => import('@/views/Friends.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'steal-settings',
@@ -42,6 +47,7 @@ export const menuRoutes: MenuItem[] = [
     label: '偷菜设置',
     icon: 'i-carbon-sprout',
     component: () => import('@/views/StealSettings.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'workflow',
@@ -49,6 +55,7 @@ export const menuRoutes: MenuItem[] = [
     label: '策略流程',
     icon: 'i-carbon-flow',
     component: () => import('@/views/Workflow.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'analytics',
@@ -56,6 +63,7 @@ export const menuRoutes: MenuItem[] = [
     label: '作物图鉴',
     icon: 'i-carbon-catalog',
     component: () => import('@/views/Analytics.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'accounts',
@@ -63,6 +71,7 @@ export const menuRoutes: MenuItem[] = [
     label: '账号',
     icon: 'i-carbon-user-settings',
     component: () => import('@/views/Accounts.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'settings',
@@ -70,6 +79,7 @@ export const menuRoutes: MenuItem[] = [
     label: '设置',
     icon: 'i-carbon-settings',
     component: () => import('@/views/Settings.vue'),
+    layoutMode: 'fluid',
   },
   {
     path: 'announcements',
@@ -78,6 +88,7 @@ export const menuRoutes: MenuItem[] = [
     icon: 'i-carbon-notification',
     component: () => import('@/views/AnnouncementManager.vue'),
     adminOnly: true,
+    layoutMode: 'fluid',
   },
   {
     path: 'system-logs',
@@ -86,6 +97,16 @@ export const menuRoutes: MenuItem[] = [
     icon: 'i-carbon-catalog',
     component: () => import('@/views/SystemLogs.vue'),
     adminOnly: true,
+    layoutMode: 'fluid',
+  },
+  {
+    path: 'admin-operation-logs',
+    name: 'admin-operation-logs',
+    label: '操作日志',
+    icon: 'i-carbon-task',
+    component: () => import('@/views/AdminOperationLogs.vue'),
+    adminOnly: true,
+    layoutMode: 'fluid',
   },
   {
     path: 'users',
@@ -94,6 +115,7 @@ export const menuRoutes: MenuItem[] = [
     icon: 'i-carbon-user-multiple',
     component: () => import('@/views/Users.vue'),
     adminOnly: true,
+    layoutMode: 'fluid',
   },
   {
     path: 'account-ownership',
@@ -102,6 +124,7 @@ export const menuRoutes: MenuItem[] = [
     icon: 'i-carbon-user-role',
     component: () => import('@/views/AccountOwnership.vue'),
     adminOnly: true,
+    layoutMode: 'fluid',
   },
   {
     path: 'cards',
@@ -110,5 +133,6 @@ export const menuRoutes: MenuItem[] = [
     icon: 'i-carbon-id-management',
     component: () => import('@/views/Cards.vue'),
     adminOnly: true,
+    layoutMode: 'fluid',
   },
 ]

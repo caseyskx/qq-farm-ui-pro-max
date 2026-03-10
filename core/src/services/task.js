@@ -12,7 +12,14 @@ const { recordOperation } = require('./stats');
 let checking = false;
 let taskClaimDoneDateKey = '';
 let taskClaimLastAt = 0;
-const taskScheduler = createScheduler('task');
+let taskScheduler = null;
+
+function getTaskScheduler() {
+    if (!taskScheduler) {
+        taskScheduler = createScheduler('task');
+    }
+    return taskScheduler;
+}
 
 function getDateKey() {
     const { getServerTimeSec } = require('../utils/utils');
@@ -290,7 +297,7 @@ function onTaskInfoNotify(taskInfo) {
     if (hasClaimable) log('任务', `有 ${claimable.length} 个任务可领取，准备自动领取...`, {
         module: 'task', event: 'task_claim', result: 'plan', count: claimable.length
     });
-    taskScheduler.setTimeoutTask('task_claim_debounce', 1000, async () => {
+    getTaskScheduler().setTimeoutTask('task_claim_debounce', 1000, async () => {
         if (hasClaimable) await claimTasksFromList(claimable);
         await checkAndClaimActives(actives);
         await checkAndClaimIllustratedRewards();
@@ -309,14 +316,16 @@ async function claimTasksFromList(claimable) {
 function initTaskSystem() {
     cleanupTaskSystem();
     networkEvents.on('taskInfoNotify', onTaskInfoNotify);
-    taskScheduler.setTimeoutTask('task_init_bootstrap', 4000, () => {
+    getTaskScheduler().setTimeoutTask('task_init_bootstrap', 4000, () => {
         checkAndClaimTasks();
     });
 }
 
 function cleanupTaskSystem() {
     networkEvents.off('taskInfoNotify', onTaskInfoNotify);
-    taskScheduler.clearAll();
+    if (taskScheduler) {
+        taskScheduler.clearAll();
+    }
     checking = false;
 }
 

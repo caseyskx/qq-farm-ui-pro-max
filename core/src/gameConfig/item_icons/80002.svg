@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100" fill="none">
+  <rect width="100" height="100" rx="20" fill="#EEF5F7"/>
+  <path d="M29 24C28 18 33 13 39 13H62C68 13 73 18 71 24L67 35H33L29 24Z" fill="#744A2B"/>
+  <path d="M24 34C24 28 29 23 35 23H64C70 23 75 28 75 34V68C75 78 67 87 57 87H43C33 87 25 78 25 68L24 34Z" fill="#C6894E"/>
+  <path d="M25 37C25 31 29 26 35 26H64C70 26 74 31 74 37V67C74 76 67 83 58 83H44C35 83 28 76 28 67L25 37Z" fill="#F0D7B5"/>
+  <path d="M56 55C61 53 66 56 67 61C62 63 57 60 56 55Z" fill="#56B879"/>
+  <path d="M44 56C40 53 34 55 33 61C38 63 43 61 44 56Z" fill="#6FCB6A"/>
+  <path d="M50 51C54 55 54 63 50 69C46 64 46 56 50 51Z" fill="#4F9C4D"/>
+  <text x="12" y="86" fill="#FFFDF7" font-family="'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="21" font-weight="900" stroke="#7B4B27" stroke-linejoin="round" stroke-width="6" paint-order="stroke">4小时</text>
+</svg>

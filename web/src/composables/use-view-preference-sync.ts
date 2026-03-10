@@ -1,8 +1,10 @@
-import type { ViewPreferencesPayload } from '@/utils/view-preferences'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { fetchViewPreferences, saveViewPreferences } from '@/utils/view-preferences'
+import type { ViewPreferencesPayload } from '../utils/view-preferences'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 
-interface UseViewPreferenceSyncOptions<T, K extends keyof ViewPreferencesPayload> {
+type ViewPreferencesFetcher = () => Promise<ViewPreferencesPayload | null>
+type ViewPreferencesSaver = (payload: ViewPreferencesPayload) => Promise<unknown>
+
+export interface UseViewPreferenceSyncOptions<T, K extends keyof ViewPreferencesPayload> {
   key: K
   label: string
   buildState: () => T
@@ -11,6 +13,8 @@ interface UseViewPreferenceSyncOptions<T, K extends keyof ViewPreferencesPayload
   readLocalFallback?: () => T
   shouldSyncFallback?: (state: T) => boolean
   debounceMs?: number
+  fetchPreferences?: ViewPreferencesFetcher
+  savePreferences?: ViewPreferencesSaver
 }
 
 function hasPersistedViewPreferenceValue(value: unknown) {
@@ -24,6 +28,16 @@ function buildViewPreferencePayload<K extends keyof ViewPreferencesPayload>(
   return { [key]: state } as ViewPreferencesPayload
 }
 
+async function resolveDefaultFetchPreferences(): Promise<ViewPreferencesFetcher> {
+  const { fetchViewPreferences } = await import('../utils/view-preference-api')
+  return fetchViewPreferences
+}
+
+async function resolveDefaultSavePreferences(): Promise<ViewPreferencesSaver> {
+  const { saveViewPreferences } = await import('../utils/view-preference-api')
+  return saveViewPreferences
+}
+
 export function useViewPreferenceSync<T, K extends keyof ViewPreferencesPayload>(
   options: UseViewPreferenceSyncOptions<T, K>,
 ) {
@@ -31,6 +45,8 @@ export function useViewPreferenceSync<T, K extends keyof ViewPreferencesPayload>
   const syncEnabled = ref(false)
   let syncTimer: ReturnType<typeof setTimeout> | null = null
   const debounceMs = options.debounceMs ?? 240
+  const fetchPreferences = options.fetchPreferences ?? (() => resolveDefaultFetchPreferences().then(load => load()))
+  const savePreferences = options.savePreferences ?? (payload => resolveDefaultSavePreferences().then(save => save(payload)))
 
   const signature = computed(() => JSON.stringify(options.buildState()))
 
@@ -61,7 +77,7 @@ export function useViewPreferenceSync<T, K extends keyof ViewPreferencesPayload>
 
   async function persistState(state: T = options.buildState()) {
     try {
-      await saveViewPreferences(
+      await savePreferences(
         buildViewPreferencePayload(options.key, state as ViewPreferencesPayload[K]),
       )
     }
@@ -73,7 +89,7 @@ export function useViewPreferenceSync<T, K extends keyof ViewPreferencesPayload>
   async function hydrate(preloadedPayload?: ViewPreferencesPayload | null) {
     const fallbackState = readFallbackState()
     try {
-      const payload = preloadedPayload ?? await fetchViewPreferences()
+      const payload = preloadedPayload ?? await fetchPreferences()
       const remoteState = payload?.[options.key]
       if (hasPersistedViewPreferenceValue(remoteState)) {
         applyHydratedState(remoteState)
@@ -104,7 +120,7 @@ export function useViewPreferenceSync<T, K extends keyof ViewPreferencesPayload>
     scheduleSync()
   })
 
-  onBeforeUnmount(() => {
+  onScopeDispose(() => {
     clearSyncTimer()
   })
 

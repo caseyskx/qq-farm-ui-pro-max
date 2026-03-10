@@ -221,7 +221,7 @@ const AUTOMATION_SCHEMA = {
     friend_steal: { type: 'boolean', default: true, label: '偷菜' },
     friend_help: { type: 'boolean', default: true, label: '帮忙' },
     friend_bad: { type: 'boolean', default: false, label: '捣乱' },
-    task: { type: 'boolean', default: true, label: '每日任务' },
+    task: { type: 'boolean', default: true, label: '任务领奖' },
     email: { type: 'boolean', default: true, label: '邮箱' },
     fertilizer_gift: { type: 'boolean', default: false, label: '肥料礼包' },
     fertilizer_buy: { type: 'boolean', default: false, label: '自动购肥' },

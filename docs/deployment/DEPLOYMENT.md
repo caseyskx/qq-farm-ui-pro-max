@@ -34,8 +34,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/Penty-d/qq-farm-bot-ui.git
-cd qq-farm-bot-ui
+git clone https://github.com/smdk000/qq-farm-ui-pro-max.git
+cd qq-farm-ui-pro-max
 
 # 2. 配置管理员密码（可选）
 # 编辑 docker-compose.yml，设置 ADMIN_PASSWORD 环境变量
@@ -60,8 +60,8 @@ docker compose logs -f
 corepack enable
 
 # 3. 克隆项目
-git clone https://github.com/Penty-d/qq-farm-bot-ui.git
-cd qq-farm-bot-ui
+git clone https://github.com/smdk000/qq-farm-ui-pro-max.git
+cd qq-farm-ui-pro-max
 
 # 4. 安装依赖
 pnpm install
@@ -634,15 +634,15 @@ cp -r data $BACKUP_DIR/data_$DATE
 
 ## 技术支持
 
-- **GitHub Issues**: [提交问题](https://github.com/Penty-d/qq-farm-bot-ui/issues)
-- **官方文档**: [查看文档](https://github.com/Penty-d/qq-farm-bot-ui)
-- **讨论区**: [参与讨论](https://github.com/Penty-d/qq-farm-bot-ui/discussions)
+- **GitHub Issues**: [提交问题](https://github.com/smdk000/qq-farm-ui-pro-max/issues)
+- **官方文档**: [查看文档](https://github.com/smdk000/qq-farm-ui-pro-max)
+- **讨论区**: [参与讨论](https://github.com/smdk000/qq-farm-ui-pro-max/discussions)
 
 ---
 
 ## 更新日志
 
-查看 [Update.log](./Update.log) 了解最新版本信息。
+查看 [Update.log](../../logs/development/Update.log) 了解最新版本信息。
 
 ---
 

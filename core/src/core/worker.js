@@ -11,7 +11,7 @@ const { getEmailDailyState } = require('../services/email');
 const { checkFarm, startFarmCheckLoop, stopFarmCheckLoop, refreshFarmCheckLoop, getLandsDetail, getAvailableSeeds, runFarmOperation } = require('../services/farm');
 const { checkFriends, startFriendCheckLoop, stopFriendCheckLoop, refreshFriendCheckLoop, getFriendsList, getFriendLandsDetail, doFriendOperation, doFriendBatchOperation } = require('../services/friend');
 const { processInviteCodes } = require('../services/invite');
-const { autoBuyOrganicFertilizer, buyFreeGifts, getFreeGiftDailyState, getMallGoodsCatalog, purchaseMallGoods } = require('../services/mall');
+const { autoBuyOrganicFertilizer, buyFreeGifts, getFreeGiftDailyState, getMallGoodsCatalog, getMallCatalog, purchaseMallGoods, claimMonthCardRewardByGoodsId } = require('../services/mall');
 const { performDailyMonthCardGift, getMonthCardDailyState } = require('../services/monthcard');
 const { performDailyOpenServerGift, getOpenServerDailyState } = require('../services/openserver');
 const { performDailyVipGift, getVipDailyState } = require('../services/qqvip');
@@ -22,6 +22,8 @@ const { initStatusBar, setStatusPlatform, statusData } = require('../services/st
 const { setRecordGoldExpHook } = require('../services/status');
 const { cleanupTaskSystem, checkAndClaimTasks, getTaskClaimDailyState, getTaskDailyStateLikeApp, getGrowthTaskStateLikeApp } = require('../services/task');
 const { getRuntimeAccountModePolicy, getRuntimeFriendsSnapshot, updateRuntimeFriendsSnapshot } = require('../services/account-mode-policy');
+const { getInteractRecords } = require('../services/interact');
+const { getShopCatalog, buyShopGoods } = require('../services/shop');
 const { sellAllFruits, getBag, getBagItems, getSellPreview, sellByPolicy, sellSelectedItems, openFertilizerGiftPacksSilently } = require('../services/warehouse');
 const { connect, cleanup, getWs, getUserState, networkEvents } = require('../utils/network');
 const { loadProto } = require('../utils/proto');
@@ -150,20 +152,40 @@ let onFarmHarvested = null;
 let harvestSellRunning = false;
 let onWsError = null;
 let wsErrorHandledAt = 0;
-let lastDailyRunDate = '';
-const workerScheduler = createScheduler('worker');
+let workerScheduler = null;
 
-function isDailyRoutineEnabled(auto) {
+function getWorkerScheduler() {
+    if (!workerScheduler) {
+        workerScheduler = createScheduler('worker');
+    }
+    return workerScheduler;
+}
+const DAILY_ROUTINE_AUTOMATION_KEYS = Object.freeze([
+    'email',
+    'free_gifts',
+    'share_reward',
+    'vip_gift',
+    'month_card',
+    'open_server_gift',
+]);
+
+function hasEnabledDailyRoutine(auto) {
     const a = (auto && typeof auto === 'object') ? auto : {};
-    return !!(a.email && a.free_gifts && a.share_reward && a.vip_gift && a.month_card && a.open_server_gift);
+    return DAILY_ROUTINE_AUTOMATION_KEYS.some((key) => !!a[key]);
 }
 
-function getLocalDateKey() {
+function hasNewDailyRoutineEnabled(prevAuto, nextAuto) {
+    const prev = (prevAuto && typeof prevAuto === 'object') ? prevAuto : {};
+    const next = (nextAuto && typeof nextAuto === 'object') ? nextAuto : {};
+    return DAILY_ROUTINE_AUTOMATION_KEYS.some((key) => !prev[key] && !!next[key]);
+}
+
+function getDelayUntilNextDailyRoutineMs() {
     const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    const next = new Date(now);
+    // 稍微偏移 1 秒，避免本地零点边界上的重复/过早触发。
+    next.setHours(24, 0, 1, 0);
+    return Math.max(1000, next.getTime() - now.getTime());
 }
 
 async function runDailyRoutines(force = false) {
@@ -182,21 +204,26 @@ async function runDailyRoutines(force = false) {
 }
 
 function stopDailyRoutineTimer() {
-    workerScheduler.clear('daily_routine_interval');
+    getWorkerScheduler().clear('daily_routine_interval');
 }
 
-function startDailyRoutineTimer() {
+function scheduleNextDailyRoutineRun() {
     stopDailyRoutineTimer();
-    lastDailyRunDate = getLocalDateKey();
-    // 新账号登录后按当前设置强制执行一次领取
-    runDailyRoutines(true).catch(() => null);
-    workerScheduler.setIntervalTask('daily_routine_interval', 30 * 1000, () => {
-        if (!loginReady) return;
-        const today = getLocalDateKey();
-        if (today === lastDailyRunDate) return;
-        lastDailyRunDate = today;
-        runDailyRoutines(true).catch(() => null);
+    if (!loginReady || !hasEnabledDailyRoutine(getAutomation())) return;
+    getWorkerScheduler().setTimeoutTask('daily_routine_interval', getDelayUntilNextDailyRoutineMs(), () => {
+        runDailyRoutines(true).catch(() => null).finally(() => {
+            scheduleNextDailyRoutineRun();
+        });
     });
+}
+
+function startDailyRoutineTimer(options = {}) {
+    scheduleNextDailyRoutineRun();
+    if (options.runImmediately === false) return;
+    // 登录后先补跑一次，避免当天错过礼包。
+    if (loginReady && hasEnabledDailyRoutine(getAutomation())) {
+        runDailyRoutines(true).catch(() => null);
+    }
 }
 
 function normalizeIntervalRangeSec(minSec, maxSec, fallbackSec) {
@@ -331,7 +358,7 @@ async function runUnifiedTick() {
 
 function scheduleUnifiedNextTick() {
     if (!unifiedSchedulerRunning) return;
-    workerScheduler.clear('unified_next_tick');
+    getWorkerScheduler().clear('unified_next_tick');
     if (!loginReady) return;
 
     const now = Date.now();
@@ -342,7 +369,7 @@ function scheduleUnifiedNextTick() {
     );
     const delayMs = Math.max(1000, nextAt - now); // 最低 1 秒
 
-    workerScheduler.setTimeoutTask('unified_next_tick', delayMs, async () => {
+    getWorkerScheduler().setTimeoutTask('unified_next_tick', delayMs, async () => {
         try {
             await runUnifiedTick();
         } finally {
@@ -363,7 +390,7 @@ function stopUnifiedScheduler() {
     farmTaskRunning = false;
     helpTaskRunning = false;
     stealTaskRunning = false;
-    workerScheduler.clear('unified_next_tick');
+    getWorkerScheduler().clear('unified_next_tick');
 }
 
 function applyRuntimeConfig(snapshot, syncNow = false) {
@@ -390,11 +417,16 @@ function applyRuntimeConfig(snapshot, syncNow = false) {
         const hasAutomationPayload = !!(snapshot && snapshot.automation && typeof snapshot.automation === 'object');
         if (hasAutomationPayload) {
             const nextAuto = getAutomation();
-            const wasEnabled = isDailyRoutineEnabled(prevAuto);
-            const nowEnabled = isDailyRoutineEnabled(nextAuto);
+            const wasEnabled = hasEnabledDailyRoutine(prevAuto);
+            const nowEnabled = hasEnabledDailyRoutine(nextAuto);
             if (!wasEnabled && nowEnabled) {
-                // 保存设置时 /api/automation 可能触发多次 config_sync，这里做防抖且仅关->开触发
-                workerScheduler.setTimeoutTask('daily_routine_immediate', 400, () => {
+                startDailyRoutineTimer({ runImmediately: false });
+            } else if (wasEnabled && !nowEnabled) {
+                stopDailyRoutineTimer();
+            }
+            if (hasNewDailyRoutineEnabled(prevAuto, nextAuto)) {
+                // 保存设置时 /api/automation 可能触发多次 config_sync，这里做防抖且仅在新增日常开关时触发
+                getWorkerScheduler().setTimeoutTask('daily_routine_immediate', 400, () => {
                     runDailyRoutines(true).catch(() => null);
                 });
             }
@@ -478,7 +510,7 @@ async function startBot(config) {
             message: payload?.message || '',
         });
         if (isRunning) {
-            workerScheduler.setTimeoutTask('ws_error_cleanup', 1000, () => {
+            getWorkerScheduler().setTimeoutTask('ws_error_cleanup', 1000, () => {
                 if (isRunning) {
                     stopFarmCheckLoop();
                     stopFriendCheckLoop();
@@ -539,7 +571,7 @@ async function startBot(config) {
                 if (list.length > 0) {
                     sendToMaster({ type: 'sync_friends_cache', data: list });
                 }
-            } catch (e) { }
+            } catch { }
         });
         // ====================
 
@@ -604,7 +636,7 @@ async function startBot(config) {
     connect(config.code, config.uin, onLoginSuccess);
 
     // 启动定时状态同步
-    workerScheduler.setIntervalTask('status_sync', 3000, syncStatus, { preventOverlap: true });
+    getWorkerScheduler().setIntervalTask('status_sync', 3000, syncStatus, { preventOverlap: true });
 }
 
 async function stopBot() {
@@ -629,7 +661,9 @@ async function stopBot() {
     stopFriendCheckLoop();
     stopDailyRoutineTimer();
     cleanupTaskSystem();
-    workerScheduler.clearAll();
+    if (workerScheduler) {
+        workerScheduler.clearAll();
+    }
     cleanup();
     const ws = getWs();
     if (ws) ws.close();
@@ -640,7 +674,7 @@ function onKickout(payload) {
     const reason = payload && payload.reason ? payload.reason : '未知';
     log('系统', `检测到踢下线，准备自动停止账号。原因: ${reason}`);
     sendToMaster({ type: 'account_kicked', reason });
-    workerScheduler.setTimeoutTask('kickout_stop', 200, () => {
+    getWorkerScheduler().setTimeoutTask('kickout_stop', 200, () => {
         stopBot().catch(() => exitWorker(0));
     });
 }
@@ -662,6 +696,9 @@ async function handleApiCall(msg) {
             case 'getFriendLands':
                 result = await getFriendLandsDetail(args[0]);
                 break;
+            case 'getInteractRecords':
+                result = await getInteractRecords(args[0]);
+                break;
             case 'doFriendOp':
                 result = await doFriendOperation(args[0], args[1]);
                 break;
@@ -680,8 +717,20 @@ async function handleApiCall(msg) {
             case 'getMallGoods':
                 result = await getMallGoodsCatalog(args[0]);
                 break;
+            case 'getMallCatalog':
+                result = await getMallCatalog();
+                break;
             case 'buyMallGoods':
                 result = await purchaseMallGoods(args[0], args[1]);
+                break;
+            case 'claimMonthCardReward':
+                result = await claimMonthCardRewardByGoodsId(args[0]);
+                break;
+            case 'getShopCatalog':
+                result = await getShopCatalog();
+                break;
+            case 'buyShopGoods':
+                result = await buyShopGoods(args[0], args[1], args[2]);
                 break;
             case 'getSellPreview':
                 result = await getSellPreview(args[0]);
@@ -713,10 +762,13 @@ async function handleApiCall(msg) {
                 result = getSchedulerRegistrySnapshot();
                 break;
             default:
-                error = 'Unknown method';
+                error = '未知调用方法';
         }
     } catch (e) {
-        error = e.message;
+        error = {
+            message: e && e.message ? e.message : String(e || '未知错误'),
+            code: e && e.code ? String(e.code) : '',
+        };
     }
 
     sendToMaster({ type: 'api_response', id, result, error });
@@ -750,7 +802,7 @@ async function getDailyGiftOverview() {
         gifts: [
             {
                 key: 'task_claim',
-                label: '每日任务',
+                label: '任务领奖',
                 enabled: !!auto.task,
                 doneToday: !!task.doneToday,
                 lastAt: Number(task.lastClaimAt || 0),

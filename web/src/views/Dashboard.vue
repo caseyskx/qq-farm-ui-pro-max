@@ -132,14 +132,14 @@ function getInventoryModeLabel(mode: unknown) {
 
 function getLogDetailChipClass(tone: LogDetailTone) {
   if (tone === 'blue')
-    return 'border-blue-200/70 bg-blue-50/70 text-blue-700 dark:border-blue-800/60 dark:bg-blue-900/25 dark:text-blue-300'
+    return 'ui-meta-chip--info'
   if (tone === 'emerald')
-    return 'border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-900/25 dark:text-emerald-300'
+    return 'ui-meta-chip--success'
   if (tone === 'amber')
-    return 'border-amber-200/70 bg-amber-50/70 text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/25 dark:text-amber-300'
+    return 'ui-meta-chip--warning'
   if (tone === 'violet')
-    return 'border-violet-200/70 bg-violet-50/70 text-violet-700 dark:border-violet-800/60 dark:bg-violet-900/25 dark:text-violet-300'
-  return 'border-gray-200/70 bg-gray-50/70 text-gray-700 dark:border-gray-700/60 dark:bg-gray-800/30 dark:text-gray-300'
+    return 'ui-meta-chip--brand'
+  return 'ui-meta-chip--neutral'
 }
 
 function toSafeLogCount(value: unknown) {
@@ -374,18 +374,18 @@ function formatDuration(seconds: number) {
 
 function getLogTagClass(tag: string) {
   if (tag === '错误')
-    return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+    return 'dashboard-log-tag dashboard-log-tag--danger'
   if (tag === '系统')
-    return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+    return 'dashboard-log-tag dashboard-log-tag--info'
   if (tag === '警告')
-    return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
-  return 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+    return 'dashboard-log-tag dashboard-log-tag--warning'
+  return 'dashboard-log-tag dashboard-log-tag--brand'
 }
 
 function getLogMsgClass(tag: string) {
   if (tag === '错误')
-    return 'text-red-600 dark:text-red-400'
-  return 'glass-text-main dark:text-gray-300'
+    return 'dashboard-log-message dashboard-log-message--danger'
+  return 'dashboard-log-message'
 }
 
 function formatLogTime(timeStr: string) {
@@ -397,20 +397,20 @@ function formatLogTime(timeStr: string) {
 }
 
 const OP_META: Record<string, { label: string, icon: string, color: string }> = {
-  harvest: { label: '收获', icon: 'i-carbon-crop-growth', color: 'text-primary-500' },
-  water: { label: '浇水', icon: 'i-carbon-rain-drop', color: 'text-blue-400' },
-  weed: { label: '除草', icon: 'i-carbon-cut-out', color: 'text-yellow-500' },
-  bug: { label: '除虫', icon: 'i-carbon-warning-alt', color: 'text-red-400' },
-  fertilize: { label: '施肥', icon: 'i-carbon-chemistry', color: 'text-emerald-500' },
-  plant: { label: '种植', icon: 'i-carbon-tree', color: 'text-lime-500' },
-  upgrade: { label: '土地升级', icon: 'i-carbon-upgrade', color: 'text-purple-500' },
-  levelUp: { label: '账号升级', icon: 'i-carbon-user-certification', color: 'text-indigo-500' },
-  steal: { label: '偷菜', icon: 'i-carbon-run', color: 'text-orange-500' },
-  helpWater: { label: '帮浇水', icon: 'i-carbon-rain-drop', color: 'text-blue-300' },
-  helpWeed: { label: '帮除草', icon: 'i-carbon-cut-out', color: 'text-yellow-400' },
-  helpBug: { label: '帮除虫', icon: 'i-carbon-warning-alt', color: 'text-red-300' },
-  taskClaim: { label: '任务', icon: 'i-carbon-task-complete', color: 'text-indigo-500' },
-  sell: { label: '出售', icon: 'i-carbon-shopping-cart', color: 'text-pink-500' },
+  harvest: { label: '收获', icon: 'i-carbon-crop-growth', color: 'dashboard-op-tone dashboard-op-tone--brand' },
+  water: { label: '浇水', icon: 'i-carbon-rain-drop', color: 'dashboard-op-tone dashboard-op-tone--info' },
+  weed: { label: '除草', icon: 'i-carbon-cut-out', color: 'dashboard-op-tone dashboard-op-tone--warning' },
+  bug: { label: '除虫', icon: 'i-carbon-warning-alt', color: 'dashboard-op-tone dashboard-op-tone--danger' },
+  fertilize: { label: '施肥', icon: 'i-carbon-chemistry', color: 'dashboard-op-tone dashboard-op-tone--success' },
+  plant: { label: '种植', icon: 'i-carbon-tree', color: 'dashboard-op-tone dashboard-op-tone--success-soft' },
+  upgrade: { label: '土地升级', icon: 'i-carbon-upgrade', color: 'dashboard-op-tone dashboard-op-tone--violet' },
+  levelUp: { label: '账号升级', icon: 'i-carbon-user-certification', color: 'dashboard-op-tone dashboard-op-tone--violet' },
+  steal: { label: '偷菜', icon: 'i-carbon-run', color: 'dashboard-op-tone dashboard-op-tone--warning' },
+  helpWater: { label: '帮浇水', icon: 'i-carbon-rain-drop', color: 'dashboard-op-tone dashboard-op-tone--info-soft' },
+  helpWeed: { label: '帮除草', icon: 'i-carbon-cut-out', color: 'dashboard-op-tone dashboard-op-tone--warning-soft' },
+  helpBug: { label: '帮除虫', icon: 'i-carbon-warning-alt', color: 'dashboard-op-tone dashboard-op-tone--danger-soft' },
+  taskClaim: { label: '任务', icon: 'i-carbon-task-complete', color: 'dashboard-op-tone dashboard-op-tone--violet' },
+  sell: { label: '出售', icon: 'i-carbon-shopping-cart', color: 'dashboard-op-tone dashboard-op-tone--brand-soft' },
 }
 
 const DEFAULT_OP_ICON = 'i-carbon-circle-dash'
@@ -424,7 +424,7 @@ function getOpIcon(key: string | number) {
 }
 
 function getOpColor(key: string | number) {
-  return OP_META[String(key)]?.color || 'text-gray-400'
+  return OP_META[String(key)]?.color || 'dashboard-op-tone dashboard-op-tone--neutral'
 }
 
 function getExpPercent(p: any) {
@@ -623,6 +623,13 @@ const schedulerTasks = computed(() => {
     return (a.nextRunAt || Infinity) - (b.nextRunAt || Infinity)
   })
 })
+const runningSchedulerTaskCount = computed(() => schedulerTasks.value.filter((task: any) => task.running).length)
+const dashboardLogFilterSummary = computed(() => [
+  `模块 ${modules.find(option => option.value === filter.value.module)?.label || '所有模块'}`,
+  `事件 ${events.find(option => option.value === filter.value.event)?.label || '所有事件'}`,
+  filter.value.isWarn === 'warn' ? '仅告警' : filter.value.isWarn === 'info' ? '仅普通' : '全部日志',
+  filter.value.keyword ? `关键词 ${filter.value.keyword}` : '无关键词过滤',
+])
 
 // 任务元数据：中文名 + 操作步骤
 interface TaskMeta {
@@ -963,8 +970,20 @@ function getTaskKindLabel(kind: string) {
 
 function getTaskKindClass(kind: string) {
   if (kind === 'interval')
-    return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-  return 'bg-gray-100 text-gray-600 dark:bg-gray-700/30 dark:text-gray-400'
+    return 'dashboard-task-kind dashboard-task-kind--interval'
+  return 'dashboard-task-kind dashboard-task-kind--neutral'
+}
+
+function getTaskStateClass(running: boolean) {
+  return running
+    ? 'dashboard-task-state dashboard-task-state--running'
+    : 'dashboard-task-state dashboard-task-state--waiting'
+}
+
+function getShowAllTasksButtonClass() {
+  return showAllTasks.value
+    ? 'dashboard-toggle-btn dashboard-toggle-btn--active'
+    : 'dashboard-toggle-btn dashboard-toggle-btn--idle'
 }
 
 // ========== 任务详情弹窗 ==========
@@ -1253,9 +1272,9 @@ async function handleDashboardTrialRenew() {
     <!-- 体验卡续费横幅 -->
     <div
       v-if="showDashboardTrialBanner"
-      class="trial-pulse-banner flex items-center justify-between gap-4 rounded-lg bg-orange-50 px-4 py-3 text-sm shadow dark:bg-orange-900/20"
+      class="trial-pulse-banner dashboard-trial-banner flex flex-col items-start justify-between gap-4 rounded-lg px-4 py-3 text-sm shadow sm:flex-row sm:items-center"
     >
-      <div class="flex items-center gap-2 text-orange-700 dark:text-orange-300">
+      <div class="dashboard-trial-copy flex items-center gap-2">
         <span class="text-lg">⏰</span>
         <span class="font-medium">
           你的体验卡{{ dashboardTrialIsExpired ? '已过期' : '即将过期' }}。{{ trialCountdownText }} 点击一键续费继续使用
@@ -1263,7 +1282,7 @@ async function handleDashboardTrialRenew() {
       </div>
       <button
         :disabled="dashboardTrialRenewing"
-        class="shrink-0 rounded-lg bg-orange-500 px-4 py-1.5 text-sm text-white font-medium transition-colors hover:bg-orange-600 disabled:opacity-50"
+        class="dashboard-trial-action shrink-0 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50"
         @click="handleDashboardTrialRenew"
       >
         {{ dashboardTrialRenewing ? '续费中...' : '🔄 一键续费' }}
@@ -1279,7 +1298,7 @@ async function handleDashboardTrialRenew() {
             <div class="i-fas-user-circle" />
             账号
           </div>
-          <div class="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+          <div class="dashboard-level-badge rounded px-2 py-0.5 text-xs">
             Lv.{{ status?.status?.level || 0 }}
           </div>
         </div>
@@ -1291,14 +1310,14 @@ async function handleDashboardTrialRenew() {
         <div class="mt-auto">
           <div class="glass-text-muted mb-1 flex justify-between text-xs">
             <div class="flex items-center gap-1">
-              <div class="i-fas-bolt text-blue-400" />
+              <div class="dashboard-exp-icon i-fas-bolt" />
               <span>EXP</span>
             </div>
             <span>{{ status?.levelProgress?.current || 0 }} / {{ status?.levelProgress?.needed || '?' }}</span>
           </div>
-          <div class="h-1.5 w-full overflow-hidden rounded-full bg-gray-100/50 dark:bg-gray-700/50">
+          <div class="dashboard-exp-track h-1.5 w-full overflow-hidden rounded-full">
             <div
-              class="h-full rounded-full bg-blue-500 transition-all duration-500"
+              class="dashboard-exp-fill h-full rounded-full transition-all duration-500"
               :style="{ width: `${getExpPercent(status?.levelProgress)}%` }"
             />
           </div>
@@ -1452,59 +1471,71 @@ async function handleDashboardTrialRenew() {
               <span>运行日志</span>
             </h3>
 
-            <div class="flex flex-wrap items-center gap-1.5 text-sm">
-              <BaseSelect
-                v-model="filter.module"
-                :options="modules"
-                class="w-28"
-                @change="refresh"
-              />
+            <div class="dashboard-log-toolbar ui-mobile-sticky-panel ui-mobile-action-panel">
+              <div class="dashboard-log-toolbar-fields ui-bulk-actions text-sm">
+                <BaseSelect
+                  v-model="filter.module"
+                  :options="modules"
+                  class="min-w-[8rem] w-full sm:w-28"
+                  @change="refresh"
+                />
 
-              <BaseSelect
-                v-model="filter.event"
-                :options="events"
-                class="w-28"
-                @change="refresh"
-              />
+                <BaseSelect
+                  v-model="filter.event"
+                  :options="events"
+                  class="min-w-[8rem] w-full sm:w-28"
+                  @change="refresh"
+                />
 
-              <BaseSelect
-                v-model="filter.isWarn"
-                :options="logs"
-                class="w-24"
-                @change="refresh"
-              />
+                <BaseSelect
+                  v-model="filter.isWarn"
+                  :options="logs"
+                  class="min-w-[7rem] w-full sm:w-24"
+                  @change="refresh"
+                />
 
-              <BaseInput
-                v-model="filter.keyword"
-                placeholder="关键词..."
-                class="w-28"
-                clearable
-                @keyup.enter="refresh"
-                @clear="refresh"
-              />
+                <BaseInput
+                  v-model="filter.keyword"
+                  placeholder="关键词..."
+                  class="min-w-[10rem] w-full sm:w-28"
+                  clearable
+                  @keyup.enter="refresh"
+                  @clear="refresh"
+                />
 
-              <BaseButton
-                variant="primary"
-                size="sm"
-                title="搜索"
-                @click="refresh"
-              >
-                <div class="i-carbon-search text-lg" />
-              </BaseButton>
-              <BaseButton
-                v-if="hasActiveLogFilter"
-                variant="danger"
-                size="sm"
-                class="!px-2"
-                title="恢复默认 / 清空过滤"
-                @click="clearFilter"
-              >
-                <div class="i-carbon-close text-lg" />
-              </BaseButton>
+                <BaseButton
+                  variant="primary"
+                  size="sm"
+                  title="搜索"
+                  @click="refresh"
+                >
+                  <div class="i-carbon-search text-lg" />
+                </BaseButton>
+                <BaseButton
+                  v-if="hasActiveLogFilter"
+                  variant="danger"
+                  size="sm"
+                  class="!px-2"
+                  title="恢复默认 / 清空过滤"
+                  @click="clearFilter"
+                >
+                  <div class="i-carbon-close text-lg" />
+                </BaseButton>
+              </div>
+
+              <div class="dashboard-log-chip-row ui-bulk-actions">
+                <span
+                  v-for="chip in dashboardLogFilterSummary"
+                  :key="chip"
+                  class="dashboard-log-chip ui-meta-chip--neutral"
+                >
+                  {{ chip }}
+                </span>
+              </div>
             </div>
           </div>
 
-          <div class="mb-3 border border-sky-200/70 rounded-xl bg-sky-50/70 px-3 py-2 text-xs text-sky-700 leading-5 dark:border-sky-800/40 dark:bg-sky-900/15 dark:text-sky-200">
+          <div class="dashboard-log-note mb-3 rounded-xl px-3 py-2 text-xs leading-5">
             {{ DASHBOARD_BROWSER_PREF_NOTE }}
           </div>
 
@@ -1516,7 +1547,7 @@ async function handleDashboardTrialRenew() {
               <div>
                 <span class="mr-1.5 select-none opacity-60">[{{ formatLogTime(log.time) }}]</span>
                 <span class="mr-1.5 rounded px-1 py-0.5 text-xs font-bold" :class="getLogTagClass(log.tag)">{{ log.tag }}</span>
-                <span v-if="log.meta?.event" class="mr-1.5 rounded bg-blue-50/50 px-1 py-0.5 text-xs text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">{{ getEventLabel(log.meta.event) }}</span>
+                <span v-if="log.meta?.event" class="dashboard-log-event mr-1.5 rounded px-1 py-0.5 text-xs">{{ getEventLabel(log.meta.event) }}</span>
                 <span :class="getLogMsgClass(log.tag)" class="glass-text-main opacity-90">{{ log.msg }}</span>
               </div>
               <div v-if="getPlantingLogDetailChips(log).length" class="mt-1.5 flex flex-wrap gap-1.5 pl-14">
@@ -1539,21 +1570,23 @@ async function handleDashboardTrialRenew() {
       <div class="flex flex-col gap-4 md:min-w-0 md:w-[60%] md:overflow-hidden">
         <!-- 任务队列预览 -->
         <div class="glass-panel flex flex-1 flex-col rounded-lg p-4 shadow md:overflow-hidden">
-          <h3 class="glass-text-main mb-3 flex shrink-0 items-center gap-2 text-base font-medium">
-            <div class="i-carbon-task text-indigo-500" />
-            <span>任务队列预览</span>
-            <span v-if="schedulerTasks.length" class="ml-auto flex items-center gap-2 text-xs font-normal">
+          <div class="mb-3 flex shrink-0 flex-col gap-3">
+            <h3 class="glass-text-main flex items-center gap-2 text-base font-medium">
+              <div class="i-carbon-task text-indigo-500" />
+              <span>任务队列预览</span>
+            </h3>
+            <div v-if="schedulerTasks.length" class="dashboard-task-meta ui-bulk-actions text-xs font-normal">
               <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">共 {{ schedulerTasks.length }} 个任务</span>
-              <span class="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-300">运行中 {{ schedulerTasks.filter((t: any) => t.running).length }}</span>
+              <span class="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-300">运行中 {{ runningSchedulerTaskCount }}</span>
               <button
-                class="rounded px-1.5 py-0.5 text-[10px] transition-colors"
-                :class="showAllTasks ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700/30 dark:text-gray-400'"
+                class="dashboard-toggle-btn rounded px-1.5 py-0.5 text-[10px] transition-colors"
+                :class="getShowAllTasksButtonClass()"
                 @click="showAllTasks = !showAllTasks"
               >
                 {{ showAllTasks ? '隐藏内部' : '显示全部' }}
               </button>
-            </span>
-          </h3>
+            </div>
+          </div>
 
           <div v-if="!schedulerPreview || !schedulerTasks.length" class="glass-text-muted flex flex-1 items-center justify-center py-6 text-center text-sm">
             <div v-if="!status?.connection?.connected">
@@ -1564,71 +1597,141 @@ async function handleDashboardTrialRenew() {
             </div>
           </div>
 
-          <div v-else class="custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
-            <table class="w-full text-xs">
-              <thead class="sticky top-0 z-10 bg-transparent backdrop-blur-xl">
-                <tr class="glass-text-muted border-b border-gray-200/50 dark:border-white/10">
-                  <th class="px-2 py-2 text-left font-semibold tracking-wider">
-                    分组
-                  </th>
-                  <th class="px-2 py-2 text-left font-semibold tracking-wider">
-                    任务名
-                  </th>
-                  <th class="px-2 py-2 text-center font-semibold tracking-wider">
-                    状态
-                  </th>
-                  <th class="px-2 py-2 text-right font-semibold tracking-wider">
-                    倒计时
-                  </th>
-                  <th class="px-2 py-2 text-right font-semibold tracking-wider">
-                    已执行
-                  </th>
-                  <th class="px-2 py-2 text-center font-semibold tracking-wider">
-                    详情
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="task in schedulerTasks"
-                  :key="`${task.namespace}-${task.name}`"
-                  class="group border-b border-gray-100/30 transition-colors dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5"
-                >
-                  <td class="whitespace-nowrap px-2 py-2 text-[10px]">
-                    <span class="rounded bg-black/5 px-1.5 py-0.5 text-gray-600 dark:bg-white/10 dark:text-gray-300">
-                      {{ task.group }}
-                    </span>
-                  </td>
-                  <td class="max-w-[180px] truncate px-2 py-1.5 font-medium" :title="getTaskDisplayName(task.name)">
-                    {{ getTaskDisplayName(task.name) }}
-                  </td>
-                  <td class="px-2 py-1.5 text-center">
-                    <span v-if="task.running" class="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
-                      <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
-                      执行中
-                    </span>
-                    <span v-else class="glass-text-muted">等待中</span>
-                  </td>
-                  <td class="px-2 py-1.5 text-right font-mono">
-                    {{ getTaskCountdown(task) }}
-                  </td>
-                  <td class="px-2 py-1.5 text-right">
-                    {{ task.runCount || 0 }} 次
-                  </td>
-                  <td class="px-2 py-1.5 text-center">
-                    <button
-                      v-if="getTaskSteps(task.name).length"
-                      class="rounded px-1.5 py-0.5 text-[10px] text-indigo-600 font-medium transition-colors hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/20"
-                      @click="openTaskDetail(task)"
-                    >
-                      查看
-                    </button>
-                    <span v-else class="glass-text-muted">-</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <template v-else>
+            <div class="ui-mobile-record-list md:hidden">
+              <article
+                v-for="task in schedulerTasks"
+                :key="`${task.namespace}-${task.name}`"
+                class="ui-mobile-record-card"
+              >
+                <div class="ui-mobile-record-head">
+                  <div class="ui-mobile-record-body">
+                    <div class="ui-mobile-record-badges">
+                      <span class="dashboard-group-badge rounded px-2 py-0.5 text-[11px]">
+                        {{ task.group }}
+                      </span>
+                      <span class="rounded px-2 py-0.5 text-[11px] font-medium" :class="getTaskKindClass(task.kind)">
+                        {{ getTaskKindLabel(task.kind) }}
+                      </span>
+                      <span class="rounded px-2 py-0.5 text-[11px] font-medium" :class="getTaskStateClass(task.running)">
+                        {{ task.running ? '执行中' : '等待中' }}
+                      </span>
+                    </div>
+                    <h3 class="ui-mobile-record-title">
+                      {{ getTaskDisplayName(task.name) }}
+                    </h3>
+                    <p class="ui-mobile-record-subtitle">
+                      {{ task.namespace || '默认命名空间' }}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="ui-mobile-record-grid">
+                  <div class="ui-mobile-record-field">
+                    <div class="ui-mobile-record-label">
+                      倒计时
+                    </div>
+                    <div class="ui-mobile-record-value font-mono">
+                      {{ getTaskCountdown(task) }}
+                    </div>
+                  </div>
+                  <div class="ui-mobile-record-field">
+                    <div class="ui-mobile-record-label">
+                      已执行
+                    </div>
+                    <div class="ui-mobile-record-value">
+                      {{ task.runCount || 0 }} 次
+                    </div>
+                  </div>
+                  <div v-if="getTaskSteps(task.name).length" class="ui-mobile-record-field ui-mobile-record-field--full">
+                    <div class="ui-mobile-record-label">
+                      步骤预览
+                    </div>
+                    <div class="ui-mobile-record-value ui-mobile-record-value--muted">
+                      {{ getTaskSteps(task.name).slice(0, 2).join(' -> ') }}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ui-mobile-record-actions ui-bulk-actions">
+                  <BaseButton
+                    v-if="getTaskSteps(task.name).length"
+                    variant="outline"
+                    size="sm"
+                    @click="openTaskDetail(task)"
+                  >
+                    查看详情
+                  </BaseButton>
+                </div>
+              </article>
+            </div>
+
+            <div class="custom-scrollbar hidden min-h-0 flex-1 overflow-y-auto pr-1 md:block">
+              <table class="w-full text-xs">
+                <thead class="sticky top-0 z-10 bg-transparent backdrop-blur-xl">
+                  <tr class="dashboard-table-head glass-text-muted border-b">
+                    <th class="px-2 py-2 text-left font-semibold tracking-wider">
+                      分组
+                    </th>
+                    <th class="px-2 py-2 text-left font-semibold tracking-wider">
+                      任务名
+                    </th>
+                    <th class="px-2 py-2 text-center font-semibold tracking-wider">
+                      状态
+                    </th>
+                    <th class="px-2 py-2 text-right font-semibold tracking-wider">
+                      倒计时
+                    </th>
+                    <th class="px-2 py-2 text-right font-semibold tracking-wider">
+                      已执行
+                    </th>
+                    <th class="px-2 py-2 text-center font-semibold tracking-wider">
+                      详情
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="task in schedulerTasks"
+                    :key="`${task.namespace}-${task.name}`"
+                    class="dashboard-task-row group border-b transition-colors"
+                  >
+                    <td class="whitespace-nowrap px-2 py-2 text-[10px]">
+                      <span class="dashboard-group-badge dashboard-group-badge--compact rounded px-1.5 py-0.5">
+                        {{ task.group }}
+                      </span>
+                    </td>
+                    <td class="max-w-[180px] truncate px-2 py-1.5 font-medium" :title="getTaskDisplayName(task.name)">
+                      {{ getTaskDisplayName(task.name) }}
+                    </td>
+                    <td class="px-2 py-1.5 text-center">
+                      <span v-if="task.running" class="dashboard-task-state dashboard-task-state--running inline-flex items-center gap-1">
+                        <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
+                        执行中
+                      </span>
+                      <span v-else class="glass-text-muted">等待中</span>
+                    </td>
+                    <td class="px-2 py-1.5 text-right font-mono">
+                      {{ getTaskCountdown(task) }}
+                    </td>
+                    <td class="px-2 py-1.5 text-right">
+                      {{ task.runCount || 0 }} 次
+                    </td>
+                    <td class="px-2 py-1.5 text-center">
+                      <button
+                        v-if="getTaskSteps(task.name).length"
+                        class="dashboard-task-view rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+                        @click="openTaskDetail(task)"
+                      >
+                        查看
+                      </button>
+                      <span v-else class="glass-text-muted">-</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </div>
 
         <!-- 今日统计（保持 2 列，压缩间距） -->
@@ -1641,7 +1744,7 @@ async function handleDashboardTrialRenew() {
             <div
               v-for="(val, key) in (status?.operations || {})"
               :key="key"
-              class="flex items-center justify-between rounded-xl bg-black/5 px-3 py-2 transition-colors dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10"
+              class="dashboard-stat-card flex items-center justify-between rounded-xl px-3 py-2 transition-colors"
             >
               <div class="flex items-center gap-2">
                 <div class="text-sm" :class="[getOpIcon(key), getOpColor(key)]" />
@@ -1673,20 +1776,20 @@ async function handleDashboardTrialRenew() {
           <span class="rounded px-2 py-0.5 text-xs font-medium" :class="getTaskKindClass(selectedTask.kind)">
             {{ getTaskKindLabel(selectedTask.kind) }}
           </span>
-          <span v-if="selectedTask.running" class="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-xs text-green-700 font-medium dark:bg-green-900/30 dark:text-green-300">
+          <span v-if="selectedTask.running" class="dashboard-task-state dashboard-task-state--running inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium">
             <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
             执行中
           </span>
-          <span v-else class="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-gray-700/30 dark:text-gray-400">
+          <span v-else class="dashboard-task-state dashboard-task-state--waiting rounded px-2 py-0.5 text-xs">
             等待中
           </span>
-          <span class="rounded bg-purple-100 px-2 py-0.5 text-xs text-purple-700 font-medium dark:bg-purple-900/30 dark:text-purple-300">
+          <span class="dashboard-task-run-count rounded px-2 py-0.5 text-xs font-medium">
             已执行 {{ selectedTask.runCount || 0 }} 次
           </span>
         </div>
 
         <!-- 倒计时 -->
-        <div class="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-700/30">
+        <div class="dashboard-task-countdown flex items-center gap-2 rounded-lg px-3 py-2">
           <div class="i-carbon-timer text-indigo-500" />
           <span class="glass-text-muted text-sm">距下次执行：</span>
           <span class="text-sm font-bold font-mono">
@@ -1705,7 +1808,7 @@ async function handleDashboardTrialRenew() {
               :key="idx"
               class="flex items-start gap-2 text-sm"
             >
-              <span class="mt-0.5 h-5 w-5 flex shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] text-indigo-700 font-bold dark:bg-indigo-900/30 dark:text-indigo-300">
+              <span class="dashboard-step-index mt-0.5 h-5 w-5 flex shrink-0 items-center justify-center rounded-full text-[10px] font-bold">
                 {{ idx + 1 }}
               </span>
               <span class="glass-text-main">{{ step }}</span>
@@ -1722,20 +1825,26 @@ async function handleDashboardTrialRenew() {
   color: var(--ui-text-1);
 }
 
-.dashboard-page :is(.text-gray-500, .text-gray-400, .text-gray-300, .glass-text-muted) {
+.dashboard-page
+  :is(
+    [class*='text-'][class*='gray-500'],
+    [class*='text-'][class*='gray-400'],
+    [class*='text-'][class*='gray-300'],
+    .glass-text-muted
+  ) {
   color: var(--ui-text-2) !important;
 }
 
-.dashboard-page [class*='border-gray-100/'],
-.dashboard-page [class*='border-gray-700/'],
-.dashboard-page [class*='border-white/10'] {
+.dashboard-page [class*='border-'][class*='gray-100/'],
+.dashboard-page [class*='border-'][class*='gray-700/'],
+.dashboard-page [class*='border-'][class*='white/10'] {
   border-color: var(--ui-border-subtle) !important;
 }
 
-.dashboard-page [class*='bg-gray-100/50'],
-.dashboard-page [class*='bg-gray-700/30'],
-.dashboard-page [class*='bg-black/5'],
-.dashboard-page [class*='dark:bg-white/5'] {
+.dashboard-page [class*='bg-'][class*='gray-100/50'],
+.dashboard-page [class*='bg-'][class*='gray-700/30'],
+.dashboard-page [class*='bg-'][class*='black/5'],
+.dashboard-page [class*='dark:bg-'][class*='white/5'] {
   background-color: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent) !important;
 }
 
@@ -1761,5 +1870,173 @@ async function handleDashboardTrialRenew() {
 
 .dark .trial-pulse-banner {
   border-color: color-mix(in srgb, var(--ui-status-warning) 20%, transparent);
+}
+
+.dashboard-log-toolbar {
+  z-index: 12;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dashboard-log-chip-row,
+.dashboard-task-meta {
+  min-width: 0;
+}
+
+.dashboard-log-chip {
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.dashboard-trial-banner {
+  background: color-mix(in srgb, var(--ui-status-warning) 12%, var(--ui-bg-surface));
+}
+
+.dashboard-trial-copy {
+  color: color-mix(in srgb, var(--ui-status-warning) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-trial-action {
+  background: var(--ui-status-warning);
+  color: var(--ui-text-on-brand);
+}
+
+.dashboard-trial-action:hover {
+  background: color-mix(in srgb, var(--ui-status-warning) 88%, black 12%);
+}
+
+.dashboard-level-badge,
+.dashboard-log-event,
+.dashboard-log-tag--info,
+.dashboard-task-kind--interval,
+.dashboard-task-run-count,
+.dashboard-step-index {
+  background: color-mix(in srgb, var(--ui-status-info) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-info) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-exp-icon {
+  color: var(--ui-status-info);
+}
+
+.dashboard-exp-track,
+.dashboard-task-countdown {
+  background: color-mix(in srgb, var(--ui-bg-surface) 68%, transparent);
+}
+
+.dashboard-exp-fill {
+  background: var(--ui-status-info);
+}
+
+.dashboard-log-note {
+  border: 1px solid color-mix(in srgb, var(--ui-status-info) 26%, transparent);
+  background: color-mix(in srgb, var(--ui-status-info) 10%, var(--ui-bg-surface));
+  color: color-mix(in srgb, var(--ui-status-info) 68%, var(--ui-text-1) 32%);
+}
+
+.dashboard-log-tag--danger,
+.dashboard-log-message--danger {
+  color: var(--ui-status-danger);
+}
+
+.dashboard-log-tag--danger {
+  background: color-mix(in srgb, var(--ui-status-danger) 12%, transparent);
+}
+
+.dashboard-log-tag--warning {
+  background: color-mix(in srgb, var(--ui-status-warning) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-warning) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-log-tag--brand {
+  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-brand-600) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-log-message {
+  color: var(--ui-text-1);
+}
+
+.dashboard-toggle-btn--active {
+  background: color-mix(in srgb, var(--ui-status-warning) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-warning) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-toggle-btn--idle,
+.dashboard-group-badge,
+.dashboard-task-kind--neutral,
+.dashboard-task-state--waiting {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent);
+  color: var(--ui-text-2);
+}
+
+.dashboard-task-state--running {
+  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-success) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-table-head,
+.dashboard-task-row {
+  border-color: var(--ui-border-subtle);
+}
+
+.dashboard-task-row:hover,
+.dashboard-stat-card:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+}
+
+.dashboard-task-view {
+  color: color-mix(in srgb, var(--ui-brand-600) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-task-view:hover {
+  background: color-mix(in srgb, var(--ui-brand-500) 10%, transparent);
+}
+
+.dashboard-stat-card {
+  background: color-mix(in srgb, var(--ui-bg-surface) 68%, transparent);
+}
+
+.dashboard-op-tone--brand {
+  color: var(--ui-brand-500);
+}
+
+.dashboard-op-tone--brand-soft {
+  color: color-mix(in srgb, var(--ui-brand-500) 58%, var(--ui-status-danger) 42%);
+}
+
+.dashboard-op-tone--info,
+.dashboard-op-tone--info-soft {
+  color: var(--ui-status-info);
+}
+
+.dashboard-op-tone--warning,
+.dashboard-op-tone--warning-soft {
+  color: var(--ui-status-warning);
+}
+
+.dashboard-op-tone--danger,
+.dashboard-op-tone--danger-soft {
+  color: var(--ui-status-danger);
+}
+
+.dashboard-op-tone--success,
+.dashboard-op-tone--success-soft {
+  color: var(--ui-status-success);
+}
+
+.dashboard-op-tone--violet {
+  color: color-mix(in srgb, var(--ui-brand-600) 72%, var(--ui-status-info) 28%);
+}
+
+.dashboard-op-tone--neutral {
+  color: var(--ui-text-3);
 }
 </style>

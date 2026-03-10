@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { createDataProvider } = require('../src/runtime/data-provider');
 
-function createStoreMock() {
+function createStoreMock(timeline = []) {
     const snapshots = {
         '1': {
             accountMode: 'alt',
@@ -37,6 +37,7 @@ function createStoreMock() {
         ensureMainAccountUnique: [],
         applyAccountMode: [],
         applyConfigSnapshot: [],
+        flushGlobalConfigSave: 0,
     };
 
     return {
@@ -73,6 +74,11 @@ function createStoreMock() {
                 ...snapshot,
             };
         },
+        flushGlobalConfigSave: async () => {
+            calls.flushGlobalConfigSave += 1;
+            timeline.push('flush');
+            return true;
+        },
         getConfigSnapshot: (accountId) => ({ ...snapshots[String(accountId)] }),
         getPlantingStrategy: () => 'preferred',
         getPreferredSeed: () => 0,
@@ -84,7 +90,8 @@ function createStoreMock() {
 }
 
 test('saveSettings applies account mode and persists downgraded sibling accounts in one backend chain', async () => {
-    const store = createStoreMock();
+    const timeline = [];
+    const store = createStoreMock(timeline);
     const updatedConfigs = [];
     const broadcasted = [];
 
@@ -96,6 +103,7 @@ test('saveSettings applies account mode and persists downgraded sibling accounts
         accountRepository: {
             async updateConfig(accountId, config) {
                 updatedConfigs.push({ accountId: String(accountId), config: { ...config } });
+                timeline.push(`persist:${accountId}`);
                 return { changes: 1 };
             },
         },
@@ -111,9 +119,13 @@ test('saveSettings applies account mode and persists downgraded sibling accounts
         normalizeStatusForPanel: status => status,
         filterLogs: logs => logs,
         addAccountLog: () => {},
-        nextConfigRevision: () => 9,
+        nextConfigRevision: () => {
+            timeline.push('revision');
+            return 9;
+        },
         broadcastConfigToWorkers: (accountId) => {
             broadcasted.push(String(accountId));
+            timeline.push(`broadcast:${accountId}`);
         },
         startWorker: async () => {},
         stopWorker: async () => {},
@@ -128,12 +140,21 @@ test('saveSettings applies account mode and persists downgraded sibling accounts
             globalKeepCount: 2,
             reserveRules: [{ seedId: 20059, keepCount: 5 }],
         },
+        intervals: {
+            farmMin: 45,
+            farmMax: 90,
+            friendMin: 120,
+            friendMax: 240,
+        },
         friendQuietHours: { enabled: true, start: '00:00', end: '06:00' },
+        stakeoutSteal: { enabled: true, delaySec: 5 },
         reportConfig: { enabled: true, channel: 'email' },
+        automation: { farm: false, friend_help: false, forceGetAllEnabled: true },
     });
 
     assert.deepEqual(store.calls.ensureMainAccountUnique, [{ accountId: '1', ownerUsername: 'admin' }]);
     assert.deepEqual(store.calls.applyAccountMode, [{ accountId: '1', mode: 'main' }]);
+    assert.equal(store.calls.flushGlobalConfigSave, 1);
     assert.equal(result.configRevision, 9);
     assert.equal(store.getConfigSnapshot('1').accountMode, 'main');
     assert.deepEqual(store.getConfigSnapshot('1').harvestDelay, { min: 12, max: 34 });
@@ -142,7 +163,26 @@ test('saveSettings applies account mode and persists downgraded sibling accounts
         globalKeepCount: 2,
         reserveRules: [{ seedId: 20059, keepCount: 5 }],
     });
+    assert.deepEqual(store.getConfigSnapshot('1').intervals, {
+        farmMin: 45,
+        farmMax: 90,
+        friendMin: 120,
+        friendMax: 240,
+    });
+    assert.deepEqual(store.getConfigSnapshot('1').stakeoutSteal, {
+        enabled: true,
+        delaySec: 5,
+    });
+    assert.deepEqual(store.getConfigSnapshot('1').automation, {
+        farm: false,
+        friend_help: false,
+        forceGetAllEnabled: true,
+    });
+    assert.deepEqual(store.getConfigSnapshot('1').forceGetAll, { enabled: true });
     assert.equal(store.getConfigSnapshot('2').accountMode, 'alt');
+    assert.equal(timeline.indexOf('flush') < timeline.indexOf('revision'), true);
+    assert.equal(timeline.indexOf('persist:2') < timeline.indexOf('revision'), true);
+    assert.equal(timeline.indexOf('revision') < timeline.indexOf('broadcast:1'), true);
 
     assert.deepEqual(
         updatedConfigs,

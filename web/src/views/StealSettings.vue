@@ -89,6 +89,9 @@ const localSettings = ref({
 const activeTab = ref<'friends' | 'plants'>('friends')
 const searchQuery = ref('')
 const selectedAccount = ref<string>(currentAccountId.value || '')
+const footerSelectionSummary = computed(() => activeTab.value === 'friends'
+  ? `当前名单 ${localSettings.value.automation.stealFriendFilterIds.length}/${friends.value?.length || 0}`
+  : `当前作物 ${localSettings.value.automation.stealFilterPlantIds.length}/${seeds.value?.length || 0}`)
 
 function syncLocalSettings() {
   if (settings.value && settings.value.automation) {
@@ -366,7 +369,7 @@ void getPlantCheckClasses
 
     <template v-else>
       <!-- 跳过白萝卜偷菜 -->
-      <div class="steal-top-card glass-panel mb-3 flex items-center justify-between gap-4 p-3">
+      <div class="steal-top-card glass-panel mb-3 flex flex-col items-start justify-between gap-4 p-3 sm:flex-row sm:items-center">
         <div class="flex items-center gap-2">
           <span class="glass-text-main text-sm font-medium">🥕 跳过白萝卜偷菜</span>
           <span class="glass-text-muted text-xs">开启后偷菜时自动跳过白萝卜，不偷取该作物</span>
@@ -374,124 +377,128 @@ void getPlantCheckClasses
         <BaseSwitch v-model="localSettings.automation.skipStealRadishEnabled" size="sm" />
       </div>
 
-      <!-- Tabs -->
-      <div class="steal-tab-bar mb-3 flex shrink-0 gap-4 overflow-x-auto">
-        <button
-          class="whitespace-nowrap border-b-2 px-4 py-2 font-medium transition-colors"
-          :class="getStealTabClasses(activeTab === 'friends')"
-          @click="activeTab = 'friends'; searchQuery = ''"
-        >
-          👥 好友偷菜名单 ({{ localSettings.automation.stealFriendFilterIds.length }}/{{ friends.length }})
-        </button>
-        <button
-          class="whitespace-nowrap border-b-2 px-4 py-2 font-medium transition-colors"
-          :class="getStealTabClasses(activeTab === 'plants')"
-          @click="activeTab = 'plants'; searchQuery = ''"
-        >
-          🌾 作物偷菜过滤 ({{ localSettings.automation.stealFilterPlantIds.length }}/{{ seeds.length }})
-        </button>
-      </div>
+      <div class="steal-controls-panel ui-mobile-sticky-panel mb-3">
+        <!-- Tabs -->
+        <div class="steal-tab-bar ui-bulk-actions flex shrink-0 gap-4 overflow-x-auto">
+          <button
+            class="steal-tab whitespace-nowrap border-b-2 px-4 py-2 font-medium transition-colors"
+            :class="getStealTabClasses(activeTab === 'friends')"
+            @click="activeTab = 'friends'; searchQuery = ''"
+          >
+            👥 好友偷菜名单 ({{ localSettings.automation.stealFriendFilterIds.length }}/{{ friends.length }})
+          </button>
+          <button
+            class="steal-tab whitespace-nowrap border-b-2 px-4 py-2 font-medium transition-colors"
+            :class="getStealTabClasses(activeTab === 'plants')"
+            @click="activeTab = 'plants'; searchQuery = ''"
+          >
+            🌾 作物偷菜过滤 ({{ localSettings.automation.stealFilterPlantIds.length }}/{{ seeds.length }})
+          </button>
+        </div>
 
-      <div class="steal-toolbar glass-panel mb-3 p-3 shadow-sm">
-        <div class="flex flex-col gap-3 xl:flex-row xl:items-center">
-          <div class="relative min-w-0 flex-1 xl:max-w-xl">
-            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5">
-              <div class="steal-search-icon i-carbon-search text-sm" />
-            </div>
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="activeTab === 'friends' ? '搜索好友昵称/备注...' : '搜索作物名称...'"
-              class="steal-search-input glass-text-main m-0 box-border block h-[36px] w-full py-1.5 pl-9 pr-3 text-sm font-medium leading-5 transition-colors focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
-            >
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2 xl:justify-end">
-            <div class="steal-toolbar-chip flex items-center gap-2 px-3 py-1.5">
-              <span class="glass-text-muted text-xs font-medium">总控:</span>
-              <BaseSwitch v-if="activeTab === 'friends'" v-model="localSettings.automation.stealFriendFilterEnabled" size="sm" />
-              <BaseSwitch v-else v-model="localSettings.automation.stealFilterEnabled" size="sm" />
+        <div class="steal-toolbar glass-panel p-3 shadow-sm">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-center">
+            <div class="relative min-w-0 flex-1 xl:max-w-xl">
+              <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5">
+                <div class="steal-search-icon i-carbon-search text-sm" />
+              </div>
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="activeTab === 'friends' ? '搜索好友昵称/备注...' : '搜索作物名称...'"
+                class="steal-search-input glass-text-main m-0 box-border block h-[36px] w-full py-1.5 pl-9 pr-3 text-sm font-medium leading-5 transition-colors focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
             </div>
 
-            <div class="steal-toolbar-chip flex items-center gap-2 px-2 py-1">
-              <span class="glass-text-muted text-xs font-medium">模式:</span>
-              <select
-                v-if="activeTab === 'friends'"
-                v-model="localSettings.automation.stealFriendFilterMode"
-                class="steal-inline-select glass-text-main py-1.5 pl-2 pr-6 text-xs font-medium shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-              >
-                <option value="blacklist" class="steal-select-option">
-                  黑名单
-                </option>
-                <option value="whitelist" class="steal-select-option">
-                  白名单
-                </option>
-              </select>
-              <select
-                v-else
-                v-model="localSettings.automation.stealFilterMode"
-                class="steal-inline-select glass-text-main py-1.5 pl-2 pr-6 text-xs font-medium shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-              >
-                <option value="blacklist" class="steal-select-option">
-                  黑名单
-                </option>
-                <option value="whitelist" class="steal-select-option">
-                  白名单
-                </option>
-              </select>
-            </div>
+            <div class="steal-toolbar-actions flex flex-col gap-2 xl:ml-auto xl:items-end">
+              <div class="ui-bulk-actions">
+                <div class="steal-toolbar-chip flex items-center gap-2 px-3 py-1.5">
+                  <span class="glass-text-muted text-xs font-medium">总控:</span>
+                  <BaseSwitch v-if="activeTab === 'friends'" v-model="localSettings.automation.stealFriendFilterEnabled" size="sm" />
+                  <BaseSwitch v-else v-model="localSettings.automation.stealFilterEnabled" size="sm" />
+                </div>
 
-            <div class="flex flex-wrap items-center gap-2 xl:ml-2">
-              <BaseButton
-                v-if="activeTab === 'friends'"
-                size="sm"
-                :class="getStealBulkButtonClasses('brand')"
-                @click="selectAllFriends"
-              >
-                <div class="i-carbon-checkmark-outline mr-1.5 text-sm" /> 全选
-              </BaseButton>
-              <BaseButton
-                v-else
-                size="sm"
-                :class="getStealBulkButtonClasses('brand')"
-                @click="selectAllPlants"
-              >
-                <div class="i-carbon-checkmark-outline mr-1.5 text-sm" /> 全选
-              </BaseButton>
+                <div class="steal-toolbar-chip flex items-center gap-2 px-2 py-1">
+                  <span class="glass-text-muted text-xs font-medium">模式:</span>
+                  <select
+                    v-if="activeTab === 'friends'"
+                    v-model="localSettings.automation.stealFriendFilterMode"
+                    class="steal-inline-select glass-text-main py-1.5 pl-2 pr-6 text-xs font-medium shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                  >
+                    <option value="blacklist" class="steal-select-option">
+                      黑名单
+                    </option>
+                    <option value="whitelist" class="steal-select-option">
+                      白名单
+                    </option>
+                  </select>
+                  <select
+                    v-else
+                    v-model="localSettings.automation.stealFilterMode"
+                    class="steal-inline-select glass-text-main py-1.5 pl-2 pr-6 text-xs font-medium shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                  >
+                    <option value="blacklist" class="steal-select-option">
+                      黑名单
+                    </option>
+                    <option value="whitelist" class="steal-select-option">
+                      白名单
+                    </option>
+                  </select>
+                </div>
+              </div>
 
-              <BaseButton
-                v-if="activeTab === 'friends'"
-                size="sm"
-                :class="getStealBulkButtonClasses('neutral')"
-                @click="invertAllFriends"
-              >
-                反选
-              </BaseButton>
-              <BaseButton
-                v-else
-                size="sm"
-                :class="getStealBulkButtonClasses('neutral')"
-                @click="invertAllPlants"
-              >
-                反选
-              </BaseButton>
+              <div class="ui-bulk-actions xl:ml-2">
+                <BaseButton
+                  v-if="activeTab === 'friends'"
+                  size="sm"
+                  :class="getStealBulkButtonClasses('brand')"
+                  @click="selectAllFriends"
+                >
+                  <div class="i-carbon-checkmark-outline mr-1.5 text-sm" /> 全选
+                </BaseButton>
+                <BaseButton
+                  v-else
+                  size="sm"
+                  :class="getStealBulkButtonClasses('brand')"
+                  @click="selectAllPlants"
+                >
+                  <div class="i-carbon-checkmark-outline mr-1.5 text-sm" /> 全选
+                </BaseButton>
 
-              <BaseButton
-                v-if="activeTab === 'friends'"
-                size="sm"
-                :class="getStealBulkButtonClasses('danger')"
-                @click="clearAllFriends"
-              >
-                <div class="i-carbon-close-outline mr-1.5 text-sm" /> 清空
-              </BaseButton>
-              <BaseButton
-                v-else
-                size="sm"
-                :class="getStealBulkButtonClasses('danger')"
-                @click="clearAllPlants"
-              >
-                <div class="i-carbon-close-outline mr-1.5 text-sm" /> 清空
-              </BaseButton>
+                <BaseButton
+                  v-if="activeTab === 'friends'"
+                  size="sm"
+                  :class="getStealBulkButtonClasses('neutral')"
+                  @click="invertAllFriends"
+                >
+                  反选
+                </BaseButton>
+                <BaseButton
+                  v-else
+                  size="sm"
+                  :class="getStealBulkButtonClasses('neutral')"
+                  @click="invertAllPlants"
+                >
+                  反选
+                </BaseButton>
+
+                <BaseButton
+                  v-if="activeTab === 'friends'"
+                  size="sm"
+                  :class="getStealBulkButtonClasses('danger')"
+                  @click="clearAllFriends"
+                >
+                  <div class="i-carbon-close-outline mr-1.5 text-sm" /> 清空
+                </BaseButton>
+                <BaseButton
+                  v-else
+                  size="sm"
+                  :class="getStealBulkButtonClasses('danger')"
+                  @click="clearAllPlants"
+                >
+                  <div class="i-carbon-close-outline mr-1.5 text-sm" /> 清空
+                </BaseButton>
+              </div>
             </div>
           </div>
         </div>
@@ -595,7 +602,7 @@ void getPlantCheckClasses
 
                 <div class="mt-1.5 space-y-1.5">
                   <div class="flex items-center gap-1.5 text-xs">
-                    <div class="whitespace-nowrap rounded-sm bg-purple-50 px-1.5 py-0.5 text-purple-600 font-medium dark:bg-purple-900/30 dark:text-purple-400">
+                    <div class="steal-metric-pill steal-metric-pill-info whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
                       时经: <span class="font-bold">{{ cropAnalytics[seed.seedId]?.expPerHour ?? '-' }}</span>
                     </div>
                     <div class="steal-metric-pill steal-metric-pill-warning whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
@@ -622,10 +629,15 @@ void getPlantCheckClasses
       </div>
 
       <!-- Footer Action -->
-      <div class="steal-footer-bar glass-panel fixed bottom-0 left-0 right-0 z-40 flex items-center justify-end gap-4 border-t-0 p-4 lg:left-64" style="border-top: 1px solid var(--glass-border);">
-        <span class="glass-text-muted text-sm font-medium transition-opacity" :class="saving ? 'opacity-100' : 'opacity-0'">
-          正在上传修改到服务器...
-        </span>
+      <div class="steal-footer-bar glass-panel fixed bottom-0 left-0 right-0 z-40 flex flex-col items-stretch gap-3 border-t-0 p-4 lg:left-64 sm:flex-row sm:items-center sm:justify-end">
+        <div class="steal-footer-meta min-w-0 flex items-center justify-between gap-3 sm:mr-auto sm:justify-start">
+          <span class="glass-text-muted truncate text-sm font-medium">
+            {{ footerSelectionSummary }}
+          </span>
+          <span class="glass-text-muted hidden text-sm font-medium transition-opacity sm:inline-flex" :class="saving ? 'opacity-100' : 'opacity-0'">
+            正在上传修改到服务器...
+          </span>
+        </div>
         <BaseButton
           variant="primary"
           class="relative shadow-lg shadow-primary-500/30 !px-8 !py-2.5 !font-bold"
@@ -677,7 +689,13 @@ void getPlantCheckClasses
   color: var(--ui-text-1);
 }
 
-.steal-settings-page :is(.text-gray-500, .text-gray-400, .dark\:text-gray-400, .glass-text-muted) {
+.steal-settings-page
+  :is(
+    [class*='text-'][class*='gray-500'],
+    [class*='text-'][class*='gray-400'],
+    [class*='dark:text-'][class*='gray-400'],
+    .glass-text-muted
+  ) {
   color: var(--ui-text-2) !important;
 }
 
@@ -697,6 +715,12 @@ void getPlantCheckClasses
   border: 1px solid var(--ui-border-subtle) !important;
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--ui-bg-surface) 68%, transparent) !important;
+}
+
+.steal-controls-panel {
+  z-index: 12;
+  display: grid;
+  gap: 0.75rem;
 }
 
 .steal-tab {
@@ -805,26 +829,47 @@ void getPlantCheckClasses
   color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1)) !important;
 }
 
+.steal-metric-pill-info {
+  background: color-mix(in srgb, var(--ui-status-info) 8%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 78%, var(--ui-text-1)) !important;
+}
+
 .steal-metric-text-info {
   color: color-mix(in srgb, var(--ui-status-info) 76%, var(--ui-text-1)) !important;
 }
 
-.steal-settings-page [class*='border-gray-300/'],
-.steal-settings-page [class*='border-gray-300'],
-.steal-settings-page [class*='border-white/20'],
-.steal-settings-page [class*='dark:border-white/10'] {
+.steal-settings-page [class*='border-'][class*='gray-300/'],
+.steal-settings-page [class*='border-'][class*='gray-300'],
+.steal-settings-page [class*='border-'][class*='white/20'],
+.steal-settings-page [class*='dark:border-'][class*='white/10'] {
   border-color: var(--ui-border-subtle) !important;
 }
 
-.steal-settings-page [class*='bg-black/5'],
-.steal-settings-page [class*='bg-white/20'],
-.steal-settings-page [class*='dark:bg-black/20'],
-.steal-settings-page [class*='dark:bg-white/5'] {
+.steal-settings-page [class*='bg-'][class*='black/5'],
+.steal-settings-page [class*='bg-'][class*='white/20'],
+.steal-settings-page [class*='dark:bg-'][class*='black/20'],
+.steal-settings-page [class*='dark:bg-'][class*='white/5'] {
   background-color: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent) !important;
 }
 
 .steal-select-option {
   background: var(--ui-bg-surface) !important;
   color: var(--ui-text-1) !important;
+}
+
+.steal-toolbar-actions {
+  min-width: 0;
+}
+
+.steal-footer-bar {
+  border-top: 1px solid var(--glass-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+@media (max-width: 767px) {
+  .steal-footer-bar {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 </style>

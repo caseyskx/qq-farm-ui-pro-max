@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { developmentProgress, helpArticles, helpCategories } from '@/data/help-articles'
+import { useAppStore } from '@/stores/app'
+
+const appStore = useAppStore()
 
 // 从数据文件加载分类
 const categories = ref(helpCategories.map((cat: any) => ({
@@ -73,6 +76,29 @@ function selectArticle(articleId: string) {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
+function getCategoryButtonClasses(expanded: boolean) {
+  return expanded
+    ? 'hc-cat-active help-nav-category help-nav-category-active'
+    : 'help-nav-category help-nav-category-idle'
+}
+
+function getCategoryIconClasses(expanded: boolean) {
+  return expanded
+    ? 'help-nav-icon help-nav-icon-active'
+    : 'help-nav-icon help-nav-icon-idle'
+}
+
+function getArticleButtonClasses(active: boolean) {
+  return active
+    ? 'help-article-link help-article-link-active'
+    : 'help-article-link help-article-link-idle'
+}
+
+// Vue template usage is not always reflected in the TS unused analysis for this page.
+void getCategoryButtonClasses
+void getCategoryIconClasses
+void getArticleButtonClasses
+
 // 获取当前文章
 function getCurrentArticle() {
   return helpArticles.find((article: any) => article.id === selectedArticle.value)
@@ -86,18 +112,25 @@ function getArticleTitle() {
 
 // 获取开发进度
 const progress = developmentProgress
+const siteTitle = computed(() => appStore.siteTitle)
+const supportQqGroup = computed(() => appStore.supportQqGroup)
+const supportQqGroupLink = computed(() => `tencent://message/?uin=${supportQqGroup.value}&Site=&Menu=yes`)
+
+onMounted(() => {
+  appStore.fetchUIConfig()
+})
 </script>
 
 <template>
-  <div class="glass-text-main h-full flex flex-col overflow-hidden p-4 lg:p-8 sm:p-6">
-    <div class="mx-auto h-full max-w-7xl w-full flex gap-6">
+  <div class="help-center-page ui-page-shell ui-page-density-reading glass-text-main h-full min-h-0 w-full flex flex-col overflow-hidden">
+    <div class="help-center-shell h-full min-h-0 w-full flex flex-col gap-4 xl:flex-row xl:gap-5">
       <!-- 左侧分类导航 -->
-      <aside class="glass-panel h-full w-64 flex shrink-0 flex-col rounded-2xl p-4 shadow-sm transition-all">
-        <h2 class="mb-6 from-blue-600 to-indigo-600 bg-gradient-to-r bg-clip-text px-2 text-xl text-transparent font-bold tracking-wide dark:from-cyan-400 dark:to-blue-500">
-          御农 Help
+      <aside class="help-center-sidebar glass-panel min-h-0 w-full flex shrink-0 flex-col rounded-2xl p-4 shadow-sm transition-all">
+        <h2 class="help-page-title mb-6 bg-clip-text px-2 text-xl text-transparent font-bold tracking-wide">
+          {{ siteTitle }} Help
         </h2>
 
-        <nav class="flex-1 overflow-y-auto pr-1 space-y-2">
+        <nav class="min-h-0 flex-1 overflow-y-auto pr-1 space-y-2">
           <div
             v-for="(category, index) in categories"
             :key="category.name"
@@ -105,15 +138,11 @@ const progress = developmentProgress
           >
             <button
               class="group w-full flex items-center justify-between rounded-xl px-4 py-3 text-left transition-colors"
-              :class="[
-                category.expanded
-                  ? 'bg-primary-500/10 border border-primary-500/20 dark:bg-white/[0.08] dark:border-white/10 text-primary-700 dark:text-primary-300 font-bold shadow-[0_0_15px_rgba(var(--color-primary-500),0.1)]'
-                  : 'glass-text-main dark:text-gray-300 hover:text-gray-900 border border-transparent dark:hover:text-gray-100 dark:hover:bg-white/5 font-medium',
-              ]"
+              :class="getCategoryButtonClasses(category.expanded)"
               @click="toggleCategory(index)"
             >
               <div class="flex items-center gap-3">
-                <div :class="[category.icon, category.expanded ? 'text-primary-600 dark:text-primary-400' : 'glass-text-muted group-hover:scale-110 transition-transform']" />
+                <div :class="[category.icon, getCategoryIconClasses(category.expanded)]" />
                 <span>{{ category.name }}</span>
               </div>
               <div
@@ -135,11 +164,7 @@ const progress = developmentProgress
                   v-for="item in category.items"
                   :key="item.id"
                   class="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-all"
-                  :class="[
-                    selectedArticle === item.id
-                      ? 'bg-primary-500/10 text-primary-700 font-bold dark:bg-white/[0.08] dark:text-primary-300 shadow-sm'
-                      : 'glass-text-muted hover:bg-black/5 dark:text-gray-400 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-gray-200',
-                  ]"
+                  :class="getArticleButtonClasses(selectedArticle === item.id)"
                   @click="selectArticle(item.id)"
                 >
                   <div :class="item.icon" class="opacity-80" />
@@ -152,11 +177,11 @@ const progress = developmentProgress
 
         <!-- 开发进度信息 -->
         <div class="glass-panel mt-4 rounded-xl p-4 shadow-sm">
-          <div class="glass-text-main mb-3 flex items-center gap-2 text-xs font-bold dark:text-gray-300">
+          <div class="glass-text-main mb-3 flex items-center gap-2 text-xs font-bold">
             <div class="i-carbon-in-progress text-primary-600 dark:text-primary-400" />
             <span>核心库补完计划</span>
           </div>
-          <div class="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-white/10">
+          <div class="help-progress-track h-1.5 overflow-hidden rounded-full">
             <div
               class="h-full from-primary-500 to-primary-600 bg-gradient-to-r transition-all duration-1000 ease-out"
               :style="{ width: `${(progress.completedArticles / progress.totalArticles) * 100}%` }"
@@ -169,7 +194,7 @@ const progress = developmentProgress
       </aside>
 
       <!-- 右侧主内容区 -->
-      <main class="h-full min-w-0 flex flex-1 flex-col gap-6">
+      <main class="help-center-main min-h-0 min-w-0 flex flex-1 flex-col gap-4 xl:gap-5">
         <div class="relative min-h-0 flex flex-1 flex-col">
           <!-- 创作者与搜索卡片 (固定在顶部) -->
           <div class="glass-panel group sticky top-0 z-20 mb-6 flex shrink-0 flex-col justify-between gap-4 overflow-hidden rounded-3xl p-4 shadow-sm sm:flex-row sm:items-center lg:p-5">
@@ -178,8 +203,8 @@ const progress = developmentProgress
 
             <!-- 左侧作者信息 -->
             <div class="relative z-10 flex items-center gap-4">
-              <div class="relative h-12 w-12 rounded-full from-blue-500 to-indigo-600 bg-gradient-to-tr p-[2px] shadow-md transition-all duration-500 dark:from-cyan-400 dark:to-blue-500 group-hover:shadow-[0_0_15px_rgba(59,130,246,0.3)]">
-                <div class="h-full w-full flex items-center justify-center border border-white/20 rounded-full bg-black/5 dark:border-white/10 dark:bg-black/40">
+              <div class="hc-author-orb help-author-orb-shell relative h-12 w-12 rounded-full p-[2px] shadow-md transition-all duration-500">
+                <div class="help-author-core h-full w-full flex items-center justify-center rounded-full">
                   <div class="i-carbon-code text-xl text-primary-700 dark:text-primary-400" />
                 </div>
               </div>
@@ -188,11 +213,11 @@ const progress = developmentProgress
                   <h3 class="glass-text-main text-base font-extrabold tracking-wide">
                     官方核心创作者
                   </h3>
-                  <span class="flex items-center gap-0.5 border border-primary-300 rounded-full bg-primary-100 px-2 py-0.5 text-[9px] text-primary-800 font-bold tracking-wider uppercase dark:border-primary-500/30 dark:bg-primary-500/20 dark:text-primary-300">
+                  <span class="help-verified-badge flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase">
                     <div class="i-carbon-checkmark-filled text-[10px]" /> VERIFIED
                   </span>
                 </div>
-                <p class="glass-text-muted text-xs font-medium dark:text-slate-300">
+                <p class="help-author-subtitle text-xs font-medium">
                   系统架构与底座开发：<span class="glass-text-main font-bold">smdk000</span>
                 </p>
               </div>
@@ -201,31 +226,31 @@ const progress = developmentProgress
             <!-- 右侧搜索与联系方式 -->
             <div class="relative z-10 w-full flex items-center gap-3 sm:w-auto">
               <!-- 搜索框 -->
-              <div class="flex flex-1 cursor-text items-center border border-gray-200/50 rounded-xl bg-black/5 p-2.5 shadow-inner backdrop-blur-md transition-all sm:w-64 dark:border-white/5 group-hover:border-primary-400/50 dark:bg-black/30 dark:hover:border-white/10">
+              <div class="help-search-shell flex flex-1 cursor-text items-center rounded-xl p-2.5 shadow-inner backdrop-blur-md transition-all sm:w-64">
                 <span class="glass-text-muted i-carbon-search ml-2 mr-2 text-lg transition-colors group-hover:text-primary-600 dark:group-hover:text-primary-400" />
                 <input
                   v-model="searchQuery"
                   type="text"
                   placeholder="搜索所有文档..."
-                  class="glass-text-main w-full border-none bg-transparent text-sm font-medium outline-none placeholder-gray-500 dark:placeholder-gray-500"
+                  class="help-search-input glass-text-main w-full border-none bg-transparent text-sm font-medium outline-none"
                   @keyup.enter="handleSearch"
                 >
-                <button v-show="searchQuery" class="glass-text-muted mx-1 rounded-full p-1 transition-colors hover:bg-black/5 dark:text-gray-400 hover:text-gray-900 dark:hover:bg-white/10 dark:hover:text-white" @click="clearSearch">
+                <button v-show="searchQuery" class="help-search-clear glass-text-muted mx-1 rounded-full p-1 transition-colors" @click="clearSearch">
                   <div class="i-carbon-close text-sm" />
                 </button>
               </div>
 
               <!-- QQ群按钮 -->
-              <a href="tencent://message/?uin=227916149&Site=&Menu=yes" class="glass-panel glass-text-main flex items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-bold shadow-sm transition-all hover:shadow-md">
+              <a :href="supportQqGroupLink" class="glass-panel glass-text-main flex items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-bold shadow-sm transition-all hover:shadow-md">
                 <div class="i-carbon-chat text-lg text-primary-600 dark:text-primary-400" />
-                <span class="hidden sm:inline">支持Q群</span>
+                <span class="hidden sm:inline">支持QQ群 {{ supportQqGroup }}</span>
               </a>
             </div>
           </div>
 
           <!-- 文档内容卡片 -->
-          <div class="glass-panel relative flex-1 overflow-y-auto overscroll-contain scroll-smooth rounded-3xl p-8 shadow-sm">
-            <div class="pointer-events-none absolute right-0 top-0 h-32 w-full from-white/30 to-transparent bg-gradient-to-b dark:from-white/[0.02]" />
+          <div class="glass-panel relative flex-1 overflow-y-auto overscroll-contain scroll-smooth rounded-3xl p-5 shadow-sm lg:p-8">
+            <div class="help-document-sheen pointer-events-none absolute right-0 top-0 h-32 w-full" />
 
             <!-- 搜索结果视图 -->
             <div v-if="isSearching" class="relative z-10">
@@ -237,10 +262,10 @@ const progress = developmentProgress
                 <button
                   v-for="result in searchResults"
                   :key="result.id"
-                  class="group glass-panel w-full flex items-start gap-4 rounded-xl p-4 text-left shadow-sm transition-all hover:shadow-md"
+                  class="help-result-card group glass-panel w-full flex items-start gap-4 rounded-xl p-4 text-left shadow-sm transition-all hover:shadow-md"
                   @click="selectArticle(result.id)"
                 >
-                  <div class="h-10 w-10 flex shrink-0 items-center justify-center border border-gray-200/50 rounded-lg bg-black/5 text-primary-600 shadow-sm dark:border-white/5 dark:bg-black/30 dark:text-primary-400 group-hover:shadow-md">
+                  <div class="help-result-icon h-10 w-10 flex shrink-0 items-center justify-center rounded-lg shadow-sm group-hover:shadow-md">
                     <div :class="result.icon" class="text-xl" />
                   </div>
                   <div class="min-w-0 flex-1">
@@ -248,14 +273,14 @@ const progress = developmentProgress
                       {{ result.title }}
                     </h3>
                     <div class="flex items-center gap-2">
-                      <span class="glass-text-main rounded bg-black/5 px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase dark:bg-white/10">{{ result.category }}</span>
+                      <span class="help-result-tag glass-text-main rounded px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase">{{ result.category }}</span>
                     </div>
                   </div>
                 </button>
               </div>
               <div v-else class="py-20 text-center">
-                <div class="i-carbon-search-locate dark:glass-text-muted mx-auto mb-4 text-6xl text-gray-300" />
-                <p class="glass-text-main text-lg font-bold dark:text-gray-300">
+                <div class="help-empty-icon i-carbon-search-locate mx-auto mb-4 text-6xl" />
+                <p class="glass-text-main text-lg font-bold">
                   未找到相关内容
                 </p>
                 <p class="glass-text-muted mt-2 text-sm font-medium">
@@ -276,7 +301,7 @@ const progress = developmentProgress
               </div>
 
               <!-- Meta Footer -->
-              <div class="mt-12 flex flex-wrap items-center justify-between gap-4 border-t border-white/20 pt-6 dark:border-white/10/50">
+              <div class="help-article-footer mt-12 flex flex-wrap items-center justify-between gap-4 pt-6">
                 <div class="glass-text-muted flex flex-wrap items-center gap-x-6 gap-y-2 text-sm font-medium">
                   <div class="flex items-center gap-2">
                     <div class="i-carbon-calendar" />
@@ -291,10 +316,10 @@ const progress = developmentProgress
                 <div class="flex items-center gap-3">
                   <span class="glass-text-muted text-sm font-bold">文档有帮助吗？</span>
                   <div class="flex gap-2">
-                    <button class="glass-text-muted h-9 w-9 flex items-center justify-center border border-transparent rounded-full bg-black/5 shadow-sm transition-all hover:border-primary-300 dark:bg-white/[0.06] hover:bg-primary-100 hover:text-primary-700 dark:hover:border-primary-700/50 dark:hover:bg-primary-900/40 dark:hover:text-primary-400">
+                    <button class="help-feedback-btn help-feedback-btn-like glass-text-muted h-9 w-9 flex items-center justify-center rounded-full shadow-sm transition-all">
                       <div class="i-carbon-thumbs-up" />
                     </button>
-                    <button class="glass-text-muted h-9 w-9 flex items-center justify-center border border-transparent rounded-full bg-black/5 shadow-sm transition-all hover:border-red-300 dark:bg-white/[0.06] hover:bg-red-100 hover:text-red-700 dark:hover:border-red-700/50 dark:hover:bg-red-900/40 dark:hover:text-red-400">
+                    <button class="help-feedback-btn help-feedback-btn-dislike glass-text-muted h-9 w-9 flex items-center justify-center rounded-full shadow-sm transition-all">
                       <div class="i-carbon-thumbs-down" />
                     </button>
                   </div>
@@ -309,50 +334,235 @@ const progress = developmentProgress
 </template>
 
 <style scoped>
+.help-center-page {
+  color: var(--ui-text-1);
+}
+
+.help-center-shell {
+  align-items: stretch;
+  gap: var(--ui-page-gap-current);
+}
+
+.help-center-sidebar {
+  flex-basis: 100%;
+  max-height: min(22rem, 42vh);
+}
+
+.help-center-main {
+  min-width: 0;
+  gap: calc(var(--ui-page-gap-current) + 0.125rem);
+}
+
+@media (min-width: 1280px) {
+  .help-center-sidebar {
+    width: 18.5rem;
+    flex-basis: 18.5rem;
+    max-height: none;
+  }
+}
+
+.help-center-page
+  :is(
+    [class*='text-'][class*='gray-300'],
+    [class*='text-'][class*='gray-400'],
+    [class*='text-'][class*='gray-500'],
+    .glass-text-muted
+  ) {
+  color: var(--ui-text-2) !important;
+}
+
+.help-center-page :is([class*='text-'][class*='gray-200'], [class*='text-'][class*='gray-100']) {
+  color: var(--ui-text-1) !important;
+}
+
+.help-page-title {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ui-brand-700) 88%, var(--ui-text-1) 12%),
+    color-mix(in srgb, var(--ui-brand-500) 92%, var(--ui-text-1) 8%)
+  );
+}
+
+.help-author-orb-shell {
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ui-brand-500) 88%, white 12%),
+    color-mix(in srgb, var(--ui-brand-700) 82%, black 18%)
+  );
+}
+
+.help-nav-category,
+.help-article-link,
+.help-search-shell,
+.help-result-icon,
+.help-result-tag,
+.help-feedback-btn,
+.help-author-core,
+.help-verified-badge {
+  border: 1px solid var(--ui-border-subtle) !important;
+}
+
+.help-nav-category-active,
+.help-article-link-active,
+.help-verified-badge {
+  background: var(--ui-brand-soft-12) !important;
+  color: color-mix(in srgb, var(--ui-brand-700) 76%, var(--ui-text-1)) !important;
+}
+
+.help-nav-category-idle,
+.help-article-link-idle {
+  color: var(--ui-text-1) !important;
+}
+
+.help-nav-category-idle:hover,
+.help-article-link-idle:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
+}
+
+.help-nav-icon-active {
+  color: var(--ui-brand-600) !important;
+}
+
+.help-nav-icon-idle {
+  color: var(--ui-text-2) !important;
+  transition: transform 0.2s ease;
+}
+
+.group:hover .help-nav-icon-idle {
+  transform: scale(1.1);
+}
+
+.help-progress-track {
+  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent) !important;
+}
+
+.help-author-core,
+.help-search-shell,
+.help-result-icon,
+.help-result-tag,
+.help-feedback-btn {
+  background: color-mix(in srgb, var(--ui-bg-surface) 68%, transparent) !important;
+}
+
+.help-author-subtitle {
+  color: var(--ui-text-2) !important;
+}
+
+.help-document-sheen {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--ui-brand-500) 10%, transparent),
+    transparent
+  ) !important;
+}
+
+.help-search-shell {
+  border-radius: 0.75rem;
+}
+
+.group:hover .help-search-shell {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 28%, var(--ui-border-subtle)) !important;
+}
+
+.help-search-input::placeholder {
+  color: var(--ui-text-3);
+}
+
+.help-search-clear:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
+  color: var(--ui-text-1) !important;
+}
+
+.help-result-card:hover {
+  box-shadow: 0 14px 28px var(--ui-shadow-panel) !important;
+}
+
+.help-result-icon {
+  color: var(--ui-brand-600) !important;
+}
+
+.help-feedback-btn-like:hover {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 36%, transparent) !important;
+  background: var(--ui-brand-soft-10) !important;
+  color: color-mix(in srgb, var(--ui-brand-700) 76%, var(--ui-text-1)) !important;
+}
+
+.help-feedback-btn-dislike:hover {
+  border-color: color-mix(in srgb, var(--ui-status-danger) 30%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-status-danger) 8%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1)) !important;
+}
+
+.help-empty-icon {
+  color: color-mix(in srgb, var(--ui-text-3) 78%, transparent) !important;
+}
+
+.help-article-footer {
+  border-top: 1px solid var(--ui-border-subtle) !important;
+}
+
+.help-center-page [class*='border-'][class*='white/20'],
+.help-center-page [class*='border-'][class*='white/10'],
+.help-center-page [class*='border-'][class*='gray-200/50'],
+.help-center-page [class*='dark:border-'][class*='white/10'] {
+  border-color: var(--ui-border-subtle) !important;
+}
+
+.help-center-page [class*='bg-'][class*='black/5'],
+.help-center-page [class*='bg-'][class*='black/10'],
+.help-center-page [class*='bg-'][class*='white/10'],
+.help-center-page [class*='dark:bg-'][class*='black/20'],
+.help-center-page [class*='dark:bg-'][class*='black/30'] {
+  background-color: var(--ui-bg-surface) !important;
+}
+
 /* 深邃层次感玻璃底板 - 仅增强 box-shadow，backdrop-filter 由全局 style.css 统一管控 */
 .glass-panel {
   box-shadow:
-    0 8px 32px 0 rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 8px 32px 0 var(--ui-shadow-panel),
+    inset 0 1px 0 var(--ui-shadow-inner);
 }
 
 .dark .glass-panel {
   box-shadow:
-    0 8px 32px 0 rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    0 8px 32px 0 var(--ui-shadow-panel-strong),
+    inset 0 1px 0 var(--ui-shadow-inner);
 }
 
 /* --------------- 动态内容内部样式调整 --------------- */
 :deep(.article-markdown-body) {
   font-size: 0.95rem;
-  color: var(--text-main, #1f2937);
+  color: var(--ui-text-1);
+  line-height: 1.8;
+  max-width: 78ch;
 }
 .dark :deep(.article-markdown-body) {
-  color: var(--text-main, #e5e7eb);
+  color: var(--ui-text-1);
 }
 
 :deep(.article-markdown-body h3) {
   font-size: 1.25rem;
   font-weight: 800;
   margin-bottom: 0.75rem;
-  color: var(--text-main, #111827);
+  color: var(--ui-text-1);
 }
 .dark :deep(.article-markdown-body h3) {
-  color: var(--text-main, #ffffff);
+  color: var(--ui-text-1);
 }
 
 :deep(.article-markdown-body h4) {
   font-size: 1.1rem;
   font-weight: 700;
   margin-bottom: 0.5rem;
-  color: var(--text-main, #374151);
+  color: var(--ui-text-1);
 }
 .dark :deep(.article-markdown-body h4) {
-  color: var(--text-main, #f3f4f6);
+  color: var(--ui-text-1);
 }
 
 :deep(.article-markdown-body p) {
   font-weight: 500;
+  max-width: 72ch;
 }
 
 :deep(.article-markdown-body ul),
@@ -365,22 +575,22 @@ const progress = developmentProgress
 }
 
 :deep(.article-markdown-body pre) {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--ui-bg-surface-raised);
   padding: 1rem;
   border-radius: 0.5rem;
   overflow-x: auto;
   font-family: monospace;
   font-size: 0.85rem;
   margin-top: 0.5rem;
-  color: var(--text-main, #111827);
+  color: var(--ui-text-1);
   font-weight: 600;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--ui-border-subtle);
 }
 
 .dark :deep(.article-markdown-body pre) {
-  background: rgba(0, 0, 0, 0.4);
-  color: #e5e7eb;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--ui-bg-surface-raised);
+  color: var(--ui-text-1);
+  border: 1px solid var(--ui-border-subtle);
 }
 
 /* 统一拟态卡片样式 */
@@ -399,16 +609,16 @@ const progress = developmentProgress
 :deep(.checklist),
 :deep(.config-template),
 :deep(.faq-item) {
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid var(--glass-border, rgba(0, 0, 0, 0.05));
+  background: var(--ui-bg-surface);
+  border: 1px solid var(--ui-border-subtle);
   border-radius: 16px;
   padding: 20px;
   margin-bottom: 20px;
   box-shadow:
-    0 4px 6px -1px rgba(0, 0, 0, 0.05),
-    0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    0 4px 6px -1px var(--ui-shadow-panel),
+    0 2px 4px -2px var(--ui-shadow-panel);
   transition: all 0.3s ease;
-  color: var(--text-main, #1f2937);
+  color: var(--ui-text-1);
   backdrop-filter: blur(10px);
 }
 
@@ -427,43 +637,43 @@ const progress = developmentProgress
 .dark :deep(.checklist),
 .dark :deep(.config-template),
 .dark :deep(.faq-item) {
-  background: rgba(255, 255, 255, 0.03);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+  background: var(--ui-bg-surface);
+  box-shadow: 0 4px 6px -1px var(--ui-shadow-panel-strong);
 }
 
 /* 特殊卡片增强 */
 :deep(.tip-success) {
-  border-left: 4px solid #22c55e !important;
+  border-left: 4px solid var(--ui-status-success) !important;
 }
 :deep(.tip-warning) {
-  border-left: 4px solid #eab308 !important;
+  border-left: 4px solid var(--ui-status-warning) !important;
 }
 :deep(.tip-info) {
-  border-left: 4px solid #3b82f6 !important;
+  border-left: 4px solid var(--ui-status-info) !important;
 }
 :deep(.tip-error) {
-  border-left: 4px solid #ef4444 !important;
+  border-left: 4px solid var(--ui-status-danger) !important;
 }
 
 :deep(.tip-success) .tip-icon {
-  color: #16a34a;
+  color: var(--ui-status-success);
 }
 .dark :deep(.tip-success) .tip-icon {
-  color: #4ade80;
+  color: var(--ui-status-success);
 }
 
 :deep(.tip-warning) .tip-icon {
-  color: #ca8a04;
+  color: var(--ui-status-warning);
 }
 .dark :deep(.tip-warning) .tip-icon {
-  color: #facc15;
+  color: var(--ui-status-warning);
 }
 
 :deep(.tip-info) .tip-icon {
-  color: #2563eb;
+  color: var(--ui-status-info);
 }
 .dark :deep(.tip-info) .tip-icon {
-  color: #60a5fa;
+  color: var(--ui-status-info);
 }
 
 :deep(.feature-grid) {
@@ -478,19 +688,27 @@ const progress = developmentProgress
   justify-content: center;
   width: 28px;
   height: 28px;
-  background: rgb(var(--color-primary-500));
-  color: white;
+  background: var(--ui-status-info);
+  color: var(--ui-text-on-brand);
   border-radius: 50%;
   font-size: 0.9rem;
   font-weight: 800;
   margin-right: 12px;
   margin-bottom: 12px;
-  box-shadow: 0 2px 4px rgba(var(--color-primary-500), 0.3);
+  box-shadow: 0 2px 4px var(--ui-shadow-panel);
 }
 
 .dark :deep(.step-number) {
-  background: rgb(var(--color-primary-400));
-  box-shadow: 0 2px 4px rgba(var(--color-primary-400), 0.3);
+  background: var(--ui-status-info);
+  box-shadow: 0 2px 4px var(--ui-shadow-panel-strong);
+}
+
+.hc-cat-active {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--ui-brand-500) 18%, transparent);
+}
+
+.group:hover .hc-author-orb {
+  box-shadow: 0 0 15px color-mix(in srgb, var(--ui-brand-500) 30%, transparent);
 }
 
 :deep(.tip-header) {

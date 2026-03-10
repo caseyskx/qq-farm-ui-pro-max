@@ -19,7 +19,7 @@ on:
       version:
         description: 'Version (e.g., v3.6.0)'
         required: false
-        default: 'v4.5.17'
+        default: 'v4.5.18'
       push_to_docker_hub:
         description: 'Push to Docker Hub'
         required: false
@@ -45,6 +45,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check Announcements
+        run: node scripts/utils/check-announcements.js
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

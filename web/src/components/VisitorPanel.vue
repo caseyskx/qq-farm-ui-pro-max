@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
+import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
 import { useStatusStore } from '@/stores/status'
 
 const statusStore = useStatusStore()
@@ -25,12 +26,16 @@ function getTypeText(result: string) {
 
 function getTypeClass(result: string) {
   if (result === 'weed')
-    return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+    return 'visitor-type-badge visitor-type-badge--weed'
   if (result === 'insect')
-    return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+    return 'visitor-type-badge visitor-type-badge--insect'
   if (result === 'steal')
-    return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-  return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+    return 'visitor-type-badge visitor-type-badge--steal'
+  return 'visitor-type-badge visitor-type-badge--visit'
+}
+
+function getSummaryBadgeClass(type: 'total' | 'weed' | 'insect' | 'steal') {
+  return `visitor-summary-pill visitor-summary-pill--${type}`
 }
 
 const visitorLogs = computed(() => {
@@ -57,44 +62,196 @@ const summary = computed(() => {
   }
   return { total: list.length, weed, insect, steal }
 })
+
+const summaryChips = computed(() => [
+  { key: 'total', label: `最近 ${summary.value.total} 条`, tone: getSummaryBadgeClass('total') },
+  { key: 'weed', label: `放草 ${summary.value.weed}`, tone: getSummaryBadgeClass('weed') },
+  { key: 'insect', label: `放虫 ${summary.value.insect}`, tone: getSummaryBadgeClass('insect') },
+  { key: 'steal', label: `偷菜 ${summary.value.steal}`, tone: getSummaryBadgeClass('steal') },
+])
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="glass-panel border border-white/20 rounded-lg p-4 shadow-sm dark:border-white/10">
-      <div class="mb-3 flex flex-wrap items-center gap-2">
+  <div class="visitor-panel space-y-4">
+    <div class="visitor-shell glass-panel rounded-lg p-4 shadow-sm">
+      <div class="visitor-toolbar ui-mobile-sticky-panel">
         <div class="glass-text-main flex items-center gap-2 text-base font-semibold">
           <div class="i-carbon-user-multiple text-lg" />
           <span>访客面板</span>
         </div>
-        <span class="rounded-full bg-blue-100 px-2.5 py-1 text-xs text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">最近 {{ summary.total }} 条</span>
-        <span class="rounded-full bg-green-100 px-2.5 py-1 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-300">放草 {{ summary.weed }}</span>
-        <span class="rounded-full bg-orange-100 px-2.5 py-1 text-xs text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">放虫 {{ summary.insect }}</span>
-        <span class="rounded-full bg-red-100 px-2.5 py-1 text-xs text-red-700 dark:bg-red-900/30 dark:text-red-300">偷菜 {{ summary.steal }}</span>
+        <p class="visitor-toolbar__desc">
+          最近的好友互动、偷菜、放草和放虫事件会按时间倒序展示。
+        </p>
+        <div class="visitor-toolbar__chips ui-bulk-actions">
+          <span v-for="item in summaryChips" :key="item.key" :class="item.tone">
+            {{ item.label }}
+          </span>
+        </div>
       </div>
 
-      <div v-if="visitorLogs.length === 0" class="glass-text-muted min-h-56 flex flex-col items-center justify-center gap-3 border border-gray-300/70 rounded-lg border-dashed bg-black/5 py-10 text-sm dark:border-white/15 dark:bg-black/20">
-        <div class="i-carbon-face-wink text-2xl" />
-        <p>暂无访客事件</p>
-      </div>
+      <BaseEmptyState
+        v-if="visitorLogs.length === 0"
+        dashed
+        class="visitor-empty-state glass-text-muted min-h-56 rounded-lg py-10 text-sm"
+        icon="i-carbon-face-wink"
+        title="暂无访客事件"
+        description="等好友互动、偷菜、放草或放虫后，这里会自动按时间倒序汇总。"
+      />
 
-      <div v-else class="max-h-[32rem] overflow-y-auto pr-1 space-y-2">
+      <div v-else class="visitor-log-list">
         <div
           v-for="(log, idx) in visitorLogs"
           :key="`${log.ts || idx}_${log.msg || ''}`"
-          class="glass-panel border border-white/20 rounded-lg p-3 dark:border-white/10"
+          class="visitor-log-card ui-mobile-record-card glass-panel rounded-lg p-3"
         >
-          <div class="mb-1 flex flex-wrap items-center gap-2 text-xs">
-            <span class="rounded px-2 py-0.5 font-medium" :class="getTypeClass(String(log?.meta?.result || ''))">{{ getTypeText(String(log?.meta?.result || '')) }}</span>
-            <span class="glass-text-muted">{{ formatTime(log.time) }}</span>
-            <span class="glass-text-muted">地块 #{{ Number(log?.meta?.landId || 0) || '-' }}</span>
-            <span v-if="Number(log?.meta?.gid || 0) > 0" class="glass-text-muted">GID {{ Number(log?.meta?.gid || 0) }}</span>
+          <div class="ui-mobile-record-head">
+            <div class="ui-mobile-record-body">
+              <div class="ui-mobile-record-badges">
+                <span class="rounded px-2 py-0.5 font-medium" :class="getTypeClass(String(log?.meta?.result || ''))">{{ getTypeText(String(log?.meta?.result || '')) }}</span>
+              </div>
+              <h3 class="ui-mobile-record-title mt-3">
+                {{ String(log.msg || '').trim() || '访客事件' }}
+              </h3>
+              <p class="ui-mobile-record-subtitle">
+                {{ formatTime(log.time) }}
+              </p>
+            </div>
           </div>
-          <div class="glass-text-main text-sm leading-6">
-            {{ String(log.msg || '').trim() || '访客事件' }}
+
+          <div class="ui-mobile-record-grid visitor-log-grid">
+            <div class="ui-mobile-record-field">
+              <div class="ui-mobile-record-label">
+                事件类型
+              </div>
+              <div class="ui-mobile-record-value">
+                {{ getTypeText(String(log?.meta?.result || '')) }}
+              </div>
+            </div>
+            <div class="ui-mobile-record-field">
+              <div class="ui-mobile-record-label">
+                地块
+              </div>
+              <div class="ui-mobile-record-value">
+                #{{ Number(log?.meta?.landId || 0) || '-' }}
+              </div>
+            </div>
+            <div v-if="Number(log?.meta?.gid || 0) > 0" class="ui-mobile-record-field">
+              <div class="ui-mobile-record-label">
+                GID
+              </div>
+              <div class="ui-mobile-record-value">
+                {{ Number(log?.meta?.gid || 0) }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.visitor-panel {
+  color: var(--ui-text-1);
+}
+
+.visitor-shell,
+.visitor-empty-state,
+.visitor-log-card,
+.visitor-summary-pill,
+.visitor-type-badge {
+  border: 1px solid var(--ui-border-subtle) !important;
+}
+
+.visitor-shell,
+.visitor-log-card {
+  background: color-mix(in srgb, var(--ui-bg-surface) 68%, transparent) !important;
+}
+
+.visitor-empty-state {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
+  border-style: dashed !important;
+}
+
+.visitor-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.visitor-toolbar__desc {
+  color: var(--ui-text-2);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.visitor-toolbar__chips {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.visitor-summary-pill,
+.visitor-type-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.visitor-summary-pill--total,
+.visitor-type-badge--visit {
+  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-info) 78%, var(--ui-text-1)) !important;
+}
+
+.visitor-summary-pill--weed,
+.visitor-type-badge--weed {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1)) !important;
+}
+
+.visitor-summary-pill--insect,
+.visitor-type-badge--insect {
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-warning) 80%, var(--ui-text-1)) !important;
+}
+
+.visitor-summary-pill--steal,
+.visitor-type-badge--steal {
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent) !important;
+  color: color-mix(in srgb, var(--ui-status-danger) 80%, var(--ui-text-1)) !important;
+}
+
+.visitor-log-list {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 32rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.visitor-log-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 767px) {
+  .visitor-toolbar {
+    z-index: 11;
+    padding-bottom: 0.15rem;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent) 0%,
+      color-mix(in srgb, var(--ui-bg-surface) 70%, transparent) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .visitor-log-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+</style>

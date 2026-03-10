@@ -1,9 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveWebDistPath } = require('../utils/web-dist');
 
 function loadJson(name) {
     const devPath = path.join(__dirname, '../../../web/public/nc_local_version/data', name);
-    const prodPath = path.join(__dirname, '../../../web/dist/nc_local_version/data', name);
+    const prodPath = resolveWebDistPath('nc_local_version', 'data', name);
     if (fs.existsSync(prodPath)) return JSON.parse(fs.readFileSync(prodPath, 'utf8'));
     if (fs.existsSync(devPath)) return JSON.parse(fs.readFileSync(devPath, 'utf8'));
     return null;

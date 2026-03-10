@@ -20,6 +20,7 @@ async function loadProto() {
         getResourcePath('proto', 'corepb.proto'),
         getResourcePath('proto', 'shoppb.proto'),
         getResourcePath('proto', 'friendpb.proto'),
+        getResourcePath('proto', 'interactpb.proto'),
         getResourcePath('proto', 'visitpb.proto'),
         getResourcePath('proto', 'notifypb.proto'),
         getResourcePath('proto', 'taskpb.proto'),
@@ -72,6 +73,9 @@ async function loadProto() {
     types.FertilizeReply = root.lookupType('gamepb.plantpb.FertilizeReply');
 
     // 背包/仓库
+    types.CoreItem = root.lookupType('corepb.Item');
+    types.CoreItemBag = root.lookupType('corepb.ItemBag');
+    types.CoreItemChg = root.lookupType('corepb.ItemChg');
     types.BagRequest = root.lookupType('gamepb.itempb.BagRequest');
     types.BagReply = root.lookupType('gamepb.itempb.BagReply');
     types.SellRequest = root.lookupType('gamepb.itempb.SellRequest');
@@ -127,6 +131,8 @@ async function loadProto() {
     types.AcceptFriendsReply = root.lookupType('gamepb.friendpb.AcceptFriendsReply');
     types.SyncAllFriendsRequest = root.lookupType('gamepb.friendpb.SyncAllRequest');
     types.SyncAllFriendsReply = root.lookupType('gamepb.friendpb.SyncAllReply');
+    types.InteractRecordsRequest = root.lookupType('gamepb.interactpb.InteractRecordsRequest');
+    types.InteractRecordsReply = root.lookupType('gamepb.interactpb.InteractRecordsReply');
 
     // 访问
     types.VisitEnterRequest = root.lookupType('gamepb.visitpb.EnterRequest');

@@ -62,19 +62,23 @@
 
 ### 2.1 最快上手：Docker 一键部署（推荐）
 
-**x86_64（Intel/AMD 云服务器）：**
+**推荐写法（自动识别部署目录并拉起完整栈）：**
 ```bash
-curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy-x86.sh && chmod +x deploy-x86.sh && ./deploy-x86.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
 ```
 
-**ARM64（甲骨文 ARM、树莓派、Apple Silicon）：**
+**如需按架构显式调用包装脚本：**
 ```bash
-curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy-arm.sh && chmod +x deploy-arm.sh && ./deploy-arm.sh
+# x86_64
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-x86.sh && chmod +x deploy-x86.sh && ./deploy-x86.sh
+
+# ARM64
+curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/deploy-arm.sh && chmod +x deploy-arm.sh && ./deploy-arm.sh
 ```
 
 - 约 2 分钟内完成，日志出现 `✅ MySQL 核心表结构自动初始化完成` 即成功
 - 访问：`http://localhost:3080`
-- 默认账号：`admin` / `qq007qq008`（**建议部署后立即修改密码**）
+- 默认账号：`admin` / `.env` 中的 `ADMIN_PASSWORD`（`deploy/.env.example` 示例值为 `qq007qq008`，建议部署后立即修改）
 
 ### 2.2 本地开发：源码运行
 
@@ -111,10 +115,15 @@ pnpm dev:core
 ### 3.2 方式二：Docker Compose（生产环境）
 
 ```bash
-curl -O https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/docker-compose.prod.yml
-curl -o .env https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/.env.example
+mkdir -p /opt/$(date +%Y_%m_%d)/qq-farm-bot
+cd /opt/$(date +%Y_%m_%d)/qq-farm-bot
+
+curl -fsSLO https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/deploy/docker-compose.yml
+curl -fsSLo .env https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/deploy/.env.example
+curl -fsSLo init-db/01-init.sql --create-dirs https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/deploy/init-db/01-init.sql
+
 # 编辑 .env 修改 ADMIN_PASSWORD 等
-docker-compose -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
 ### 3.3 方式三：单容器运行
@@ -149,7 +158,7 @@ docker run -d \
 
 | 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
-| `ADMIN_PASSWORD` | 管理员密码 | `qq007qq008` |
+| `ADMIN_PASSWORD` | 管理员密码 | 以 `.env` 配置为准（示例值 `qq007qq008`） |
 | `TZ` | 时区 | `Asia/Shanghai` |
 | `LOG_LEVEL` | 日志级别 | `info` |
 
@@ -419,7 +428,12 @@ sqlite3 data/farm-bot.db "PRAGMA integrity_check;"
 
 ### Q5: Docker 镜像拉取失败？
 
-确认使用 `smdk000/qq-farm-bot-ui:latest`，执行 `docker login`。
+优先确认镜像地址是否正确：
+
+- Docker Hub：`smdk000/qq-farm-bot-ui:latest`
+- GHCR：`ghcr.io/smdk000/qq-farm-ui-pro-max:latest`
+
+然后执行 `docker login`，或改用 `fresh-install.sh` 让脚本自动处理拉取与本地构建回退。
 
 ### Q6: 端口被占用？
 
@@ -427,7 +441,7 @@ sqlite3 data/farm-bot.db "PRAGMA integrity_check;"
 
 ### Q7: 默认密码是什么？
 
-- Docker 部署：`admin` / `qq007qq008`
+- Docker 部署：`admin` / `.env` 中的 `ADMIN_PASSWORD`（示例值 `qq007qq008`）
 - 二进制版：`admin` / `admin`
 - **建议部署后立即修改**
 
@@ -483,7 +497,7 @@ sqlite3 data/farm-bot.db "PRAGMA integrity_check;"
 
 | 文档 | 说明 |
 |------|------|
-| [README_DRAFT.md](../README_DRAFT.md) | 项目总览 |
+| [README.md](../README.md) | 项目总览 |
 | [guides/SETTINGS_GUIDE.md](guides/SETTINGS_GUIDE.md) | 设置功能详解 |
 | [guides/TROUBLESHOOTING.md](guides/TROUBLESHOOTING.md) | 故障排除手册 |
 | [guides/CONFIG_TEMPLATES.md](guides/CONFIG_TEMPLATES.md) | 配置模板集 |

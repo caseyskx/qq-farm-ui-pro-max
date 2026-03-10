@@ -10,6 +10,7 @@ const path = require('path');
 const axios = require('axios');
 const { execFile } = require('child_process');
 const { determineRuntimeMode, inspectListeningProcess } = require('../../../scripts/service/ai-autostart');
+const { createModuleLogger } = require('../services/logger');
 const {
   describeAllowedAiProjectRoots,
   isAiWorkspaceError,
@@ -19,6 +20,7 @@ const {
 const router = express.Router();
 const PROJECT_ROOT = path.join(__dirname, '../../..');
 const AI_AUTOSTART_SCRIPT = path.join(PROJECT_ROOT, 'scripts', 'service', 'ai-autostart.js');
+const aiStatusLogger = createModuleLogger('ai-status');
 
 const CONFIG = {
   openVikingUrl: process.env.OPENVIKING_URL || 'http://localhost:5432',
@@ -31,7 +33,10 @@ function resolveRequestedCwd(rawInput) {
 }
 
 function logRejectedWorkspace(rawInput, error) {
-  console.warn(`[AI 状态] 已拒绝目录请求: ${String(rawInput || '').trim() || '<default>'} -> ${error.message}`);
+  aiStatusLogger.warn('已拒绝 AI 目录请求', {
+    requestedPath: String(rawInput || '').trim() || '<default>',
+    error: error && error.message ? error.message : String(error || ''),
+  });
 }
 
 function respondAiStatusError(res, error, rawInput) {
@@ -141,7 +146,7 @@ router.get('/status', async (req, res) => {
         process.kill(pid, 0);
         status.daemon.running = true;
         status.daemon.pid = pid;
-      } catch (error) {
+      } catch {
         // 进程不存在
         fs.unlinkSync(pidFile);
       }
@@ -159,7 +164,7 @@ router.get('/status', async (req, res) => {
       status.openViking.healthy = response.data.status === 'healthy';
       status.openViking.workspace = response.data.workspace;
       status.openViking.detectedWithoutDaemon = !status.daemon.running;
-    } catch (error) {
+    } catch {
       status.openViking.running = false;
       status.openViking.healthy = false;
       status.openViking.detectedWithoutDaemon = false;

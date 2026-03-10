@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import api from '@/api'
 import { getThemeAppearanceConfig, getWorkspaceAppearanceConfig } from '@/constants/ui-appearance'
+import { applyThemeTokens } from '@/theme/apply-theme'
+import { currentAccountId } from '@/utils/auth'
 
 const THEME_KEY = 'ui_theme'
 const DEFAULT_LOGIN_BACKGROUND_OVERLAY_OPACITY = 30
@@ -10,6 +12,9 @@ const DEFAULT_LOGIN_BACKGROUND_BLUR = 2
 const DEFAULT_WORKSPACE_VISUAL_CONFIG = getWorkspaceAppearanceConfig('console')
 const DEFAULT_APP_BACKGROUND_OVERLAY_OPACITY = DEFAULT_WORKSPACE_VISUAL_CONFIG.appBackgroundOverlayOpacity
 const DEFAULT_APP_BACKGROUND_BLUR = DEFAULT_WORKSPACE_VISUAL_CONFIG.appBackgroundBlur
+export const DEFAULT_SITE_TITLE = '御农·QQ 农场智能助手'
+export const DEFAULT_SUPPORT_QQ_GROUP = '227916149'
+export const DEFAULT_COPYRIGHT_TEXT = '© 2026 御农 System | 架构与开发: smdk000'
 type ThemeMode = 'light' | 'dark' | 'auto'
 type BackgroundScope = 'login_only' | 'login_and_app' | 'global'
 interface UIConfigInput {
@@ -24,6 +29,10 @@ interface UIConfigInput {
   colorTheme?: string
   performanceMode?: boolean
   themeBackgroundLinked?: boolean
+  siteTitle?: string
+  supportQqGroup?: string
+  copyrightText?: string
+  currentAccountId?: string
 }
 
 function clampUiNumber(value: unknown, fallback: number, min: number, max: number) {
@@ -31,6 +40,21 @@ function clampUiNumber(value: unknown, fallback: number, min: number, max: numbe
   if (!Number.isFinite(num))
     return fallback
   return Math.min(max, Math.max(min, Math.round(num)))
+}
+
+function normalizeSiteTitle(value: unknown) {
+  const title = String(value ?? '').trim().slice(0, 120)
+  return title || DEFAULT_SITE_TITLE
+}
+
+function normalizeSupportQqGroup(value: unknown) {
+  const group = String(value ?? '').replace(/\D/g, '').slice(0, 20)
+  return group || DEFAULT_SUPPORT_QQ_GROUP
+}
+
+function normalizeCopyrightText(value: unknown) {
+  const text = String(value ?? '').trim().slice(0, 240)
+  return text || DEFAULT_COPYRIGHT_TEXT
 }
 
 /**
@@ -128,6 +152,9 @@ export const useAppStore = defineStore('app', () => {
   const appBackgroundOverlayOpacity = useStorage('app_background_overlay_opacity', DEFAULT_APP_BACKGROUND_OVERLAY_OPACITY)
   const appBackgroundBlur = useStorage('app_background_blur', DEFAULT_APP_BACKGROUND_BLUR)
   const themeBackgroundLinked = useStorage('theme_background_linked', false)
+  const siteTitle = useStorage('site_title', DEFAULT_SITE_TITLE)
+  const supportQqGroup = useStorage('support_qq_group', DEFAULT_SUPPORT_QQ_GROUP)
+  const copyrightText = useStorage('copyright_text', DEFAULT_COPYRIGHT_TEXT)
 
   // 最终的深色状态（对外暴露）
   const isDark = computed(() => {
@@ -209,6 +236,10 @@ export const useAppStore = defineStore('app', () => {
           colorTheme: ct,
           performanceMode: pm,
           themeBackgroundLinked: linkedThemeBackground,
+          siteTitle: nextSiteTitle,
+          supportQqGroup: nextSupportQqGroup,
+          copyrightText: nextCopyrightText,
+          currentAccountId: nextCurrentAccountId,
           timestamp: svrTimestamp,
         } = res.data.data
 
@@ -256,6 +287,21 @@ export const useAppStore = defineStore('app', () => {
         }
         if (linkedThemeBackground !== undefined) {
           themeBackgroundLinked.value = !!linkedThemeBackground
+        }
+        if (nextSiteTitle !== undefined) {
+          siteTitle.value = normalizeSiteTitle(nextSiteTitle)
+        }
+        if (nextSupportQqGroup !== undefined) {
+          supportQqGroup.value = normalizeSupportQqGroup(nextSupportQqGroup)
+        }
+        if (nextCopyrightText !== undefined) {
+          copyrightText.value = normalizeCopyrightText(nextCopyrightText)
+        }
+        if (nextCurrentAccountId !== undefined) {
+          const normalizedCurrentAccountId = String(nextCurrentAccountId || '').trim()
+          if (normalizedCurrentAccountId) {
+            currentAccountId.value = normalizedCurrentAccountId
+          }
         }
       }
     }
@@ -305,46 +351,65 @@ export const useAppStore = defineStore('app', () => {
   async function setUIConfig(config: UIConfigInput) {
     try {
       const resolvedConfig = resolveWorkspaceVisualConfig(resolveLinkedThemeConfig(config))
+      const normalizedResolvedConfig: UIConfigInput = { ...resolvedConfig }
+      if (normalizedResolvedConfig.siteTitle !== undefined) {
+        normalizedResolvedConfig.siteTitle = normalizeSiteTitle(normalizedResolvedConfig.siteTitle)
+      }
+      if (normalizedResolvedConfig.supportQqGroup !== undefined) {
+        normalizedResolvedConfig.supportQqGroup = normalizeSupportQqGroup(normalizedResolvedConfig.supportQqGroup)
+      }
+      if (normalizedResolvedConfig.copyrightText !== undefined) {
+        normalizedResolvedConfig.copyrightText = normalizeCopyrightText(normalizedResolvedConfig.copyrightText)
+      }
       const newTimestamp = Date.now()
-      await api.post('/api/settings/theme', { ...resolvedConfig, timestamp: newTimestamp })
+      await api.post('/api/settings/theme', { ...normalizedResolvedConfig, timestamp: newTimestamp })
 
       // 更新本地写入时间戳
       uiTimestamp.value = newTimestamp
 
-      if (resolvedConfig.theme) {
-        themeMode.value = resolvedConfig.theme
-        localStorage.setItem(THEME_KEY, resolvedConfig.theme)
+      if (normalizedResolvedConfig.theme) {
+        themeMode.value = normalizedResolvedConfig.theme
+        localStorage.setItem(THEME_KEY, normalizedResolvedConfig.theme)
       }
-      if (resolvedConfig.loginBackground !== undefined) {
-        loginBackground.value = resolvedConfig.loginBackground
-        localStorage.setItem('login_background', resolvedConfig.loginBackground)
+      if (normalizedResolvedConfig.loginBackground !== undefined) {
+        loginBackground.value = normalizedResolvedConfig.loginBackground
+        localStorage.setItem('login_background', normalizedResolvedConfig.loginBackground)
       }
-      if (resolvedConfig.backgroundScope !== undefined) {
-        backgroundScope.value = resolvedConfig.backgroundScope
+      if (normalizedResolvedConfig.backgroundScope !== undefined) {
+        backgroundScope.value = normalizedResolvedConfig.backgroundScope
       }
-      if (resolvedConfig.loginBackgroundOverlayOpacity !== undefined) {
-        loginBackgroundOverlayOpacity.value = clampUiNumber(resolvedConfig.loginBackgroundOverlayOpacity, DEFAULT_LOGIN_BACKGROUND_OVERLAY_OPACITY, 0, 80)
+      if (normalizedResolvedConfig.loginBackgroundOverlayOpacity !== undefined) {
+        loginBackgroundOverlayOpacity.value = clampUiNumber(normalizedResolvedConfig.loginBackgroundOverlayOpacity, DEFAULT_LOGIN_BACKGROUND_OVERLAY_OPACITY, 0, 80)
       }
-      if (resolvedConfig.loginBackgroundBlur !== undefined) {
-        loginBackgroundBlur.value = clampUiNumber(resolvedConfig.loginBackgroundBlur, DEFAULT_LOGIN_BACKGROUND_BLUR, 0, 12)
+      if (normalizedResolvedConfig.loginBackgroundBlur !== undefined) {
+        loginBackgroundBlur.value = clampUiNumber(normalizedResolvedConfig.loginBackgroundBlur, DEFAULT_LOGIN_BACKGROUND_BLUR, 0, 12)
       }
-      if (resolvedConfig.workspaceVisualPreset !== undefined) {
-        workspaceVisualPreset.value = resolvedConfig.workspaceVisualPreset
+      if (normalizedResolvedConfig.workspaceVisualPreset !== undefined) {
+        workspaceVisualPreset.value = normalizedResolvedConfig.workspaceVisualPreset
       }
-      if (resolvedConfig.appBackgroundOverlayOpacity !== undefined) {
-        appBackgroundOverlayOpacity.value = clampUiNumber(resolvedConfig.appBackgroundOverlayOpacity, DEFAULT_APP_BACKGROUND_OVERLAY_OPACITY, 20, 90)
+      if (normalizedResolvedConfig.appBackgroundOverlayOpacity !== undefined) {
+        appBackgroundOverlayOpacity.value = clampUiNumber(normalizedResolvedConfig.appBackgroundOverlayOpacity, DEFAULT_APP_BACKGROUND_OVERLAY_OPACITY, 20, 90)
       }
-      if (resolvedConfig.appBackgroundBlur !== undefined) {
-        appBackgroundBlur.value = clampUiNumber(resolvedConfig.appBackgroundBlur, DEFAULT_APP_BACKGROUND_BLUR, 0, 18)
+      if (normalizedResolvedConfig.appBackgroundBlur !== undefined) {
+        appBackgroundBlur.value = clampUiNumber(normalizedResolvedConfig.appBackgroundBlur, DEFAULT_APP_BACKGROUND_BLUR, 0, 18)
       }
-      if (resolvedConfig.colorTheme !== undefined) {
-        colorTheme.value = resolvedConfig.colorTheme
+      if (normalizedResolvedConfig.colorTheme !== undefined) {
+        colorTheme.value = normalizedResolvedConfig.colorTheme
       }
-      if (resolvedConfig.performanceMode !== undefined) {
-        performanceMode.value = resolvedConfig.performanceMode
+      if (normalizedResolvedConfig.performanceMode !== undefined) {
+        performanceMode.value = normalizedResolvedConfig.performanceMode
       }
-      if (resolvedConfig.themeBackgroundLinked !== undefined) {
-        themeBackgroundLinked.value = !!resolvedConfig.themeBackgroundLinked
+      if (normalizedResolvedConfig.themeBackgroundLinked !== undefined) {
+        themeBackgroundLinked.value = !!normalizedResolvedConfig.themeBackgroundLinked
+      }
+      if (normalizedResolvedConfig.siteTitle !== undefined) {
+        siteTitle.value = normalizeSiteTitle(normalizedResolvedConfig.siteTitle)
+      }
+      if (normalizedResolvedConfig.supportQqGroup !== undefined) {
+        supportQqGroup.value = normalizeSupportQqGroup(normalizedResolvedConfig.supportQqGroup)
+      }
+      if (normalizedResolvedConfig.copyrightText !== undefined) {
+        copyrightText.value = normalizeCopyrightText(normalizedResolvedConfig.copyrightText)
       }
     }
     catch (e) {
@@ -392,6 +457,13 @@ export const useAppStore = defineStore('app', () => {
     }
   }, { immediate: true })
 
+  // 统一主题 token 注入（仅作用于 UI 变量，不影响业务逻辑）
+  watch([isDark, colorTheme], ([dark, theme]) => {
+    if (typeof window === 'undefined')
+      return
+    applyThemeTokens(String(theme || 'default'), dark ? 'dark' : 'light')
+  }, { immediate: true })
+
   // 监听性能模式状态 → 切换 HTML class 屏蔽毛玻璃
   watch(performanceMode, (val) => {
     if (val) {
@@ -437,6 +509,9 @@ export const useAppStore = defineStore('app', () => {
     workspaceVisualPreset,
     appBackgroundOverlayOpacity,
     appBackgroundBlur,
+    siteTitle,
+    supportQqGroup,
+    copyrightText,
     toggleDark,
     toggleSidebar,
     closeSidebar,

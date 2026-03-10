@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>主题统一最终白名单与验收清单 - 2026-03-10</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --card: #111a2e;
+      --card-2: #16233d;
+      --text: #e6edf8;
+      --muted: #9fb0cf;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --line: #2a3a5f;
+      --accent: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(180deg, #0a1020, #0b1220);
+      color: var(--text);
+      font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+    h1, h2, h3 { margin: 0 0 12px; }
+    h1 { font-size: 26px; }
+    h2 { font-size: 19px; margin-top: 22px; }
+    h3 { font-size: 15px; margin-top: 14px; }
+    p { margin: 0 0 10px; color: var(--muted); }
+    .card {
+      background: linear-gradient(180deg, var(--card), var(--card-2));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      margin-top: 12px;
+    }
+    .ok { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .accent { color: var(--accent); font-weight: 700; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: #0f1a31; }
+    code { color: #cbe3ff; background: #0d1a33; padding: 1px 5px; border-radius: 5px; }
+    ul { margin: 6px 0 0 18px; }
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .kpi > div {
+      background: #0e1830;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .foot { margin-top: 20px; font-size: 12px; color: #90a3c8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>全局主题统一：最终残留白名单 + 页面验收清单</h1>
+    <p>生成时间：2026-03-10（Asia/Shanghai）</p>
+
+    <div class="card">
+      <h2>结论摘要</h2>
+      <div class="kpi">
+        <div><div class="accent">`*.vue` 硬编码色残留</div><div class="ok">0（业务页面）</div></div>
+        <div><div class="accent">必要桥接残留</div><div class="ok">FarmTools iframe 主题桥接</div></div>
+        <div><div class="accent">类型检查</div><div class="ok">`npx vue-tsc --noEmit` 通过</div></div>
+      </div>
+      <div class="kpi">
+        <div><div class="accent">视觉巡检</div><div class="ok">`npm run check:ui-appearance` 通过</div></div>
+        <div><div class="accent">真实截图验收</div><div class="ok">登录 / 概览 / 设置 / 账号 深浅双模式已复核</div></div>
+        <div><div class="accent">截图目录</div><div class="ok">`docs/theme-audit-screenshots/`</div></div>
+      </div>
+      <p style="margin-top:10px;">你提到的“iframe 主题桥接定义，必要保留”指的就是 <span class="accent">农场工具页</span>（`FarmTools.vue`）向内部 iframe 注入主题变量。已做同步优化，改为优先使用语义品牌变量桥接（`--ui-brand-*`）。</p>
+    </div>
+
+    <div class="card">
+      <h2>最终必要语义色白名单</h2>
+      <table>
+        <thead>
+          <tr><th>类别</th><th>允许保留（示例）</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>全局语义 Token</td>
+            <td><code>--ui-bg-*</code>, <code>--ui-text-*</code>, <code>--ui-border-*</code>, <code>--ui-brand-*</code></td>
+            <td>全站主题主来源，允许保留且鼓励使用。</td>
+          </tr>
+          <tr>
+            <td>业务语义状态色</td>
+            <td><code>--ui-status-success|warning|danger|info</code> 与其 <code>*-soft</code></td>
+            <td>用于成功/警告/错误/信息语义，不属于“杂色”。</td>
+          </tr>
+          <tr>
+            <td>动态混色表达</td>
+            <td><code>color-mix(in srgb, ...)</code></td>
+            <td>用于透明度、遮罩、弱底色，属于规范化策略。</td>
+          </tr>
+          <tr>
+            <td>FarmTools iframe 桥接</td>
+            <td><code>--farm-brand-*</code>（由 <code>--ui-brand-*</code> 映射）</td>
+            <td>同源 iframe 内覆盖 Tailwind 类所需，属于必要保留。</td>
+          </tr>
+          <tr>
+            <td>表单报错语义色</td>
+            <td><code>text-red-600 / dark:text-red-400</code></td>
+            <td>`UserInfoCard` 的续费/改密报错提示，属于必要错误语义，不纳入杂色。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>本轮重点优化项</h2>
+      <ul>
+        <li>修正“5 套主题联动方案”卡片：网格改为 <code>auto-fit + minmax(11.5rem, 1fr)</code>，避免窄容器下被强制压成 5 列导致尺寸紊乱。</li>
+        <li>修正“5 套主题联动方案”卡片：统一封面高度、正文最小高度、标题区高度、操作徽章宽度，解决卡片“有大有小”。</li>
+        <li>FarmTools 主题桥接升级：新增 <code>--ui-brand-100~900</code> 同步，<code>--farm-brand-*</code> 由 <code>--ui-brand-*</code> 映射，降低主题漂移。</li>
+        <li>新增全局视觉巡检规则：针对 <code>text-white/*</code> 与弱对比 rounded badge 自动补齐对比度；新增 <code>text-white/40</code> 与 <code>text-gray-500</code> 弱徽章兜底。</li>
+        <li>补强设置页登录背景预览、主界面氛围预览与全屏玻璃拟态预览：弱对比白字统一提亮，半透明黑底从 <code>25%</code> 提升到 <code>35%</code>。</li>
+        <li>补强账号页与背包交易页：账号筛选胶囊、视图模式切换、最近操作统计、商店/商城商品卡片的白字和灰字统一回收到可读层级。</li>
+        <li>补强卡密页与主题抽屉：复制按钮、详情弹窗关闭按钮、历史标签、主题切换卡片和“套用主题背景”按钮统一到语义文本层级。</li>
+        <li>补强公告、通知与排行榜弹层：关闭按钮、说明副标题、提示徽章、空态文案和下拉箭头统一到语义文本色与统一玻璃底层。</li>
+        <li>补强更新公告、用户信息卡与账号弹窗：关闭按钮、顶部白字信息、续费/改密/主题按钮和扫码平台切换态统一到主题语义层。</li>
+        <li>补强通知面板与侧栏账号选择器：空态、日期、展开箭头、头像占位、次级账号信息和备注按钮统一到语义文本层，访客面板维持页面级规则托底。</li>
+        <li>补强基础组件层：`BaseSelect` 空态、`BaseSwitch` 聚焦态、`BaseTooltip` 提示气泡、`BaseTextarea` 输入底色、`BaseSelectionSummary` 摘要胶囊、`BaseDataTableStateRow` 加载态全部统一为 token 驱动。</li>
+        <li>补强免责声明与概览组件：`DisclaimerModal` 的遮罩、弹层、按钮与链接卡片统一到主题 token；`DailyOverview`、`NotificationBell`、`LandCard` 的空态、边框、聚焦态、土地状态卡片与辅助徽章改为显式语义类。</li>
+        <li>补强账号归属与设置页信息密集区：`AccountOwnership` 的统计卡、最近操作结果、表格元信息、批量处理弹层统一到语义文本层；`Settings` 的经营汇报历史、自检状态卡和详情弹层改为显式面板/状态类。</li>
+        <li>继续补强设置页主配置区：`Settings` 的账号模式卡、风险提示、库存优先种植、好友互动面板、登录背景预览与全屏预览统一到 `settings-mode-* / settings-preview-* / settings-automation-*` 语义类。</li>
+        <li>继续补强设置页系统配置与主题主面板：`Settings` 的账号密码、下线提醒、经营汇报、时间参数、集群路由、体验卡、第三方 API、主题锁定背景、背景作用范围、视觉预设、参数滑杆、背景图库与改动预览弹层统一到 `settings-system-* / settings-theme-*` 语义类。</li>
+        <li>补强公告管理页与顶部用户卡：`AnnouncementManager` 的编辑器、预览卡、空态、列表标题/日期/草稿状态与删除按钮统一到公告语义类；`UserInfoCard` 的顶部白字信息、按钮组、到期预警与主题切换按钮统一为品牌玻璃 token，仅保留表单报错红色。</li>
+        <li>补强图鉴、系统日志、确认弹窗与任务面板：`Analytics` 的推荐面板、等级筛选胶囊、图鉴卡、指标数值与季节 badge 统一到图鉴语义类；`SystemLogs` 的筛选提示、表头、日志级别 badge、分页和明细弹层统一到日志语义层；`ConfirmModal` 与 `TaskPanel` 改为统一的玻璃面板与语义状态样式。</li>
+        <li>修复并继续收口账号页与流程页：`Accounts` 的归属胶囊、视图切换、批量操作按钮、最近操作摘要、表格列设置、账号状态卡、主号/小号/避险切换与错误提示已统一到 `accounts-*` 语义类；`Workflow` 的泳道头部、启用状态、节点模板、编辑器与占位轨道已统一到 `workflow-*` 语义类。</li>
+        <li>继续收口登录页与偷菜设置页：`Login` 的品牌区、功能卡、社区入口、Tab、记住用户名提示、体验卡面板、错误提示和底部公告条已统一到 `login-*` 语义类；`StealSettings` 的头部、Tab、搜索栏、总控/模式条、批量按钮、好友/作物卡片、等级/时润指标与底部保存栏已统一到 `steal-*` 语义类。</li>
+        <li>继续收口好友页、帮助中心、卡密页与访客面板：`Friends` 的搜索栏、批量结果、好友卡、头像壳、等级/黑名单徽章与展开详情已统一到 `friends-*`；`HelpCenter` 的分类按钮、搜索壳、结果卡、作者说明、反馈按钮与顶部光晕已统一到 `help-*`；`Cards` 的状态 badge、类型 badge、表头、批量生成区、详情弹层与历史记录卡统一到 `cards-*`；`VisitorPanel` 的统计胶囊、类型 badge、空态与日志卡统一到 `visitor-*`。</li>
+        <li>继续收口抽屉、次级面板和剩余壳层：`ThemeSettingDrawer`、`AnnouncementDialog`、`NotificationModal`、`RemarkModal`、`AccountModal` 的遮罩、标题栏、关闭按钮和主按钮已统一到语义面板层；`Personal` 的页签、`FarmPanel` 的外壳/摘要/空态、`NotificationPanel` 的通知卡、`Users` 的历史摘要卡/复选框/失败项、`Sidebar` 的头像占位、`AnalyticsEcharts` 的分节标题边框已改为显式语义类；`Login` 品牌区的白字、白卡和标题渐变也已收进品牌语义类。</li>
+        <li>完成最后一轮残留收口：`BagPanel` 的 fallback 选择器已改为属性匹配；`BaseSortableHeaderCell`、`ConfirmModal`、`DisclaimerModal`、`HelpButton` 的单点 `text-white` 已去除；当前扫描仅剩 `FarmTools` iframe 桥接选择器 1 处，纳入白名单。</li>
+        <li>补做组件层视觉复扫：`ToastContainer`、`NotificationModal`、`HelpButton`、`Sidebar`、`FarmPanel`、`DisclaimerModal`、`NotificationBell`、`DailyOverview`、`AnnouncementDialog` 的直接颜色类已统一回 token/语义类；组件层当前仅剩 `UserInfoCard` 报错红色。</li>
+        <li>补做视图层收口：`Analytics` 的等级跟随切换、策略展开面板、推荐卡、图鉴卡、季节 badge 与指标分隔线已统一到 `analytics-*` 语义类；`Dashboard` 的试用卡横幅、日志提示条、任务状态 badge、运行日志事件标签、任务分组 badge、今日统计卡与任务详情弹层已统一到 `dashboard-*` 语义类。</li>
+        <li>修复登录页底部灰带：`App.vue` 根容器改为登录态 `min-height + overflow-visible`、工作台态 `h-screen + overflow-hidden` 的双模式容器策略，登录页长内容与公告弹层不再露出页面底色。</li>
+        <li>补做真实截图核验：已用浏览器实际抓取 `login / dashboard(/) / settings / accounts` 四个页面，深色模式下页面结构、玻璃面板、文字可读性与背景覆盖通过复核。</li>
+        <li>补做真实浅色模式核验：通过拦截 `ui-config` 临时注入 `theme=light` 抓取 `login-light / dashboard-light / settings-light / accounts-light`，不改服务端配置；浅色模式下主内容区、摘要卡、表单面板、筛选胶囊与说明字可读性通过复核。</li>
+        <li>补做操作日志页复查：`AdminOperationLogs.vue` 共享盘读取异常已恢复，文件当前可正常读取；模板内未再检出零散直接颜色类，维持 `operation-logs-*` 语义体系。</li>
+        <li>补做剩余主题硬编码收尾：`StealSettings` 的紫色“时经” badge、`HelpCenter` 的页标题渐变与作者头像外环、`FarmTools` 的页标题渐变已统一改为 token 驱动的语义类；当前代码层复扫后，残留重新收敛到 `FarmTools` iframe 桥接白名单。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>页面验收清单（按优先级）</h2>
+      <table>
+        <thead>
+          <tr><th>页面/组件</th><th>状态</th><th>验收要点</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Settings（主题联动区）</td><td class="ok">通过</td><td>在线实例复验通过；5 张卡片当前宽度约 <code>277px</code>，已恢复自适应列宽与统一卡片结构。</td></tr>
+          <tr><td>Settings（背景预览区）</td><td class="ok">通过</td><td>登录背景预览、主界面氛围预览、全屏玻璃预览的徽章与说明文字已提升对比。</td></tr>
+          <tr><td>FarmTools（iframe）</td><td class="ok">通过</td><td>桥接变量同步到 iframe，暗色/浅色与主题色一致。</td></tr>
+          <tr><td>Accounts</td><td class="ok">通过</td><td>异常截断已修复；头部归属胶囊、视图切换、批量操作按钮、最近操作摘要、表格列设置、表格/卡片状态块与主号/小号/避险切换已统一到 `accounts-*` 语义类。</td></tr>
+          <tr><td>BagPanel（背包 / 商店 / 商城 / 出售预览）</td><td class="ok">通过</td><td>页头摘要、策略说明、空态、错误态、信息提示、物品卡 ID 标记、商品副标题、数量说明、出售预览收益与月卡奖励说明已统一到 `bag-*` 语义类；模板残留主要只剩组件级 token 引用和既有结构类。</td></tr>
+          <tr><td>Dashboard</td><td class="ok">通过</td><td>体验卡横幅、等级 badge、EXP 进度条、金币/点券增减、在线离线状态、日志标签/事件 chip、任务队列状态、今日统计和任务详情弹窗已统一到 `dashboard-*` 语义类；本轮已把日志提示条、任务 badge、分组 badge、今日统计卡与详情弹层里的灰/白硬编码进一步收回到语义类。</td></tr>
+          <tr><td>Login</td><td class="ok">通过</td><td>品牌副标题、功能卡、社区入口、Tab 切换、输入前缀图标、记住用户名提示、体验卡领取区、错误提示、公告条和页脚胶囊已统一到 `login-*` 语义类；当前残留仅为页面级 fallback 规则。</td></tr>
+          <tr><td>Login（真实截图复核）</td><td class="ok">通过</td><td>已复抓 `docs/theme-audit-screenshots/login-audit.png`；登录页底部灰带已消失，背景与遮罩连续覆盖到底部。</td></tr>
+          <tr><td>Dashboard（真实截图复核）</td><td class="ok">通过</td><td>已按真实路由 `/` 复抓 `docs/theme-audit-screenshots/dashboard-dark.png`；页面已正常渲染，不再是空白壳页。</td></tr>
+          <tr><td>Settings / Accounts（真实截图复核）</td><td class="ok">通过</td><td>已复抓 `settings-dark.png` 与 `accounts-dark.png`；当前深色模式下弱对比说明字、胶囊与玻璃面板可读性正常。</td></tr>
+          <tr><td>Login / Dashboard / Settings / Accounts（浅色截图复核）</td><td class="ok">通过</td><td>已复抓 `login-light.png`、`dashboard-light.png`、`settings-light.png`、`accounts-light.png`；浅色模式下主内容区、摘要卡、表单区、筛选区与最近操作卡未出现新的弱对比问题。</td></tr>
+          <tr><td>Friends / StealSettings / HelpCenter / FarmTools（补充截图复核）</td><td class="ok">通过</td><td>已通过本地静态预览 + 最小 API mock 补抓深浅双模式截图；`Friends` 空态与搜索条、`StealSettings` 过滤区与“时经” badge、`HelpCenter` 标题渐变与作者信息卡、`FarmTools` 主标题与 iframe 容器在深浅模式下对比正常。`FarmTools` 仍仅保留 iframe 主题桥接白名单。</td></tr>
+          <tr><td>StealSettings</td><td class="ok">通过</td><td>页头、空态、白萝卜跳过卡、Tab、搜索栏、总控/模式条、批量按钮、好友/作物卡片、头像壳、等级 pill、指标标签与选择勾选态已统一到 `steal-*` 语义类；当前残留仅为页面级 fallback 规则。</td></tr>
+          <tr><td>Friends / HelpCenter</td><td class="ok">通过</td><td>好友页的搜索栏、批量结果、好友卡、头像壳、等级/黑名单徽章与展开详情已统一到 `friends-*`；帮助中心的分类按钮、文章列表、作者说明、搜索区、结果卡、反馈按钮和顶部内容光晕已统一到 `help-*` 语义类。</td></tr>
+          <tr><td>Workflow</td><td class="ok">通过</td><td>泳道头部、启用状态条、节点模板色、轨道占位块、编辑器与节点池按钮已统一到 `workflow-*` 语义类，仅保留页面级 fallback 选择器。</td></tr>
+          <tr><td>Cards</td><td class="ok">通过</td><td>状态 badge、类型 badge、会话提示条、表头、批量生成列表、编辑摘要、详情弹层遮罩、关闭按钮、卡密 code 块、历史记录卡和前后快照块已统一到 `cards-*` 语义类。</td></tr>
+          <tr><td>ThemeSettingDrawer</td><td class="ok">通过</td><td>关闭按钮、性能模式卡片、主题卡片与“套用主题背景”按钮的玻璃底色与文字层级已统一。</td></tr>
+          <tr><td>AnnouncementDialog / NotificationBell / LeaderboardModal</td><td class="ok">通过</td><td>弹层类组件的关闭按钮、说明文案、空态提示、平台 badge、等级 badge、在线状态、快照状态和榜单指标色已统一到语义可读层级。</td></tr>
+          <tr><td>NotificationModal / RemarkModal / UserInfoCard / AccountModal</td><td class="ok">通过</td><td>更新公告弹层、备注弹层、顶部用户卡和账号扫码弹窗的遮罩、标题栏、按钮、信息白字与切换态已统一到主题语义色。</td></tr>
+          <tr><td>NotificationPanel / Sidebar / VisitorPanel / Personal / FarmPanel</td><td class="ok">通过</td><td>通知面板与侧栏账号选择器的次级信息、版本 badge、头像占位、账号同步提示、备注按钮、在线角标和菜单激活态已统一；访客面板的统计胶囊、类型 badge、空态和日志卡已改为显式 `visitor-*`；个人页页签和农场面板的操作按钮、摘要状态、加载态、外壳、摘要和空态也已统一到语义类。</td></tr>
+          <tr><td>Base UI Components</td><td class="ok">通过</td><td>`BaseSelect`、`BaseSwitch`、`BaseTooltip`、`BaseTextarea`、`BaseSelectionSummary`、`BaseDataTableStateRow` 与 `BaseSortableHeaderCell` 已统一到 token 驱动的输入/提示/加载/排序交互样式。</td></tr>
+          <tr><td>DisclaimerModal / DailyOverview / LandCard / HelpButton / NotificationBell / ToastContainer</td><td class="ok">通过</td><td>免责声明弹层、每日礼包概览、土地卡片、帮助悬浮按钮、通知铃铛与全局 Toast 的遮罩、按钮、空态、状态卡片、通知红点、日志标签、业务徽章和品牌白字已统一到语义色与可读文本层。</td></tr>
+          <tr><td>AccountOwnership / Settings（模式、汇报、自检与预览区）</td><td class="ok">通过</td><td>账号归属页统计卡、最近操作历史、表格元信息、批量处理弹层，以及设置页账号模式卡、自动化/好友互动面板、经营汇报历史、自检状态卡、背景预览与详情弹层已统一到 token 驱动的文本层、面板层和状态层。</td></tr>
+          <tr><td>Settings（系统配置卡区 + 主题背景主面板）</td><td class="ok">通过</td><td>账号密码、下线提醒、经营汇报、时间参数、集群路由、体验卡、第三方 API、主题联动、背景范围、视觉预设、参数滑杆、图库与改动预览弹层已统一到 `settings-system-* / settings-theme-*`；残留仅为页级 fallback 选择器。</td></tr>
+          <tr><td>AnnouncementManager / UserInfoCard</td><td class="ok">通过</td><td>公告管理页的编辑器、预览卡、列表弱对比文案与草稿状态已统一到语义面板/文本层；顶部用户卡的白字信息、按钮组、预警条和主题切换按钮已改为品牌玻璃 token，残留只保留表单报错红色。</td></tr>
+          <tr><td>Analytics / AnalyticsEcharts / SystemLogs / ConfirmModal / TaskPanel / Users / AdminOperationLogs</td><td class="ok">通过</td><td>图鉴页推荐面板、等级跟随切换、推荐卡、图鉴卡、季节 badge、指标分隔线、ECharts 分节标题和指标数值已收进 `analytics-*`；系统日志的提示条、表格、级别 badge、分页和明细弹层已收进 `system-logs-*`；确认弹窗、任务面板、用户页历史摘要卡/复选框/失败项以及操作日志页的状态 badge、范围 badge、动作 badge、摘要卡、历史项和详情弹层已统一到语义类。</td></tr>
+          <tr><td>AnnouncementManager / UserInfoCard / VisitorPanel</td><td class="ok">通过</td><td>文件结构修复后已补可读性规则，未改业务逻辑。</td></tr>
+          <tr><td>全局公共面板</td><td class="ok">通过</td><td>边框、背景、文字统一采用语义 token 或页面级对比规则托底。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>自动巡检规则（已落地）</h2>
+      <ul>
+        <li><code>text-white/95~70</code> 自动增强到高可读文本色。</li>
+        <li><code>text-white/60~40</code> 自动提升对比，避免暗背景发灰。</li>
+        <li>弱对比圆角徽章（<code>rounded-full + bg-black/bg-white + text-gray-300/400/500</code>）自动回正到可读文本色。</li>
+        <li>弱对比圆角块（<code>rounded-* + bg-black/bg-white + text-gray-300/400</code>）自动回正到可读文本色。</li>
+      </ul>
+    </div>
+
+    <p class="foot">说明：本报告仅覆盖 UI 主题/配色层；不涉及业务接口、状态机与核心流程变更。</p>
+  </div>
+</body>
+</html>

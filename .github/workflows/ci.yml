@@ -33,9 +33,12 @@ jobs:
       - name: Check Announcements
         run: pnpm check:announcements
 
-      - name: Check README Links (non-blocking)
+      - name: Check Doc Links (non-blocking)
         continue-on-error: true
-        run: pnpm check:readme-links
+        run: pnpm check:doc-links
+
+      - name: Verify Environment Audit Helpers
+        run: pnpm test:workspace-audit-scripts
 
       - name: Verify Frontend Regression
         run: pnpm test:frontend
@@ -43,6 +46,10 @@ jobs:
       - name: Audit Web Lint (advisory)
         continue-on-error: true
         run: pnpm -C web run lint:check
+
+      - name: Audit Workspace Permissions (advisory)
+        continue-on-error: true
+        run: pnpm audit:workspace-permissions
 
       - name: Verify Core Entry Syntax
         run: |

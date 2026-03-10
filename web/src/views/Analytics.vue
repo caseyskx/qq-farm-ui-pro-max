@@ -51,6 +51,14 @@ const sortOptions = [
 
 const currentAccountLevel = computed(() => normalizeLevel(currentAccount.value?.level))
 const effectiveAccountLevel = computed(() => liveAccountLevel.value ?? currentAccountLevel.value)
+const analyticsSummaryChips = computed(() => [
+  `共 ${list.value.length} 个作物`,
+  `排序 ${sortOptions.find(option => option.value === sortKey.value)?.label || '未知'}`,
+  effectiveAccountLevel.value > 0 ? `当前账号 Lv${effectiveAccountLevel.value}` : '当前账号等级未知',
+  strategyLevelMode.value === 'account'
+    ? '推荐跟随账号等级'
+    : (strategyLevel.value > 0 ? `推荐查看 Lv${strategyLevel.value} 以内` : '推荐查看全量等级'),
+])
 
 const strategyCandidates = computed(() => {
   if (strategyLevel.value <= 0)
@@ -92,6 +100,12 @@ const strategySummaryText = computed(() => {
 })
 
 const strategyInputValue = computed(() => (strategyLevel.value > 0 ? String(strategyLevel.value) : ''))
+
+function getStrategyLevelModeButtonClass() {
+  return strategyLevelMode.value === 'account'
+    ? 'analytics-level-mode-btn analytics-level-mode-btn--active'
+    : 'analytics-level-mode-btn analytics-level-mode-btn--idle'
+}
 
 function syncStrategyLevelWithAccount(force = false) {
   if (!force && strategyLevelMode.value !== 'account')
@@ -304,19 +318,31 @@ function formatGrowTime(seconds: any) {
 
 <template>
   <div class="analytics-page ui-page-shell w-full">
-    <div class="mb-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-      <h2 class="flex items-center gap-2 text-2xl font-bold">
-        <div class="i-carbon-catalog" />
-        作物图鉴
-      </h2>
+    <div class="analytics-header ui-mobile-sticky-panel mb-4">
+      <div class="analytics-header-bar flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+        <h2 class="flex items-center gap-2 text-2xl font-bold">
+          <div class="i-carbon-catalog" />
+          作物图鉴
+        </h2>
 
-      <div class="flex items-center gap-2">
-        <label class="whitespace-nowrap text-sm font-medium">排序方式:</label>
-        <BaseSelect
-          v-model="sortKey"
-          :options="sortOptions"
-          class="w-40"
-        />
+        <div class="analytics-controls ui-bulk-actions">
+          <label class="whitespace-nowrap text-sm font-medium">排序方式:</label>
+          <BaseSelect
+            v-model="sortKey"
+            :options="sortOptions"
+            class="min-w-[11rem] w-full sm:w-40"
+          />
+        </div>
+      </div>
+
+      <div v-if="currentAccountId && list.length" class="analytics-chip-row ui-bulk-actions mt-3">
+        <span
+          v-for="chip in analyticsSummaryChips"
+          :key="chip"
+          class="analytics-summary-chip"
+        >
+          {{ chip }}
+        </span>
       </div>
     </div>
 
@@ -336,7 +362,7 @@ function formatGrowTime(seconds: any) {
     <div v-if="!loading && currentAccountId && list.length > 0" class="glass-panel mb-4 overflow-hidden rounded-xl shadow-md">
       <div class="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="min-w-0 flex items-center gap-2">
-          <div class="i-carbon-trophy text-lg text-yellow-500" />
+          <div class="analytics-strategy-icon i-carbon-trophy text-lg" />
           <div class="min-w-0">
             <div class="glass-text-main font-bold">
               策略推荐
@@ -347,23 +373,21 @@ function formatGrowTime(seconds: any) {
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2" @click.stop>
+        <div class="ui-bulk-actions items-center" @click.stop>
           <span class="border border-primary-500/20 rounded-full bg-primary-500/10 px-2.5 py-1 text-xs text-primary-600 font-semibold dark:text-primary-400">
             当前账号 {{ effectiveAccountLevel > 0 ? `Lv${effectiveAccountLevel}` : '等级未知' }}
           </span>
           <button
             type="button"
             class="border rounded-full px-3 py-1 text-xs font-medium transition"
-            :class="strategyLevelMode === 'account'
-              ? 'border-primary-500/25 bg-primary-500/12 text-primary-600 dark:text-primary-400'
-              : 'border-white/15 bg-white/5 text-gray-600 hover:border-primary-500/25 hover:text-primary-600 dark:text-gray-300 dark:hover:text-primary-400'"
+            :class="getStrategyLevelModeButtonClass()"
             @click="useAccountLevelRecommendation"
           >
             跟随当前等级
           </button>
           <div
             v-if="!strategyPanelCollapsed"
-            class="flex items-center gap-2 border border-white/15 rounded-full bg-white/5 px-3 py-1.5 dark:bg-black/10"
+            class="analytics-level-input-shell flex items-center gap-2 border rounded-full px-3 py-1.5"
           >
             <span class="glass-text-muted text-xs">查看等级≤</span>
             <input
@@ -378,7 +402,7 @@ function formatGrowTime(seconds: any) {
           </div>
           <button
             type="button"
-            class="glass-panel flex items-center gap-1 border border-white/15 rounded-full px-3 py-1.5 text-sm transition hover:border-primary-500/25"
+            class="analytics-panel-toggle glass-panel flex items-center gap-1 border rounded-full px-3 py-1.5 text-sm transition"
             :aria-expanded="!strategyPanelCollapsed"
             @click="strategyPanelCollapsed = !strategyPanelCollapsed"
           >
@@ -391,12 +415,12 @@ function formatGrowTime(seconds: any) {
         </div>
       </div>
 
-      <div v-show="!strategyPanelCollapsed" class="border-t border-white/10 p-4">
-        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div v-show="!strategyPanelCollapsed" class="analytics-strategy-panel-body border-t p-4">
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-4 sm:grid-cols-2">
           <div
             v-for="strategy in strategies"
             :key="strategy.key"
-            class="glass-panel overflow-hidden border border-white/10 rounded-lg p-3 transition-shadow hover:shadow-md"
+            class="analytics-strategy-card glass-panel overflow-hidden border rounded-lg p-3 transition-shadow hover:shadow-md"
           >
             <!-- 策略标题 -->
             <div class="mb-2 flex items-center gap-2">
@@ -407,7 +431,7 @@ function formatGrowTime(seconds: any) {
             <!-- 推荐作物 -->
             <div v-if="bestPlantsByStrategy[strategy.key]" class="space-y-2">
               <div class="flex items-center gap-2">
-                <div class="h-8 w-8 flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-primary-500/10">
+                <div class="analytics-best-plant-shell h-8 w-8 flex shrink-0 items-center justify-center overflow-hidden rounded-md">
                   <img
                     v-if="bestPlantsByStrategy[strategy.key]?.image && !imageErrors[bestPlantsByStrategy[strategy.key]?.seedId]"
                     :src="bestPlantsByStrategy[strategy.key]?.image"
@@ -415,7 +439,7 @@ function formatGrowTime(seconds: any) {
                     loading="lazy"
                     @error="imageErrors[bestPlantsByStrategy[strategy.key]?.seedId] = true"
                   >
-                  <div v-else class="i-carbon-sprout text-lg text-primary-500/50" />
+                  <div v-else class="analytics-best-plant-fallback i-carbon-sprout text-lg" />
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="glass-text-main truncate text-sm font-bold">
@@ -453,14 +477,14 @@ function formatGrowTime(seconds: any) {
         <div
           v-for="(item, idx) in list"
           :key="idx"
-          class="glass-panel group flex flex-col overflow-hidden rounded-xl shadow transition-all hover:shadow-lg hover:-translate-y-1 dark:hover:bg-white/5"
+          class="analytics-plant-card glass-panel group flex flex-col overflow-hidden rounded-xl shadow transition-all hover:shadow-lg hover:-translate-y-1"
         >
           <!-- 卡片内容主体: 允许点击放大或高亮交互 -->
           <div class="flex flex-1 flex-col cursor-pointer gap-4 bg-transparent p-4 transition">
             <!-- 头部：图鉴图标 + 名称 + 核心状态 -->
             <div class="flex flex-row items-center gap-3">
               <!-- 作物图片 -->
-              <div class="relative h-12 w-12 flex shrink-0 items-center justify-center overflow-hidden border border-white/20 rounded-lg bg-primary-500/10 transition-colors dark:border-white/10 dark:bg-black/20 group-hover:bg-primary-500/20">
+              <div class="analytics-plant-image-shell relative h-12 w-12 flex shrink-0 items-center justify-center overflow-hidden border rounded-lg transition-colors group-hover:bg-primary-500/20">
                 <img
                   v-if="item.image && !imageErrors[item.seedId]"
                   :src="item.image"
@@ -468,7 +492,7 @@ function formatGrowTime(seconds: any) {
                   loading="lazy"
                   @error="imageErrors[item.seedId] = true"
                 >
-                <div v-else class="i-carbon-sprout text-2xl text-primary-500/50" />
+                <div v-else class="analytics-plant-image-fallback i-carbon-sprout text-2xl" />
               </div>
 
               <!-- 文本信息 -->
@@ -483,7 +507,7 @@ function formatGrowTime(seconds: any) {
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-2">
                   <span class="border border-primary-500/20 rounded bg-primary-500/10 px-1.5 py-0.5 text-[10px] text-primary-600 font-semibold dark:text-primary-400">Lv {{ formatLv(item.level) }}</span>
-                  <span class="border border-yellow-500/20 rounded bg-yellow-500/10 px-1.5 py-0.5 text-[10px] text-yellow-600 font-semibold dark:text-yellow-400">{{ item.seasons }}季</span>
+                  <span class="analytics-season-badge border rounded px-1.5 py-0.5 text-[10px] font-semibold">{{ item.seasons }}季</span>
                   <span class="glass-text-muted ml-auto flex items-center gap-0.5 text-[10px]">
                     <div class="i-carbon-time" />
                     {{ formatGrowTime(item.growTime) }}
@@ -493,7 +517,7 @@ function formatGrowTime(seconds: any) {
             </div>
 
             <!-- 数据列 (2x2 网格) -->
-            <div class="grid grid-cols-2 mt-auto gap-3 border-t border-gray-200/50 pt-2 text-sm dark:border-white/10">
+            <div class="analytics-metrics-grid grid grid-cols-2 mt-auto gap-3 border-t pt-2 text-sm">
               <div class="flex flex-col">
                 <span class="glass-text-muted mb-0.5 text-[10px] uppercase opacity-80">经验/小时</span>
                 <span class="text-purple-600 font-bold leading-none dark:text-purple-400">{{ item.expPerHour }}</span>
@@ -517,3 +541,114 @@ function formatGrowTime(seconds: any) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.analytics-page {
+  color: var(--ui-text-1);
+}
+
+.analytics-page
+  :is(
+    .glass-text-muted,
+    [class*='text-'][class*='gray-500'],
+    [class*='text-'][class*='gray-600'],
+    [class*='dark:text-'][class*='gray-300'],
+    [class*='dark:text-'][class*='gray-400']
+  ) {
+  color: var(--ui-text-2) !important;
+}
+
+.analytics-header {
+  z-index: 12;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.analytics-controls {
+  align-items: center;
+}
+
+.analytics-chip-row {
+  min-width: 0;
+}
+
+.analytics-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent);
+  color: var(--ui-text-2);
+  font-size: 0.75rem;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.analytics-strategy-icon {
+  color: var(--ui-status-warning);
+}
+
+.analytics-level-mode-btn--active {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 25%, transparent);
+  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-brand-600) 72%, var(--ui-text-1) 28%);
+}
+
+.analytics-level-mode-btn--idle,
+.analytics-level-input-shell,
+.analytics-panel-toggle,
+.analytics-strategy-panel-body,
+.analytics-strategy-card,
+.analytics-plant-image-shell,
+.analytics-metrics-grid {
+  border-color: var(--ui-border-subtle);
+}
+
+.analytics-level-mode-btn--idle,
+.analytics-level-input-shell,
+.analytics-panel-toggle {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent);
+  color: var(--ui-text-2);
+}
+
+.analytics-level-mode-btn--idle:hover,
+.analytics-panel-toggle:hover {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 25%, transparent);
+  color: var(--ui-brand-600);
+}
+
+.analytics-strategy-card {
+  background: color-mix(in srgb, var(--ui-bg-surface) 74%, transparent);
+}
+
+.analytics-best-plant-shell,
+.analytics-plant-image-shell {
+  background: color-mix(in srgb, var(--ui-brand-500) 10%, transparent);
+}
+
+.analytics-best-plant-fallback,
+.analytics-plant-image-fallback {
+  color: color-mix(in srgb, var(--ui-brand-500) 50%, var(--ui-text-1) 50%);
+}
+
+.analytics-plant-card:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+}
+
+.analytics-season-badge {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 20%, transparent);
+  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-status-warning) 72%, var(--ui-text-1) 28%);
+}
+
+@media (max-width: 767px) {
+  .analytics-header-bar {
+    border: 1px solid var(--ui-border-subtle);
+    border-radius: 1rem;
+    padding: 0.9rem;
+    background: color-mix(in srgb, var(--ui-bg-surface-raised) 90%, transparent);
+  }
+}
+</style>

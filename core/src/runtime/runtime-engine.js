@@ -15,6 +15,10 @@ const accountRepository = require('../repositories/account-repository')
 
 const OPERATION_KEYS = ['harvest', 'water', 'weed', 'bug', 'fertilize', 'plant', 'steal', 'helpWater', 'helpWeed', 'helpBug', 'taskClaim', 'sell', 'upgrade']
 
+function requiresRelogin(account) {
+  return Number(account && account.wsError && account.wsError.code) === 400
+}
+
 function createRuntimeEngine(options = {}) {
   const processRef = options.processRef || process
   const mainEntryPath = options.mainEntryPath || path.join(__dirname, '../../client.js')
@@ -164,17 +168,25 @@ function createRuntimeEngine(options = {}) {
     const pageSize = 50
     let hasMore = true
     let totalStarted = 0
+    let totalSkippedRelogin = 0
 
     log('系统', `正在准备分批唤醒账号群...`)
 
     while (hasMore) {
       const data = await store.getAccountsFullPaged(page, pageSize)
       const accounts = (data.accounts || [])
+      const startableAccounts = accounts.filter(acc => !requiresRelogin(acc))
+      const skippedReloginCount = accounts.length - startableAccounts.length
 
-      if (accounts.length > 0) {
-        log('系统', `[启动批次 ${page}] 正在拉起 ${accounts.length} 个账号...`)
-        accounts.forEach(acc => startWorker(acc))
-        totalStarted += accounts.length
+      if (startableAccounts.length > 0) {
+        log('系统', `[启动批次 ${page}] 正在拉起 ${startableAccounts.length} 个账号...`)
+        startableAccounts.forEach(acc => startWorker(acc))
+        totalStarted += startableAccounts.length
+      }
+
+      if (skippedReloginCount > 0) {
+        totalSkippedRelogin += skippedReloginCount
+        log('系统', `[启动批次 ${page}] 跳过 ${skippedReloginCount} 个登录已失效账号，等待重新登录`)
       }
 
       if (data.total <= page * pageSize || accounts.length === 0) {
@@ -187,9 +199,16 @@ function createRuntimeEngine(options = {}) {
     }
 
     if (totalStarted === 0) {
-      log('系统', '未发现账号，请访问管理面板添加账号')
+      if (totalSkippedRelogin > 0) {
+        log('系统', `本次未自动启动任何账号，已跳过 ${totalSkippedRelogin} 个需要重新登录的账号`)
+      } else {
+        log('系统', '未发现账号，请访问管理面板添加账号')
+      }
     } else {
       log('系统', `所有批次下发完成，共唤醒 ${totalStarted} 个账号！`)
+      if (totalSkippedRelogin > 0) {
+        log('系统', `另有 ${totalSkippedRelogin} 个账号因登录已失效被跳过，避免重复拉起`)
+      }
     }
   }
 

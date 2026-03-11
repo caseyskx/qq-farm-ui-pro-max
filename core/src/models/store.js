@@ -1596,6 +1596,24 @@ function normalizeAccountRuntimeSnapshot(raw) {
     };
 }
 
+function normalizeAccountWsError(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const code = Math.max(0, Number.parseInt(raw.code, 10) || 0);
+    const message = String(raw.message || '').trim();
+    const at = Math.max(0, Number(raw.at) || 0);
+
+    if (!code && !message && !at) {
+        return null;
+    }
+
+    return {
+        code,
+        message,
+        at,
+    };
+}
+
 function normalizeOptionalTimestamp(value) {
     const time = Math.max(0, Number(value) || 0);
     return time > 0 ? time : null;
@@ -1639,6 +1657,11 @@ function buildAccountAuthData(acc) {
     const lastLoginAt = normalizeOptionalTimestamp((acc && acc.lastLoginAt) !== undefined
         ? acc.lastLoginAt
         : existing.lastLoginAt);
+    const wsError = normalizeAccountWsError(
+        acc && Object.prototype.hasOwnProperty.call(acc, 'wsError')
+            ? acc.wsError
+            : existing.wsError,
+    );
 
     return {
         ...existing,
@@ -1647,6 +1670,7 @@ function buildAccountAuthData(acc) {
         code: identity.code,
         authTicket: identity.authTicket,
         lastLoginAt,
+        wsError,
         runtimeSnapshot: normalizeAccountRuntimeSnapshot(runtimeSource),
     };
 }
@@ -1660,6 +1684,7 @@ async function loadAccountsFromDB() {
         const mapped = rows.map((r) => {
             const authData = parseAccountAuthData(r.auth_data);
             const runtimeSnapshot = normalizeAccountRuntimeSnapshot(authData.runtimeSnapshot);
+            const wsError = normalizeAccountWsError(authData.wsError);
             const lastLoginAt = normalizeOptionalTimestamp(
                 r.last_login_at ? new Date(r.last_login_at).getTime() : authData.lastLoginAt,
             );
@@ -1687,6 +1712,7 @@ async function loadAccountsFromDB() {
                 exp: runtimeSnapshot.exp,
                 coupon: runtimeSnapshot.coupon,
                 uptime: runtimeSnapshot.uptime,
+                wsError,
                 lastStatusAt: runtimeSnapshot.lastStatusAt,
                 lastOnlineAt: runtimeSnapshot.lastOnlineAt,
                 lastLoginAt,
@@ -1889,6 +1915,7 @@ async function getAccountFull(accountId) {
             try { authData = JSON.parse(authData); } catch { authData = null; }
         }
         const runtimeSnapshot = normalizeAccountRuntimeSnapshot(authData && authData.runtimeSnapshot);
+        const wsError = normalizeAccountWsError(authData && authData.wsError);
         const lastLoginAt = normalizeOptionalTimestamp(
             row.last_login_at ? new Date(row.last_login_at).getTime() : (authData && authData.lastLoginAt),
         );
@@ -1916,6 +1943,7 @@ async function getAccountFull(accountId) {
             exp: runtimeSnapshot.exp,
             coupon: runtimeSnapshot.coupon,
             uptime: runtimeSnapshot.uptime,
+            wsError,
             lastStatusAt: runtimeSnapshot.lastStatusAt,
             lastOnlineAt: runtimeSnapshot.lastOnlineAt,
             lastLoginAt,
@@ -1949,6 +1977,13 @@ function shouldBumpAccountUpdatedAt(existing, payload) {
     if (hasOwn('running') && !!payload.running !== !!(existing && existing.running)) return true;
 
     const trackedFields = ['name', 'nick', 'platform', 'uin', 'qq', 'code', 'authTicket', 'avatar', 'username'];
+    const payloadWsError = hasOwn('wsError') ? normalizeAccountWsError(payload.wsError) : undefined;
+    const existingWsError = normalizeAccountWsError(existing && existing.wsError);
+    if (payloadWsError !== undefined) {
+        const payloadWsErrorText = JSON.stringify(payloadWsError || null);
+        const existingWsErrorText = JSON.stringify(existingWsError || null);
+        if (payloadWsErrorText !== existingWsErrorText) return true;
+    }
     return trackedFields.some((field) => {
         if (!hasOwn(field)) return false;
         return normalizeText(payload[field]) !== normalizeText(existing && existing[field]);
@@ -1974,7 +2009,7 @@ function createAccountRecord(acc, forcedId) {
         username: acc.username || '',
         running: !!acc.running,
         connected: !!acc.connected,
-        wsError: acc.wsError || null,
+        wsError: normalizeAccountWsError(acc.wsError),
         level: Math.max(0, Number(acc.level) || 0),
         gold: Math.max(0, Number(acc.gold) || 0),
         exp: Math.max(0, Number(acc.exp) || 0),
@@ -2019,6 +2054,9 @@ function addOrUpdateAccount(acc) {
                 ...payload,
                 name: payload.name !== undefined ? payload.name : existing.name,
             };
+            const normalizedWsError = Object.prototype.hasOwnProperty.call(payload, 'wsError')
+                ? normalizeAccountWsError(payload.wsError)
+                : normalizeAccountWsError(existing.wsError);
             const explicitUpdatedAt = normalizeOptionalTimestamp(payload.updatedAt);
             const nextUpdatedAt = explicitUpdatedAt
                 || (shouldBumpAccountUpdatedAt(existing, payload)
@@ -2027,6 +2065,7 @@ function addOrUpdateAccount(acc) {
             data.accounts[idx] = {
                 ...merged,
                 ...normalizeAccountIdentityFields(merged),
+                wsError: normalizedWsError,
                 lastLoginAt: payload.lastLoginAt !== undefined
                     ? normalizeOptionalTimestamp(payload.lastLoginAt)
                     : normalizeOptionalTimestamp(merged.lastLoginAt),

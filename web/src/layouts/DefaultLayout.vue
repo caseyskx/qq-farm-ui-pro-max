@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, onErrorCaptured, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import LeaderboardModal from '@/components/LeaderboardModal.vue'
 import NotificationBell from '@/components/NotificationBell.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import ThemeSettingDrawer from '@/components/ThemeSettingDrawer.vue'
 import { useAppStore } from '@/stores/app'
+import { attemptRouteRecovery, extractRouteErrorMessage, isRecoverableRouteError } from '@/utils/route-recovery'
+import { localizeRuntimeText } from '@/utils/runtime-text'
 
 const appStore = useAppStore()
 const route = useRoute()
@@ -14,12 +16,44 @@ const { sidebarOpen } = storeToRefs(appStore)
 
 const showThemeDrawer = ref(false)
 const showLeaderboard = ref(false)
+const routeRenderError = ref<unknown | null>(null)
+const routeRecoveryBusy = ref(false)
 const workspaceShellClass = computed(() => `workspace-shell--${appStore.workspaceVisualPreset}`)
 const workspaceContentClass = computed(() => {
   const mode = String(route.meta?.layoutMode || 'fluid')
   return ['standard', 'wide', 'fluid'].includes(mode)
     ? `workspace-content-shell--${mode}`
     : 'workspace-content-shell--fluid'
+})
+const routeErrorMessage = computed(() => {
+  if (!routeRenderError.value)
+    return '页面内容加载失败，请刷新后重试。'
+
+  const localized = localizeRuntimeText(extractRouteErrorMessage(routeRenderError.value))
+  const firstLine = localized.split('\n').map(item => item.trim()).find(Boolean)
+  return firstLine || '页面内容加载失败，请刷新后重试。'
+})
+
+function recoverCurrentRoute() {
+  routeRecoveryBusy.value = true
+  const recovered = attemptRouteRecovery(route.fullPath)
+  if (!recovered)
+    routeRecoveryBusy.value = false
+}
+
+watch(() => route.fullPath, () => {
+  routeRenderError.value = null
+  routeRecoveryBusy.value = false
+})
+
+onErrorCaptured((error, _instance, info) => {
+  console.error('布局页捕获到路由内容异常:', error, info)
+  routeRenderError.value = error
+  if (isRecoverableRouteError(error)) {
+    recoverCurrentRoute()
+    return false
+  }
+  return false
 })
 </script>
 
@@ -77,12 +111,48 @@ const workspaceContentClass = computed(() => {
         <div class="workspace-scroll custom-scrollbar flex flex-1 flex-col overflow-y-auto">
           <div class="workspace-content-shell w-full" :class="workspaceContentClass">
             <RouterView v-slot="{ Component, route: currentRoute }">
-              <Transition name="slide-fade" mode="out-in">
-                <component :is="Component" v-if="Component" :key="currentRoute.fullPath" />
-                <div v-else :key="`loading-${currentRoute.fullPath}`" class="ui-text-3 flex flex-1 items-center justify-center py-20">
-                  <div class="i-svg-spinners-ring-resize text-3xl" />
+              <div
+                v-if="routeRenderError"
+                :key="`route-error-${currentRoute.fullPath}`"
+                class="workspace-route-stage route-error-state glass-panel mx-auto my-8 max-w-3xl w-full border rounded-[28px] px-6 py-10 text-center"
+              >
+                <div class="route-error-icon i-carbon-warning-alt-filled mx-auto h-12 w-12" />
+                <h2 class="mt-4 text-xl font-semibold">
+                  页面加载中断
+                </h2>
+                <p class="glass-text-muted mx-auto mt-3 max-w-2xl text-sm leading-6">
+                  {{ routeErrorMessage }}
+                </p>
+                <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    class="route-error-primary rounded-full px-5 py-2.5 text-sm font-semibold transition-all"
+                    :disabled="routeRecoveryBusy"
+                    @click="recoverCurrentRoute"
+                  >
+                    {{ routeRecoveryBusy ? '正在恢复...' : '刷新当前页面' }}
+                  </button>
+                  <button
+                    class="route-error-secondary rounded-full px-5 py-2.5 text-sm font-semibold transition-all"
+                    @click="routeRenderError = null"
+                  >
+                    关闭提示
+                  </button>
                 </div>
-              </Transition>
+              </div>
+              <div
+                v-else-if="Component"
+                :key="currentRoute.fullPath"
+                class="workspace-route-stage"
+              >
+                <component :is="Component" />
+              </div>
+              <div
+                v-else
+                :key="`loading-${currentRoute.fullPath}`"
+                class="workspace-route-stage workspace-route-stage--loading ui-text-3 flex flex-1 items-center justify-center py-20"
+              >
+                <div class="i-svg-spinners-ring-resize text-3xl" />
+              </div>
             </RouterView>
           </div>
         </div>
@@ -295,20 +365,31 @@ const workspaceContentClass = computed(() => {
   min-width: 0;
 }
 
-/* Slide Fade Transition */
-.slide-fade-enter-active,
-.slide-fade-leave-active {
-  transition: all 0.2s ease-out;
+/* Route outlet animation */
+.workspace-route-stage {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  animation: workspace-route-enter 0.2s ease-out;
 }
 
-.slide-fade-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
+.workspace-route-stage--loading {
+  min-height: 20rem;
 }
 
-.slide-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
+@keyframes workspace-route-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -369,6 +450,36 @@ const workspaceContentClass = computed(() => {
 
 .workspace-floating-actions > * {
   pointer-events: auto;
+}
+
+.route-error-state {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent) !important;
+}
+
+.route-error-icon {
+  color: color-mix(in srgb, var(--ui-status-warning) 82%, var(--ui-text-1));
+}
+
+.route-error-primary {
+  border: 1px solid color-mix(in srgb, var(--ui-brand-500) 28%, transparent);
+  background: color-mix(in srgb, var(--ui-brand-500) 18%, var(--ui-bg-surface-raised) 82%);
+  color: var(--ui-text-on-brand);
+}
+
+.route-error-primary:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.route-error-secondary {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent);
+  color: var(--ui-text-1);
+}
+
+.route-error-primary:hover:not(:disabled),
+.route-error-secondary:hover {
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1279px) {

@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import type { MetaBadgeTone } from '@/utils/ui-badge'
 import { computed } from 'vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 
 const props = defineProps<{
   land: any
@@ -15,6 +17,39 @@ const seasonText = computed(() => {
   if (current <= 0 || total <= 0)
     return ''
   return `${current}/${total}季`
+})
+
+const landMetaBadges = computed(() => {
+  const badges: Array<{ key: string, label: string, title?: string, tone: MetaBadgeTone }> = []
+  if (isMultiPlant.value) {
+    badges.push({
+      key: 'multi',
+      label: `合种${plantSize.value}x${plantSize.value}`,
+      tone: 'success',
+    })
+  }
+  if (occupiedByMaster.value) {
+    badges.push({
+      key: 'occupied',
+      label: '副地块',
+      title: `由主地块 #${land.value?.masterLandId || '-'} 占用`,
+      tone: 'info',
+    })
+  }
+  return badges
+})
+
+const landStatusBadges = computed(() => {
+  const badges: Array<{ key: string, label: string, tone: MetaBadgeTone }> = []
+  if (land.value?.needWater)
+    badges.push({ key: 'water', label: '水', tone: 'info' })
+  if (land.value?.needWeed)
+    badges.push({ key: 'weed', label: '草', tone: 'brand' })
+  if (land.value?.needBug)
+    badges.push({ key: 'bug', label: '虫', tone: 'danger' })
+  if (land.value?.status === 'harvestable')
+    badges.push({ key: 'harvestable', label: '可偷', tone: 'warning' })
+  return badges
 })
 
 function getLandStatusClass(land: any) {
@@ -93,19 +128,16 @@ function getLandTypeName(level: number) {
     :class="getLandStatusClass(land)"
   >
     <div class="absolute right-1 top-1 flex gap-1 text-[9px]">
-      <span
-        v-if="isMultiPlant"
-        class="land-chip ui-meta-chip--success"
+      <BaseBadge
+        v-for="badge in landMetaBadges"
+        :key="badge.key"
+        surface="meta"
+        :tone="badge.tone"
+        class="land-chip"
+        :title="badge.title"
       >
-        合种{{ plantSize }}x{{ plantSize }}
-      </span>
-      <span
-        v-if="occupiedByMaster"
-        class="land-chip ui-meta-chip--info"
-        :title="`由主地块 #${land.masterLandId || '-'} 占用`"
-      >
-        副地块
-      </span>
+        {{ badge.label }}
+      </BaseBadge>
     </div>
 
     <div class="land-card-index absolute left-1 top-1 text-[10px] font-mono">
@@ -146,11 +178,15 @@ function getLandTypeName(level: number) {
 
     <!-- Status Badges -->
     <div class="mt-auto flex origin-bottom scale-90 gap-0.5 text-[10px]">
-      <span v-if="land.needWater" class="land-chip ui-meta-chip--info">水</span>
-      <span v-if="land.needWeed" class="land-chip ui-meta-chip--brand">草</span>
-      <span v-if="land.needBug" class="land-chip ui-meta-chip--danger">虫</span>
-      <!-- For friends view -->
-      <span v-if="land.status === 'harvestable'" class="land-chip ui-meta-chip--warning">可偷</span>
+      <BaseBadge
+        v-for="badge in landStatusBadges"
+        :key="badge.key"
+        surface="meta"
+        :tone="badge.tone"
+        class="land-chip"
+      >
+        {{ badge.label }}
+      </BaseBadge>
     </div>
   </div>
 </template>

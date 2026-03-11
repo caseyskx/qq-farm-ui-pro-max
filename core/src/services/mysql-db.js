@@ -401,6 +401,52 @@ async function initMysql() {
                 );
             }
 
+            const [updateJobsTable] = await pool.execute(`SHOW TABLES LIKE 'update_jobs'`);
+            if (updateJobsTable.length === 0) {
+                await runMigrationFile(
+                    path.join(migrationsDir, '017-system-update-jobs.sql'),
+                    '检测到缺少 update_jobs 表，正在执行迁移 017-system-update-jobs.sql',
+                );
+            }
+            const [confirmedUpdateJobsTable] = updateJobsTable.length > 0
+                ? [updateJobsTable]
+                : await pool.execute(`SHOW TABLES LIKE 'update_jobs'`);
+            if (confirmedUpdateJobsTable.length > 0) {
+                const updateJobColumnEnsures = [
+                    ['batch_key', "ALTER TABLE update_jobs ADD COLUMN batch_key VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' AFTER target_version", 'update_jobs.batch_key'],
+                    ['target_agent_id', "ALTER TABLE update_jobs ADD COLUMN target_agent_id VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' AFTER created_by", 'update_jobs.target_agent_id'],
+                ];
+                for (const [columnName, alterSql, label] of updateJobColumnEnsures) {
+                    const [columnRows] = await pool.execute(
+                        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'update_jobs' AND COLUMN_NAME = ?`,
+                        [DB_NAME, columnName],
+                    );
+                    if (columnRows.length === 0) {
+                        logger.info(`检测到缺少 ${label}，正在添加...`);
+                        await pool.query(alterSql);
+                        logger.info(`✅ ${label} 添加完成`);
+                    }
+                }
+
+                const updateJobIndexEnsures = [
+                    ['idx_update_jobs_batch_key', 'ALTER TABLE update_jobs ADD KEY idx_update_jobs_batch_key (batch_key)'],
+                    ['idx_update_jobs_target_status', 'ALTER TABLE update_jobs ADD KEY idx_update_jobs_target_status (target_agent_id, status)'],
+                ];
+                for (const [indexName, alterSql] of updateJobIndexEnsures) {
+                    const [indexRows] = await pool.execute(
+                        `SELECT INDEX_NAME
+                         FROM INFORMATION_SCHEMA.STATISTICS
+                         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'update_jobs' AND INDEX_NAME = ?`,
+                        [DB_NAME, indexName],
+                    );
+                    if (indexRows.length === 0) {
+                        logger.info(`检测到缺少 update_jobs.${indexName}，正在添加...`);
+                        await pool.query(alterSql);
+                        logger.info(`✅ update_jobs.${indexName} 添加完成`);
+                    }
+                }
+            }
+
             const [uiSettingsTable] = await pool.execute(`SHOW TABLES LIKE 'ui_settings'`);
             if (uiSettingsTable.length > 0) {
                 const uiSettingColumnEnsures = [

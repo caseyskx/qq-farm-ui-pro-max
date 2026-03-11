@@ -8,8 +8,10 @@ defineOptions({
 
 const props = withDefaults(defineProps<{
   items?: ToggleOptionDefinition[]
+  itemClass?: string
 }>(), {
   items: () => [],
+  itemClass: '',
 })
 
 const attrs = useAttrs()
@@ -33,7 +35,7 @@ function getItemLabel(item: ToggleOptionDefinition) {
       :key="item.key"
       type="button"
       class="ui-toggle-option-group__item"
-      :class="[item.active ? 'ui-toggle-option-group__item--active' : '', item.class]"
+      :class="[props.itemClass, item.active ? 'ui-toggle-option-group__item--active' : '', item.class]"
       :title="item.title || item.label"
       :aria-pressed="item.active ? 'true' : 'false'"
       @click="item.onClick?.($event)"

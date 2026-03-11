@@ -53,6 +53,10 @@ message Invitation {
 // --- 获取所有好友 ---
 message GetAllRequest {}
 
+message GetGameFriendsRequest {
+    repeated int64 gids = 1 [packed = true];
+}
+
 message GetAllReply {
     repeated GameFriend game_friends = 1;
     repeated Invitation invitations = 2;

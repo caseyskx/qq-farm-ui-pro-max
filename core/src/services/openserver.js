@@ -4,7 +4,8 @@
 
 const { sendMsgAsync } = require('../utils/network');
 const { types } = require('../utils/proto');
-const { log, toNum } = require('../utils/utils');
+const { log } = require('../utils/utils');
+const { getRewardSummary } = require('./common');
 
 const DAILY_KEY = 'open_server_gift';
 const CHECK_COOLDOWN_MS = 10 * 60 * 1000;
@@ -29,21 +30,6 @@ function markDoneToday() {
 
 function isDoneToday() {
     return doneDateKey === getDateKey();
-}
-
-function getRewardSummary(items) {
-    const list = Array.isArray(items) ? items : [];
-    const summary = [];
-    for (const it of list) {
-        const id = toNum(it.id);
-        const count = toNum(it.count);
-        if (count <= 0) continue;
-        if (id === 1 || id === 1001) summary.push(`金币${count}`);
-        else if (id === 2 || id === 1101) summary.push(`经验${count}`);
-        else if (id === 1002) summary.push(`点券${count}`);
-        else summary.push(`物品#${id}x${count}`);
-    }
-    return summary.join('/');
 }
 
 function isAlreadyClaimedError(err) {

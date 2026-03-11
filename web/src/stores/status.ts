@@ -240,10 +240,26 @@ export const useStatusStore = defineStore('status', () => {
     return socket
   }
 
+  let connectDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
   function connectRealtime(accountId: string | string[]) {
     // 支持分页多选订阅，如果传数组则视为开启 Room Pagination
     const newId = Array.isArray(accountId) ? accountId : String(accountId || '').trim()
     currentRealtimeAccountId.value = Array.isArray(newId) ? newId.join(',') : newId
+    if (!tokenRef.value)
+      return
+
+    // 防抖：300ms 内的重复调用只执行最后一次，防止订阅风暴
+    if (connectDebounceTimer) {
+      clearTimeout(connectDebounceTimer)
+    }
+    connectDebounceTimer = setTimeout(() => {
+      connectDebounceTimer = null
+      _doConnect(newId)
+    }, 300)
+  }
+
+  function _doConnect(newId: string | string[]) {
     if (!tokenRef.value)
       return
 

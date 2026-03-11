@@ -55,17 +55,17 @@ function createDeps(overrides = {}) {
     };
 }
 
-test('accounts route filters non-admin accounts and keeps runtime-state sort order', async () => {
+test('accounts route filters non-admin accounts and prefers recent login/update order', async () => {
     const { app, routes } = createFakeApp();
     const deps = createDeps({
         app,
         getProvider: () => ({
             getAccounts: async () => ({
                 accounts: [
-                    { id: '2', username: 'alice', running: true, connected: false, level: 20 },
-                    { id: '3', username: 'bob', running: true, connected: true, level: 99 },
-                    { id: '4', username: 'alice', running: false, connected: false, level: 50 },
-                    { id: '1', username: 'alice', running: true, connected: true, level: 5 },
+                    { id: '2', username: 'alice', running: true, connected: false, level: 20, updatedAt: 200 },
+                    { id: '3', username: 'bob', running: true, connected: true, level: 99, lastLoginAt: 999 },
+                    { id: '4', username: 'alice', running: false, connected: false, level: 50, updatedAt: 300 },
+                    { id: '1', username: 'alice', running: true, connected: true, level: 5, lastLoginAt: 400 },
                 ],
                 total: 4,
             }),
@@ -84,9 +84,9 @@ test('accounts route filters non-admin accounts and keeps runtime-state sort ord
         data: {
             total: 4,
             accounts: [
-                { id: '1', username: 'alice', running: true, connected: true, level: 5 },
-                { id: '2', username: 'alice', running: true, connected: false, level: 20 },
-                { id: '4', username: 'alice', running: false, connected: false, level: 50 },
+                { id: '1', username: 'alice', running: true, connected: true, level: 5, lastLoginAt: 400 },
+                { id: '4', username: 'alice', running: false, connected: false, level: 50, updatedAt: 300 },
+                { id: '2', username: 'alice', running: true, connected: false, level: 20, updatedAt: 200 },
             ],
         },
     });

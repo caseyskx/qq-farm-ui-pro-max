@@ -142,13 +142,58 @@ test('accounts route turns duplicate create into update and preserves existing n
 
     assert.equal(res.statusCode, 200);
     assert.deepEqual(calls, [
-        ['console', '[API /api/accounts] 拦截重复创建: UIN 10001 已存在，转为更新 (ID: acc-9)'],
+        ['console', '[API /api/accounts] 拦截重复创建: 标识 10001 已存在，转为更新 (ID: acc-9)'],
         ['save', { uin: '10001', platform: 'qq', name: '原名字', id: 'acc-9', username: 'alice', qq: '10001' }],
         ['persist', 'acc-9', { strict: true }],
         ['log', 'update', '更新账号: 原名字', 'acc-9', '原名字'],
         ['restart', 'acc-9'],
     ]);
     assert.deepEqual(res.body, { ok: true, data: { accounts: [{ id: 'acc-9', name: '原名字' }] } });
+});
+
+test('accounts route starts an existing offline account when duplicate create carries fresh login credentials', async () => {
+    const { app, routes } = createFakeApp();
+    const calls = [];
+    const deps = createDeps({
+        app,
+        getAccountsSnapshot: async () => ({
+            accounts: [{ id: 'acc-9', uin: '10001', qq: '10001', platform: 'qq', name: '原名字', username: 'alice' }],
+        }),
+        resolveAccId: async () => 'acc-9',
+        addOrUpdateAccount: async (payload) => {
+            calls.push(['save', payload]);
+            return { touchedAccountId: 'acc-9', accounts: [{ id: 'acc-9', name: '原名字' }] };
+        },
+        getProvider: () => ({
+            isAccountRunning: async () => false,
+            addAccountLog: (...args) => calls.push(['log', ...args]),
+            startAccount: async (...args) => calls.push(['start', ...args]),
+        }),
+        store: {
+            persistAccountsNow: async (...args) => calls.push(['persist', ...args]),
+        },
+        consoleRef: {
+            log: (...args) => calls.push(['console', ...args]),
+        },
+    });
+
+    registerAccountManagementRoutes(deps);
+    const { handler } = getRouteParts(routes, 'post', '/api/accounts');
+    const res = createResponse();
+    await handler({
+        body: { uin: '10001', platform: 'qq', name: '扫码账号', code: 'fresh-code', loginType: 'qr' },
+        currentUser: { username: 'alice', role: 'user', maxAccounts: 3 },
+    }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(calls, [
+        ['console', '[API /api/accounts] 拦截重复创建: 标识 10001 已存在，转为更新 (ID: acc-9)'],
+        ['save', { uin: '10001', platform: 'qq', name: '原名字', code: 'fresh-code', loginType: 'qr', id: 'acc-9', username: 'alice', qq: '10001' }],
+        ['persist', 'acc-9', { strict: true }],
+        ['log', 'update', '更新账号: 原名字', 'acc-9', '原名字'],
+        ['start', 'acc-9'],
+    ]);
+    assert.deepEqual(res.body, { ok: true, data: { touchedAccountId: 'acc-9', accounts: [{ id: 'acc-9', name: '原名字' }] } });
 });
 
 test('accounts route forces fresh snapshot and allocates a new id for create requests', async () => {

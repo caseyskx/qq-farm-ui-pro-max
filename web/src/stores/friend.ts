@@ -87,6 +87,15 @@ export const useFriendStore = defineStore('friend', () => {
     friends.value[idx] = { ...friends.value[idx], plant: nextPlant }
   }
 
+  async function applyCachedFriendsFallback(accountId: string): Promise<boolean> {
+    await fetchCachedFriends(accountId)
+    if (cachedFriends.value.length > 0) {
+      friends.value = [...cachedFriends.value]
+      return true
+    }
+    return false
+  }
+
   async function fetchFriends(accountId: string): Promise<{ ok: boolean, fromCache?: boolean }> {
     if (!accountId)
       return { ok: false }
@@ -96,16 +105,24 @@ export const useFriendStore = defineStore('friend', () => {
         headers: { 'x-account-id': accountId },
       })
       if (res.data.ok) {
-        friends.value = res.data.data || []
-        return { ok: true, fromCache: false }
+        const liveFriends = Array.isArray(res.data.data) ? res.data.data : []
+        if (liveFriends.length > 0) {
+          friends.value = liveFriends
+          return { ok: true, fromCache: false }
+        }
+        const fromCache = await applyCachedFriendsFallback(accountId)
+        friends.value = fromCache ? [...cachedFriends.value] : []
+        return { ok: true, fromCache }
       }
+      const fromCache = await applyCachedFriendsFallback(accountId)
+      if (fromCache)
+        return { ok: true, fromCache: true }
       return { ok: false }
     }
     catch {
       try {
-        await fetchCachedFriends(accountId)
-        if (cachedFriends.value.length > 0) {
-          friends.value = [...cachedFriends.value]
+        const fromCache = await applyCachedFriendsFallback(accountId)
+        if (fromCache) {
           return { ok: true, fromCache: true }
         }
       }
@@ -193,6 +210,7 @@ export const useFriendStore = defineStore('friend', () => {
     if (!accountId)
       return
     loading.value = true
+    cachedFriends.value = []
     try {
       const res = await api.get('/api/friends/cache', {
         headers: { 'x-account-id': accountId },

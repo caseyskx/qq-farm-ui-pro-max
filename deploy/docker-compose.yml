@@ -11,8 +11,8 @@
 services:
   # ========== 主应用（Node.js + Vue 前端）==========
   qq-farm-bot:
-    image: ${APP_IMAGE:-smdk000/qq-farm-bot-ui:4.5.18}
-    container_name: qq-farm-bot
+    image: ${APP_IMAGE:-smdk000/qq-farm-bot-ui:4.5.19}
+    container_name: ${STACK_NAME:-qq-farm}-bot
     restart: unless-stopped
 
     ports:
@@ -22,23 +22,28 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-qq007qq008}
       - TZ=${TZ:-Asia/Shanghai}
       - NODE_ENV=production
+      - ROLE=${APP_ROLE:-standalone}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - COOKIE_SECURE=${COOKIE_SECURE:-auto}
       - CORS_ORIGINS=${CORS_ORIGINS:-}
       - JWT_SECRET=${JWT_SECRET:-}
+      - MASTER_URL=${MASTER_URL:-}
+      - WORKER_TOKEN=${WORKER_TOKEN:-default_cluster_token}
+      - WORKER_NODE_ID=${WORKER_NODE_ID:-}
+      - WORKER_HEARTBEAT_INTERVAL_MS=${WORKER_HEARTBEAT_INTERVAL_MS:-15000}
       # 数据库（Docker 内部网络自动解析）
-      - MYSQL_HOST=mysql
-      - MYSQL_PORT=3306
+      - MYSQL_HOST=${MYSQL_HOST:-mysql}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
       - MYSQL_USER=${MYSQL_USER:-qq_farm_user}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-qq007qq008}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-qq_farm}
       - MYSQL_POOL_LIMIT=${MYSQL_POOL_LIMIT:-100}
       # Redis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       # 微信协议服务
-      - IPAD860_URL=http://ipad860:8058
+      - IPAD860_URL=${IPAD860_URL:-http://ipad860:8058}
       - WX_API_KEY=${WX_API_KEY:-}
       - WX_API_URL=${WX_API_URL:-}
       - WX_APP_ID=${WX_APP_ID:-}
@@ -58,10 +63,23 @@ services:
       - bot-logs:/app/logs
 
     networks:
-      - farm-net
+      farm-net:
+      shared-farm-net:
+        aliases:
+          - ${STACK_NAME:-qq-farm}-bot
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/ping"]
+      test:
+        - CMD-SHELL
+        - |
+          if [ "$${ROLE:-standalone}" = "worker" ]; then
+            grep -aq 'client.js' /proc/1/cmdline
+          else
+            wget --spider -q "http://127.0.0.1:3000/api/ping"
+          fi
       interval: 30s
       timeout: 10s
       retries: 3
@@ -77,7 +95,7 @@ services:
   # ========== MySQL 8.0 数据库 ==========
   mysql:
     image: ${MYSQL_IMAGE:-mysql:8.0}
-    container_name: qq-farm-mysql
+    container_name: ${STACK_NAME:-qq-farm}-mysql
     restart: unless-stopped
 
     environment:
@@ -98,7 +116,10 @@ services:
       - ./init-db:/docker-entrypoint-initdb.d:ro
 
     networks:
-      - farm-net
+      farm-net:
+      shared-farm-net:
+        aliases:
+          - ${STACK_NAME:-qq-farm}-mysql
 
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -123,7 +144,7 @@ services:
   # ========== Redis 7 缓存 ==========
   redis:
     image: ${REDIS_IMAGE:-redis:7-alpine}
-    container_name: qq-farm-redis
+    container_name: ${STACK_NAME:-qq-farm}-redis
     restart: unless-stopped
 
     environment:
@@ -147,6 +168,9 @@ services:
       farm-net:
         aliases:
           - redis
+      shared-farm-net:
+        aliases:
+          - ${STACK_NAME:-qq-farm}-redis
 
     logging:
       driver: "json-file"
@@ -164,7 +188,7 @@ services:
     image: ${IPAD860_IMAGE:-smdk000/ipad860:latest}
     # 注意：.so 共享库仅有 x86-64 版本
     platform: linux/amd64
-    container_name: qq-farm-ipad860
+    container_name: ${STACK_NAME:-qq-farm}-ipad860
     restart: unless-stopped
 
     environment:
@@ -186,7 +210,10 @@ services:
         exec /app/main
 
     networks:
-      - farm-net
+      farm-net:
+      shared-farm-net:
+        aliases:
+          - ${STACK_NAME:-qq-farm}-ipad860
 
     logging:
       driver: "json-file"
@@ -204,6 +231,9 @@ services:
 networks:
   farm-net:
     driver: bridge
+  shared-farm-net:
+    name: ${SHARED_DOCKER_NETWORK:-qq-farm-shared}
+    external: ${SHARED_DOCKER_NETWORK_EXTERNAL:-false}
 
 # ========== 数据卷定义 ==========
 volumes:

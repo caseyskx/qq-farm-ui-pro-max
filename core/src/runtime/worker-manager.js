@@ -51,6 +51,7 @@ function createWorkerManager(options) {
         deleteAccount,
         upsertFriendBlacklist,
         updateFriendsCache,
+        mergeFriendsCache,
         broadcastConfigToWorkers,
         onStatusSync,
         onWorkerLog,
@@ -521,8 +522,11 @@ function createWorkerManager(options) {
                 onWorkerLog(logEntry, accountId, worker.name);
             }
         } else if (msg.type === 'sync_friends_cache') {
-            if (typeof updateFriendsCache === 'function' && msg.data) {
-                updateFriendsCache(accountId, msg.data).catch(() => {});
+            const syncFriendsCache = typeof mergeFriendsCache === 'function'
+                ? mergeFriendsCache
+                : updateFriendsCache;
+            if (typeof syncFriendsCache === 'function' && msg.data) {
+                syncFriendsCache(accountId, msg.data).catch(() => {});
             }
         } else if (msg.type === 'error') {
             log('错误', `账号[${accountId}]进程报错: ${msg.error}`, { accountId: String(accountId), accountName: worker.name });

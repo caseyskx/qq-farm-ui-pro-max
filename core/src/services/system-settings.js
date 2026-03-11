@@ -6,6 +6,9 @@ const SYSTEM_SETTING_KEYS = Object.freeze({
     GLOBAL_CONFIG: 'global_config',
     JWT_SECRET: 'jwt_secret',
     TRIAL_IP_HISTORY: 'trial_ip_history',
+    UPDATE_CONFIG: 'update_config',
+    UPDATE_RELEASE_CACHE: 'update_release_cache',
+    UPDATE_RUNTIME: 'update_runtime',
 });
 
 function getLegacyFallbackSources() {

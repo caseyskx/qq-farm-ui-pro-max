@@ -47,6 +47,8 @@ const { registerSettingsReportRoutes } = require('./admin/settings-report-routes
 const { registerAccountReadRoutes, registerLogReadRoutes } = require('./admin/account-read-routes');
 const { registerFriendBlacklistRoutes, registerAccountControlRoutes } = require('./admin/account-control-routes');
 const { registerAnnouncementAdminRoutes } = require('./admin/announcement-admin-routes');
+const { registerSystemUpdateAdminRoutes } = require('./admin/system-update-admin-routes');
+const { getDispatcher } = require('../cluster/master-dispatcher');
 const { registerSystemPublicRoutes, registerNotificationsRoute } = require('./admin/system-public-routes');
 const { registerAccountStateRoutes } = require('./admin/account-state-routes');
 const { registerAutomationRoutes, registerFriendOperationRoutes } = require('./admin/account-automation-routes');
@@ -326,6 +328,7 @@ function startAdminServer(dataProvider) {
             clearTimeoutRef: clearTimeout,
             consoleRef: console,
             getIo: () => io,
+            getDispatcher: () => getDispatcher(),
             registerAuthRoutes,
             registerLegacyLogoutRoute,
             registerSystemPublicRoutes,
@@ -343,6 +346,7 @@ function startAdminServer(dataProvider) {
             registerAdminOperationLogRoutes,
             registerTrialCardRoutes,
             registerAnnouncementAdminRoutes,
+            registerSystemUpdateAdminRoutes,
             registerLogReadRoutes,
             registerNotificationsRoute,
             registerQrRoutes,

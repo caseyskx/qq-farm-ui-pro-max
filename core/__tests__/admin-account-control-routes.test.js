@@ -36,9 +36,12 @@ function createResponse() {
 function getRouteParts(routes, method, path) {
     const handlers = routes[method].get(path);
     assert.ok(handlers, `missing route: ${method.toUpperCase()} ${path}`);
-    assert.equal(typeof handlers[0], 'function');
-    assert.equal(typeof handlers[1], 'function');
-    return { middleware: handlers[0], handler: handlers[1] };
+    assert.ok(handlers.length >= 1);
+    assert.equal(typeof handlers[handlers.length - 1], 'function');
+    return {
+        middleware: handlers.length > 1 ? handlers[0] : null,
+        handler: handlers[handlers.length - 1],
+    };
 }
 
 function createDeps(overrides = {}) {
@@ -283,7 +286,7 @@ test('analytics route sanitizes query values before calling ranking service', as
 
     registerAccountControlRoutes(deps);
     const { middleware, handler } = getRouteParts(routes, 'get', '/api/analytics');
-    assert.equal(middleware, deps.accountOwnershipRequired);
+    assert.equal(middleware, null);
 
     const res = createResponse();
     await handler({
@@ -291,6 +294,62 @@ test('analytics route sanitizes query values before calling ranking service', as
     }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(calls, [['exp', 12, { accountId: 'acc-1', timingMode: 'theoretical' }]]);
+    assert.deepEqual(calls, [['exp', 12, { timingMode: 'theoretical' }]]);
     assert.deepEqual(res.body, { ok: true, data: [{ rank: 1 }] });
+});
+
+test('analytics route falls back to theoretical rankings when the stored account header is stale', async () => {
+    const { app, routes } = createFakeApp();
+    const calls = [];
+    const deps = createDeps({
+        app,
+        resolveAccId: async () => 'missing-account',
+        getAccountList: async () => [],
+        loadGetPlantRankings: () => (...args) => {
+            calls.push(args);
+            return [{ rank: 2 }];
+        },
+    });
+
+    registerAccountControlRoutes(deps);
+    const { handler } = getRouteParts(routes, 'get', '/api/analytics');
+
+    const res = createResponse();
+    await handler({
+        headers: { 'x-account-id': 'legacy-account' },
+        query: { sort: 'profit', timingMode: 'theoretical' },
+        currentUser: { username: 'alice', role: 'user' },
+    }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(calls, [['profit', null, { timingMode: 'theoretical' }]]);
+    assert.deepEqual(res.body, { ok: true, data: [{ rank: 2 }] });
+});
+
+test('analytics route keeps actual timing mode behind account ownership checks', async () => {
+    const { app, routes } = createFakeApp();
+    const calls = [];
+    const deps = createDeps({
+        app,
+        resolveAccId: async () => 'acc-2',
+        getAccountList: async () => [{ id: 'acc-2', username: 'bob' }],
+        loadGetPlantRankings: () => (...args) => {
+            calls.push(args);
+            return [{ rank: 3 }];
+        },
+    });
+
+    registerAccountControlRoutes(deps);
+    const { handler } = getRouteParts(routes, 'get', '/api/analytics');
+
+    const res = createResponse();
+    await handler({
+        headers: { 'x-account-id': 'acc-2' },
+        query: { sort: 'exp', timingMode: 'actual' },
+        currentUser: { username: 'alice', role: 'user' },
+    }, res);
+
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(res.body, { ok: false, error: '无权操作此账号' });
 });

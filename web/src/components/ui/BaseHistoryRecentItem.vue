@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { HistoryRecentItemDefinition } from '@/utils/management-schema'
 import { computed, useAttrs } from 'vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 
 defineOptions({
   inheritAttrs: false,
@@ -53,13 +54,22 @@ const resolvedIconClass = computed(() => {
         v-if="(item.badges && item.badges.length) || resolvedIconClass"
         :class="item.badgeGroupClass || 'flex items-center gap-2'"
       >
-        <span
-          v-for="badge in item.badges || []"
-          :key="`${item.key}-${badge.text}`"
-          :class="badge.class"
-        >
-          {{ badge.text }}
-        </span>
+        <template v-for="badge in item.badges || []" :key="`${item.key}-${badge.text}`">
+          <BaseBadge
+            v-if="badge.surface || badge.tone"
+            :surface="badge.surface || 'badge'"
+            :tone="badge.tone || ''"
+            :class="badge.class"
+          >
+            {{ badge.text }}
+          </BaseBadge>
+          <span
+            v-else
+            :class="badge.class"
+          >
+            {{ badge.text }}
+          </span>
+        </template>
         <div
           v-if="resolvedIconClass"
           class="text-base transition-transform duration-300"

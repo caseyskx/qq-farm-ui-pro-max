@@ -105,10 +105,8 @@ onMounted(async () => {
 
   await Promise.all([fetchAnnouncement(), hydrateDismissedId()])
   updateVisibility()
-
-  if (show.value) {
-    statusStore.connectRealtime('all')
-  }
+  // 移除 connectRealtime('all')：announcement:update 事件已在全局 socket 上注册，
+  // 无需单独订阅。此调用会劫持 Sidebar 的当前账号订阅，造成订阅乒乓。
 })
 
 watch(announcements, () => updateVisibility(), { deep: true })
@@ -130,9 +128,6 @@ watch(adminToken, async (token) => {
   }
   await Promise.all([fetchAnnouncement(), hydrateDismissedId()])
   updateVisibility()
-  if (show.value) {
-    statusStore.connectRealtime('all')
-  }
 })
 </script>
 

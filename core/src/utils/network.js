@@ -10,6 +10,7 @@ const { CONFIG } = require('../config/config');
 const { createScheduler } = require('../services/scheduler');
 const { updateStatusFromLogin, updateStatusGold, updateStatusLevel } = require('../services/status');
 const { recordOperation } = require('../services/stats');
+const { cacheFriendSeeds, buildFriendSeedsFromLands } = require('../services/friend-cache-seeds');
 const { types } = require('./proto');
 const { toLong, toNum, syncServerTime, log, logWarn } = require('./utils');
 const store = require('../models/store'); // Phase 3: 引入 store 用于持久化风控锁
@@ -62,9 +63,7 @@ function hasOwn(obj, key) {
 // ============ 消息编解码 ============
 async function encodeMsg(serviceName, methodName, bodyBytes) {
     let finalBody = bodyBytes || Buffer.alloc(0);
-    if (finalBody.length > 0) {
-        finalBody = await cryptoWasm.encryptBuffer(finalBody);
-    }
+    finalBody = await cryptoWasm.encryptBuffer(finalBody);
     const msg = types.GateMessage.create({
         meta: {
             service_name: serviceName,
@@ -403,6 +402,13 @@ function handleNotify(msg) {
                 const notify = types.LandsNotify.decode(eventBody);
                 const hostGid = toNum(notify.host_gid);
                 const lands = notify.lands || [];
+                const visitorSeeds = buildFriendSeedsFromLands(lands, userState.gid);
+                if (visitorSeeds.length > 0) {
+                    void cacheFriendSeeds(visitorSeeds, { delayMs: 250 });
+                }
+                if (hostGid > 0 && hostGid !== userState.gid) {
+                    void cacheFriendSeeds([{ gid: hostGid }], { delayMs: 250 });
+                }
                 if (lands.length > 0) {
                     // 如果是自己的农场，触发事件
                     if (hostGid === userState.gid || hostGid === 0) {
@@ -495,6 +501,7 @@ function handleNotify(msg) {
                 const notify = types.FriendApplicationReceivedNotify.decode(eventBody);
                 const applications = notify.applications || [];
                 if (applications.length > 0) {
+                    void cacheFriendSeeds(applications, { delayMs: 250 });
                     networkEvents.emit('friendApplicationReceived', applications);
                 }
             } catch { }
@@ -507,6 +514,7 @@ function handleNotify(msg) {
                 const notify = types.FriendAddedNotify.decode(eventBody);
                 const friends = notify.friends || [];
                 if (friends.length > 0) {
+                    void cacheFriendSeeds(friends, { delayMs: 250 });
                     const names = friends.map(f => f.name || f.remark || `GID:${toNum(f.gid)}`).join(', ');
                     log('好友', `新好友: ${names}`);
                 }
@@ -597,6 +605,21 @@ function sendLogin(onLoginSuccess) {
                 if (reply.time_now_millis) {
                     syncServerTime(toNum(reply.time_now_millis));
                 }
+                if (CONFIG.platform === 'qq') {
+                    const recommendAuthorized = toNum(reply.qq_friend_recommend_authorized);
+                    const basicAuthorizedStatus = toNum(reply.basic.authorized_status);
+                    const hasOpenId = !!String(reply.basic.open_id || '').trim();
+                    log('系统', `QQ登录授权态: qq_friend_recommend_authorized=${recommendAuthorized}, basic.authorized_status=${basicAuthorizedStatus}, open_id=${hasOpenId ? 'present' : 'empty'}`, {
+                        module: 'system',
+                        event: 'qq_login_auth_state',
+                        recommendAuthorized,
+                        basicAuthorizedStatus,
+                        hasOpenId,
+                    });
+                    if (recommendAuthorized <= 0 && basicAuthorizedStatus <= 0) {
+                        logWarn('系统', '当前 QQ 登录态疑似未携带好友社交授权，好友接口可能只返回自己');
+                    }
+                }
                 if (verboseLoginDetailsEnabled) {
                     log('系统', '登录详情同步完成', {
                         module: 'system',
@@ -679,16 +702,11 @@ function connect(code, openId, onLoginSuccess) {
     // 抹平非标准平台标识符，防止腾讯游戏服 400 Bad Request
     const wsPlatform = (CONFIG.platform === 'wx_ipad' || CONFIG.platform === 'wx_car') ? 'wx' : CONFIG.platform;
     const effectiveOpenId = wsPlatform === 'qq' ? '' : savedOpenId;
-    const query = new URLSearchParams({
-        platform: wsPlatform,
-        os: CONFIG.os,
-        ver: CONFIG.clientVersion,
-        code: String(savedCode || ''),
-    });
-    if (effectiveOpenId) {
-        query.set('openID', effectiveOpenId);
-    }
-    const url = `${CONFIG.serverUrl}?${query.toString()}`;
+    // QQ 网关保持与旧版完全一致的 query 形态：即使 openID 为空也显式附带 openID=
+    // 部分腾讯网关对“缺少 openID 参数”和“openID 为空字符串”存在行为差异。
+    const codeValue = String(savedCode || '');
+    const openIdValue = String(effectiveOpenId || '');
+    const url = `${CONFIG.serverUrl}?platform=${wsPlatform}&os=${CONFIG.os}&ver=${CONFIG.clientVersion}&code=${codeValue}&openID=${openIdValue}`;
 
     if (verboseWsConnectLogsEnabled) {
         log('系统', '准备建立 WebSocket 连接', {
@@ -784,4 +802,6 @@ module.exports = {
     getUserState,
     getWsErrorState,
     networkEvents,
+    __testEncodeMsg: encodeMsg,
+    __testHandleNotify: handleNotify,
 };

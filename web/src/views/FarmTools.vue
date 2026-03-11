@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 const menuItems = ref([
   { id: 'calculator.html', title: '经验时间计算', icon: 'i-carbon-calculator', shortTitle: '经验计算' },
@@ -8,9 +9,16 @@ const menuItems = ref([
   { id: 'lands.html', title: '土地升级属性', icon: 'i-carbon-map', shortTitle: '土地属性' },
 ])
 
+const route = useRoute()
 const selectedArticle = ref('calculator.html')
 const iframeRef = ref<HTMLIFrameElement | null>(null)
-const selectedMenuItem = computed(() => menuItems.value.find(item => item.id === selectedArticle.value) ?? menuItems.value[0]!)
+const presetArticle = computed(() => {
+  const raw = String(route.meta?.farmToolsPreset || '').trim()
+  return menuItems.value.some(item => item.id === raw) ? raw : ''
+})
+const standaloneMode = computed(() => Boolean(route.meta?.farmToolsStandalone && presetArticle.value))
+const activeArticle = computed(() => presetArticle.value || selectedArticle.value)
+const selectedMenuItem = computed(() => menuItems.value.find(item => item.id === activeArticle.value) ?? menuItems.value[0]!)
 
 // 中屏侧栏折叠状态
 const sidebarVisible = ref(false)
@@ -19,6 +27,10 @@ function toggleSidebar() {
 }
 
 function selectArticle(articleId: string) {
+  if (presetArticle.value) {
+    sidebarVisible.value = false
+    return
+  }
   selectedArticle.value = articleId
   // 中小屏下选中菜单项后自动关闭浮动侧栏
   sidebarVisible.value = false
@@ -684,7 +696,7 @@ onUnmounted(() => {
 <template>
   <div class="farm-tools-page ui-page-shell ui-page-density-relaxed h-full min-h-0 w-full flex flex-col overflow-hidden">
     <!-- ═══ 移动端/中屏 顶部工具选择栏（< lg 时可见） ═══ -->
-    <div class="farm-tools-mobile-toolbar ui-mobile-sticky-panel ui-mobile-action-panel lg:hidden">
+    <div v-if="!standaloneMode" class="farm-tools-mobile-toolbar ui-mobile-sticky-panel ui-mobile-action-panel lg:hidden">
       <div class="farm-tools-mobile-toolbar-head">
         <button
           class="farm-tools-menu-trigger"
@@ -713,7 +725,7 @@ onUnmounted(() => {
           :key="`tab-${item.id}`"
           class="farm-tool-tab flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-sm transition-all"
           :class="[
-            selectedArticle === item.id
+            activeArticle === item.id
               ? 'farm-tool-tab--active'
               : 'farm-tool-tab--inactive',
           ]"
@@ -730,12 +742,13 @@ onUnmounted(() => {
 
       <!-- 中小屏遮罩层 -->
       <div
-        v-if="sidebarVisible"
+        v-if="!standaloneMode && sidebarVisible"
         class="farm-tools-backdrop fixed inset-0 z-20 backdrop-blur-sm lg:hidden"
         @click="sidebarVisible = false"
       />
 
       <aside
+        v-if="!standaloneMode"
         class="farm-tools-sidebar glass-panel h-full shrink-0 flex-col rounded-2xl p-4 shadow-sm transition-all duration-300 lg:flex"
         :class="[
           // ≥lg：固定显示
@@ -753,17 +766,17 @@ onUnmounted(() => {
               :key="item.id"
               class="w-full flex items-center justify-between rounded-xl px-4 py-3.5 text-left transition-all"
               :class="[
-                selectedArticle === item.id
+                activeArticle === item.id
                   ? 'farm-tools-nav-active theme-glow-soft scale-100'
                   : 'farm-tools-nav-idle',
               ]"
               @click="selectArticle(item.id)"
             >
               <div class="flex items-center gap-3">
-                <div class="text-xl" :class="[item.icon, selectedArticle === item.id ? 'farm-tools-nav-icon-active' : 'farm-tools-nav-icon-idle']" />
+                <div class="text-xl" :class="[item.icon, activeArticle === item.id ? 'farm-tools-nav-icon-active' : 'farm-tools-nav-icon-idle']" />
                 <span class="tracking-wide">{{ item.title }}</span>
               </div>
-              <div v-if="selectedArticle === item.id" class="theme-glow-dot h-1.5 w-1.5 rounded-full bg-primary-500" />
+              <div v-if="activeArticle === item.id" class="theme-glow-dot h-1.5 w-1.5 rounded-full bg-primary-500" />
             </button>
           </div>
         </nav>
@@ -773,7 +786,7 @@ onUnmounted(() => {
       <main class="farm-tools-main glass-panel relative m-0 h-full min-w-0 flex flex-1 flex-col overflow-hidden rounded-2xl p-0">
         <iframe
           ref="iframeRef"
-          :src="`/nc_local_version/${selectedArticle}`"
+          :src="`/nc_local_version/${activeArticle}`"
           class="h-full w-full flex-1 border-none bg-transparent outline-none"
           @load="onIframeLoad"
         />

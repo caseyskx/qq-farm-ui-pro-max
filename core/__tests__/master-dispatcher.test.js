@@ -1,125 +1,191 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
-test('disposeDispatcher clears interval, detaches io/socket listeners and resets singleton', () => {
-    const script = `
-        const { initDispatcher, getDispatcher, disposeDispatcher } = require('./src/cluster/master-dispatcher');
+const { MasterDispatcher } = require('../src/cluster/master-dispatcher');
 
-        function createIO() {
-            const handlers = new Map();
-            return {
-                handlers,
-                on(event, handler) {
-                    handlers.set(event, handler);
+function createSocket(id, nodeId = id) {
+    const handlers = new Map();
+    const emitted = [];
+    return {
+        id,
+        handshake: {
+            auth: {
+                nodeId,
+            },
+        },
+        handlers,
+        emitted,
+        on(event, handler) {
+            handlers.set(event, handler);
+        },
+        emit(event, payload) {
+            emitted.push([event, payload]);
+        },
+    };
+}
+
+test('MasterDispatcher rebalance avoids assigning new accounts to draining workers', async () => {
+    const ioHandlers = new Map();
+    const io = {
+        on(event, handler) {
+            ioHandlers.set(event, handler);
+        },
+        to() {
+            return { emit() {} };
+        },
+    };
+    const savedSnapshots = [];
+    const dispatcher = new MasterDispatcher(io, {
+        logger: { info() {}, warn() {}, error() {} },
+        store: {
+            async getAccounts() {
+                return {
+                    accounts: [
+                        { id: 'acc-1', running: true, name: 'A' },
+                        { id: 'acc-2', running: true, name: 'B' },
+                    ],
+                };
+            },
+            getClusterConfig() {
+                return { dispatcherStrategy: 'round_robin' };
+            },
+        },
+        getSystemUpdateRuntimeRef: async () => ({
+            clusterNodes: [
+                {
+                    nodeId: 'worker-a',
+                    role: 'worker',
+                    status: 'draining',
+                    connected: true,
+                    draining: true,
+                    assignedCount: 0,
+                    assignedAccountIds: [],
+                    updatedAt: Date.now(),
                 },
-                off(event, handler) {
-                    if (handlers.get(event) === handler) {
-                        handlers.delete(event);
-                    }
-                },
-                to() {
-                    return { emit() {} };
-                },
-            };
-        }
-
-        function createSocket(id = 'worker-1') {
-            const handlers = new Map();
-            return {
-                id,
-                handshake: {
-                    auth: {
-                        nodeId: 'node-' + id,
-                    },
-                },
-                handlers,
-                on(event, handler) {
-                    handlers.set(event, handler);
-                },
-                off(event, handler) {
-                    if (handlers.get(event) === handler) {
-                        handlers.delete(event);
-                    }
-                },
-            };
-        }
-
-        disposeDispatcher();
-
-        const io = createIO();
-        const socket = createSocket();
-        const originalSetInterval = globalThis.setInterval;
-        const originalClearInterval = globalThis.clearInterval;
-        const intervalHandles = [];
-        const clearedHandles = [];
-
-        globalThis.setInterval = (handler, delay) => {
-            const intervalHandle = {
-                handler,
-                delay,
-                unrefCalled: false,
-                unref() {
-                    this.unrefCalled = true;
-                    return this;
-                },
-            };
-            intervalHandles.push(intervalHandle);
-            return intervalHandle;
-        };
-        globalThis.clearInterval = (handle) => {
-            clearedHandles.push(handle);
-        };
-
-        try {
-            const dispatcher = initDispatcher(io);
-            const connectionHandler = io.handlers.get('connection');
-            connectionHandler(socket);
-
-            dispatcher.workers.set(socket.id, { nodeId: 'node-worker-1', socket, assigned: [] });
-            dispatcher.accountToWorker.set('1001', socket.id);
-
-            disposeDispatcher();
-
-            console.log('__RESULT__' + JSON.stringify({
-                singletonCleared: getDispatcher() === null,
-                connectionHandlerRemoved: io.handlers.has('connection') === false,
-                socketHandlerCount: socket.handlers.size,
-                workersSize: dispatcher.workers.size,
-                accountToWorkerSize: dispatcher.accountToWorker.size,
-                intervalDelay: intervalHandles[0] && intervalHandles[0].delay,
-                intervalUnrefCalled: !!(intervalHandles[0] && intervalHandles[0].unrefCalled),
-                clearedHandleCount: clearedHandles.length,
-            }));
-        } finally {
-            globalThis.setInterval = originalSetInterval;
-            globalThis.clearInterval = originalClearInterval;
-            disposeDispatcher();
-        }
-
-        process.exit(0);
-    `;
-
-    const result = spawnSync(process.execPath, ['-e', script], {
-        cwd: path.resolve(__dirname, '..'),
-        encoding: 'utf8',
+            ],
+        }),
+        saveClusterNodeRuntimeSnapshotRef: async (snapshot) => {
+            savedSnapshots.push(snapshot);
+            return snapshot;
+        },
+        version: 'v4.5.18',
     });
 
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-
-    const match = result.stdout.match(/__RESULT__(.+)/);
-    assert.ok(match, result.stdout);
-
-    const parsed = JSON.parse(match[1]);
-    assert.deepEqual(parsed, {
-        singletonCleared: true,
-        connectionHandlerRemoved: true,
-        socketHandlerCount: 0,
-        workersSize: 0,
-        accountToWorkerSize: 0,
-        intervalDelay: 15 * 60 * 1000,
-        intervalUnrefCalled: true,
-        clearedHandleCount: 1,
+    const socketA = createSocket('socket-a');
+    const socketB = createSocket('socket-b');
+    dispatcher.workers.set('socket-a', {
+        nodeId: 'worker-a',
+        socket: socketA,
+        assigned: [],
+        draining: false,
+        version: 'v4.5.18',
+        lastSeenAt: Date.now(),
     });
+    dispatcher.workers.set('socket-b', {
+        nodeId: 'worker-b',
+        socket: socketB,
+        assigned: [],
+        draining: false,
+        version: 'v4.5.18',
+        lastSeenAt: Date.now(),
+    });
+
+    await dispatcher.rebalance();
+
+    assert.deepEqual(socketA.emitted, [['master:assign:accounts', { accounts: [] }]]);
+    assert.deepEqual(socketB.emitted, [[
+        'master:assign:accounts',
+        {
+            accounts: [
+                { id: 'acc-1', running: true, name: 'A' },
+                { id: 'acc-2', running: true, name: 'B' },
+            ],
+        },
+    ]]);
+    assert.equal(dispatcher.workers.get('socket-a').draining, true);
+    assert.equal(dispatcher.workers.get('socket-b').draining, false);
+    assert.equal(savedSnapshots.length, 1);
+    assert.equal(savedSnapshots[0][0].nodeId, 'worker-a');
+    assert.equal(savedSnapshots[0][0].draining, true);
+    assert.equal(savedSnapshots[0][0].assignedCount, 0);
+    assert.equal(savedSnapshots[0][1].nodeId, 'worker-b');
+    assert.equal(savedSnapshots[0][1].assignedCount, 2);
+});
+
+test('MasterDispatcher heartbeat picks up drain-state changes and rebalances automatically', async () => {
+    const ioHandlers = new Map();
+    const io = {
+        on(event, handler) {
+            ioHandlers.set(event, handler);
+        },
+        to() {
+            return { emit() {} };
+        },
+    };
+    let drainWorkerA = false;
+    const dispatcher = new MasterDispatcher(io, {
+        logger: { info() {}, warn() {}, error() {} },
+        store: {
+            async getAccounts() {
+                return {
+                    accounts: [
+                        { id: 'acc-1', running: true, name: 'A' },
+                        { id: 'acc-2', running: true, name: 'B' },
+                    ],
+                };
+            },
+            getClusterConfig() {
+                return { dispatcherStrategy: 'round_robin' };
+            },
+        },
+        getSystemUpdateRuntimeRef: async () => ({
+            clusterNodes: drainWorkerA
+                ? [{
+                    nodeId: 'worker-a',
+                    role: 'worker',
+                    status: 'draining',
+                    connected: true,
+                    draining: true,
+                    assignedCount: 0,
+                    assignedAccountIds: [],
+                    updatedAt: Date.now(),
+                }]
+                : [],
+        }),
+        saveClusterNodeRuntimeSnapshotRef: async (snapshot) => snapshot,
+        version: 'v4.5.18',
+    });
+
+    dispatcher.init();
+    const socketA = createSocket('socket-a', 'worker-a');
+    const socketB = createSocket('socket-b', 'worker-b');
+    ioHandlers.get('connection')(socketA);
+    ioHandlers.get('connection')(socketB);
+
+    await socketA.handlers.get('worker:ready')();
+    await socketB.handlers.get('worker:ready')();
+    socketA.emitted.length = 0;
+    socketB.emitted.length = 0;
+
+    drainWorkerA = true;
+    await socketA.handlers.get('worker:heartbeat')({
+        nodeId: 'worker-a',
+        status: 'active',
+        version: 'v4.5.18',
+    });
+
+    assert.deepEqual(socketA.emitted, [['master:assign:accounts', { accounts: [] }]]);
+    assert.deepEqual(socketB.emitted, [[
+        'master:assign:accounts',
+        {
+            accounts: [
+                { id: 'acc-1', running: true, name: 'A' },
+                { id: 'acc-2', running: true, name: 'B' },
+            ],
+        },
+    ]]);
+    assert.equal(dispatcher.workers.get('socket-a').draining, true);
+    assert.equal(dispatcher.workers.get('socket-b').draining, false);
+
+    dispatcher.dispose();
 });

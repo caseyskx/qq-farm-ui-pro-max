@@ -1,3 +1,5 @@
+const { readLatestQqFriendDiagnostics: readLatestQqFriendDiagnosticsDefault } = require('../../services/qq-friend-diagnostics');
+
 function registerSystemPublicRoutes({
     app,
     getPool,
@@ -15,7 +17,12 @@ function registerSystemPublicRoutes({
     getProvider,
     getSchedulerRegistrySnapshot,
     handleApiError,
+    readLatestQqFriendDiagnostics,
 }) {
+    const diagnosticsReader = typeof readLatestQqFriendDiagnostics === 'function'
+        ? readLatestQqFriendDiagnostics
+        : readLatestQqFriendDiagnosticsDefault;
+
     function buildPublicWebAssetsSnapshot() {
         if (typeof inspectWebDistState !== 'function') {
             return null;
@@ -227,6 +234,18 @@ function registerSystemPublicRoutes({
             return res.json({ ok: true, data: { runtime: getSchedulerRegistrySnapshot(), worker: null, workerError: '当前运行环境不支持调度器状态查询' } });
         } catch (e) {
             return handleApiError(res, e);
+        }
+    });
+
+    app.get('/api/qq-friend-diagnostics', async (req, res) => {
+        try {
+            if (req.currentUser?.role !== 'admin') {
+                return res.status(403).json({ ok: false, error: '仅管理员可查看 QQ 好友诊断结果' });
+            }
+            const data = diagnosticsReader(String(req.query.appid || '').trim());
+            return res.json({ ok: true, data: data || null });
+        } catch (err) {
+            return res.status(500).json({ ok: false, error: err.message });
         }
     });
 }

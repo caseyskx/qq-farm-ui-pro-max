@@ -262,6 +262,7 @@ async function submitManual() {
   }
 
   const normalizedUin = String(form.uin || '').trim()
+
   if (form.platform !== 'qq' && !normalizedUin) {
     errorMessage.value = '请输入微信ID / OpenID，避免继续沿用旧账号标识'
     return
@@ -463,8 +464,8 @@ watch(() => props.show, (newVal) => {
           <BaseInput
             v-model="form.uin"
             :label="form.platform === 'qq' ? '账号标识（可选 QQ 号）' : '账号标识（微信ID / OpenID）'"
-            :placeholder="form.platform === 'qq' ? '可选：不填则保留当前 QQ 号' : '请输入当前登录码对应的微信ID / OpenID'"
-            :hint="form.platform === 'qq' ? '手动填 QQ code 时会清空旧扫码 ticket，避免继续换回旧码' : '手动填微信 code 时请同步更新微信ID / OpenID，否则会继续使用旧账号标识'"
+            :placeholder="form.platform === 'qq' ? (props.editData?.id ? '留空则沿用当前 QQ 号；新增时也可留空' : '可选：填写当前登录码对应的 QQ 号') : '请输入当前登录码对应的微信ID / OpenID'"
+            :hint="form.platform === 'qq' ? 'QQ 手动填码可仅保存 code；如果你知道对应 QQ 号，填上后更容易复用旧账号与缓存' : '手动填微信 code 时请同步更新微信ID / OpenID，否则会继续使用旧账号标识'"
           />
 
           <BaseTextarea

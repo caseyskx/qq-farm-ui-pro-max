@@ -9,7 +9,7 @@ const { getAutomation, getPreferredSeed, getConfigSnapshot, applyConfigSnapshot 
 const { checkAndClaimEmails } = require('../services/email');
 const { getEmailDailyState } = require('../services/email');
 const { checkFarm, startFarmCheckLoop, stopFarmCheckLoop, refreshFarmCheckLoop, getLandsDetail, getAvailableSeeds, runFarmOperation } = require('../services/farm');
-const { checkFriends, startFriendCheckLoop, stopFriendCheckLoop, refreshFriendCheckLoop, getFriendsList, getFriendLandsDetail, doFriendOperation, doFriendBatchOperation } = require('../services/friend');
+const { checkAndAcceptApplications, checkFriends, startFriendCheckLoop, stopFriendCheckLoop, refreshFriendCheckLoop, getFriendsList, getFriendLandsDetail, doFriendOperation, doFriendBatchOperation } = require('../services/friend');
 const { processInviteCodes } = require('../services/invite');
 const { autoBuyOrganicFertilizer, buyFreeGifts, getFreeGiftDailyState, getMallGoodsCatalog, getMallCatalog, purchaseMallGoods, claimMonthCardRewardByGoodsId } = require('../services/mall');
 const { performDailyMonthCardGift, getMonthCardDailyState } = require('../services/monthcard');
@@ -28,7 +28,11 @@ const { sellAllFruits, getBag, getBagItems, getSellPreview, sellByPolicy, sellSe
 const { connect, cleanup, getWs, getUserState, networkEvents } = require('../utils/network');
 const { loadProto } = require('../utils/proto');
 const { setLogHook, log, toNum } = require('../utils/utils');
-const { getCachedFriends } = require('../services/database');
+const { getCachedFriends, mergeFriendsCache, findReusableFriendsCache } = require('../services/database');
+const {
+    computeNextRunAt,
+    resolveRuntimeIntervals,
+} = require('./unified-intervals');
 const EMAIL_CALL_TIMEOUT_MS = 8000;
 
 if (parentPort && workerData && workerData.accountId && !process.env.FARM_ACCOUNT_ID) {
@@ -140,9 +144,11 @@ let loginReady = false;
 let appliedConfigRevision = 0;
 let unifiedSchedulerRunning = false;
 let farmTaskRunning = false;
+let friendTaskRunning = false;
 let helpTaskRunning = false;
 let stealTaskRunning = false;
 let nextFarmRunAt = 0;
+let nextFriendRunAt = 0;
 let nextHelpRunAt = 0;
 let nextStealRunAt = 0;
 let lastStatusHash = '';
@@ -226,35 +232,24 @@ function startDailyRoutineTimer(options = {}) {
     }
 }
 
-function normalizeIntervalRangeSec(minSec, maxSec, fallbackSec) {
-    const fallback = Math.max(1, Number.parseInt(fallbackSec, 10) || 1);
-    let min = Math.max(1, Number.parseInt(minSec, 10) || fallback);
-    let max = Math.max(1, Number.parseInt(maxSec, 10) || fallback);
-    if (min > max) [min, max] = [max, min];
-    return { min, max };
-}
-
 function applyIntervalsToRuntime(intervals) {
-    const data = (intervals && typeof intervals === 'object') ? intervals : {};
-
-    const farmLegacy = Math.max(1, Number.parseInt(data.farm, 10) || 300);
-    const farmRange = normalizeIntervalRangeSec(data.farmMin, data.farmMax, farmLegacy);
+    const runtimeIntervals = resolveRuntimeIntervals(intervals);
+    const farmRange = runtimeIntervals.farm;
     CONFIG.farmCheckIntervalMin = farmRange.min * 1000;
     CONFIG.farmCheckIntervalMax = farmRange.max * 1000;
     CONFIG.farmCheckInterval = CONFIG.farmCheckIntervalMin;
 
-    const friendLegacy = Math.max(1, Number.parseInt(data.friend, 10) || 900);
-    const friendRange = normalizeIntervalRangeSec(data.friendMin, data.friendMax, friendLegacy);
+    const friendRange = runtimeIntervals.friend;
     CONFIG.friendCheckIntervalMin = friendRange.min * 1000;
     CONFIG.friendCheckIntervalMax = friendRange.max * 1000;
     CONFIG.friendCheckInterval = CONFIG.friendCheckIntervalMin;
 
-    const helpRange = normalizeIntervalRangeSec(data.helpMin, data.helpMax, friendRange.min);
+    const helpRange = runtimeIntervals.help;
     CONFIG.helpCheckIntervalMin = helpRange.min * 1000;
     CONFIG.helpCheckIntervalMax = helpRange.max * 1000;
     CONFIG.helpCheckInterval = CONFIG.helpCheckIntervalMin;
 
-    const stealRange = normalizeIntervalRangeSec(data.stealMin, data.stealMax, friendRange.min);
+    const stealRange = runtimeIntervals.steal;
     CONFIG.stealCheckIntervalMin = stealRange.min * 1000;
     CONFIG.stealCheckIntervalMax = stealRange.max * 1000;
     CONFIG.stealCheckInterval = CONFIG.stealCheckIntervalMin;
@@ -273,6 +268,10 @@ function resetUnifiedSchedule() {
         CONFIG.farmCheckIntervalMin || CONFIG.farmCheckInterval || 2000,
         CONFIG.farmCheckIntervalMax || CONFIG.farmCheckInterval || 2000
     );
+    const friendMs = randomIntervalMs(
+        CONFIG.friendCheckIntervalMin || CONFIG.friendCheckInterval || 10000,
+        CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
+    );
     const helpMs = randomIntervalMs(
         CONFIG.helpCheckIntervalMin || CONFIG.friendCheckIntervalMin || CONFIG.friendCheckInterval || 10000,
         CONFIG.helpCheckIntervalMax || CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
@@ -283,6 +282,7 @@ function resetUnifiedSchedule() {
     );
     const now = Date.now();
     nextFarmRunAt = now + farmMs;
+    nextFriendRunAt = now + friendMs;
     nextHelpRunAt = now + helpMs;
     nextStealRunAt = now + stealMs;
 }
@@ -290,6 +290,7 @@ function resetUnifiedSchedule() {
 async function runFarmTick(auto) {
     if (farmTaskRunning) return;
     farmTaskRunning = true;
+    const startedAt = Date.now();
     const farmMs = randomIntervalMs(
         CONFIG.farmCheckIntervalMin || CONFIG.farmCheckInterval || 2000,
         CONFIG.farmCheckIntervalMax || CONFIG.farmCheckInterval || 2000
@@ -303,14 +304,33 @@ async function runFarmTick(auto) {
     } catch (e) {
         log('系统', `农场调度执行失败: ${e.message}`, { module: 'system', event: 'farm_tick', result: 'error' });
     } finally {
-        nextFarmRunAt = Date.now() + farmMs;
+        nextFarmRunAt = computeNextRunAt(startedAt, farmMs);
         farmTaskRunning = false;
+    }
+}
+
+async function runFriendTick(auto) {
+    if (friendTaskRunning) return;
+    friendTaskRunning = true;
+    const startedAt = Date.now();
+    const friendMs = randomIntervalMs(
+        CONFIG.friendCheckIntervalMin || CONFIG.friendCheckInterval || 10000,
+        CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
+    );
+    try {
+        if (auto.friend_auto_accept) await checkAndAcceptApplications();
+    } catch (e) {
+        log('系统', `好友申请调度执行失败: ${e.message}`, { module: 'system', event: 'friend_applications_tick', result: 'error' });
+    } finally {
+        nextFriendRunAt = computeNextRunAt(startedAt, friendMs);
+        friendTaskRunning = false;
     }
 }
 
 async function runHelpTick(auto) {
     if (helpTaskRunning) return;
     helpTaskRunning = true;
+    const startedAt = Date.now();
     const helpMs = randomIntervalMs(
         CONFIG.helpCheckIntervalMin || CONFIG.friendCheckIntervalMin || CONFIG.friendCheckInterval || 10000,
         CONFIG.helpCheckIntervalMax || CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
@@ -320,7 +340,7 @@ async function runHelpTick(auto) {
     } catch (e) {
         log('系统', `帮忙调度执行失败: ${e.message}`, { module: 'system', event: 'help_tick', result: 'error' });
     } finally {
-        nextHelpRunAt = Date.now() + helpMs;
+        nextHelpRunAt = computeNextRunAt(startedAt, helpMs);
         helpTaskRunning = false;
     }
 }
@@ -328,6 +348,7 @@ async function runHelpTick(auto) {
 async function runStealTick(auto) {
     if (stealTaskRunning) return;
     stealTaskRunning = true;
+    const startedAt = Date.now();
     const stealMs = randomIntervalMs(
         CONFIG.stealCheckIntervalMin || CONFIG.friendCheckIntervalMin || CONFIG.friendCheckInterval || 10000,
         CONFIG.stealCheckIntervalMax || CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
@@ -337,7 +358,7 @@ async function runStealTick(auto) {
     } catch (e) {
         log('系统', `偷菜调度执行失败: ${e.message}`, { module: 'system', event: 'steal_tick', result: 'error' });
     } finally {
-        nextStealRunAt = Date.now() + stealMs;
+        nextStealRunAt = computeNextRunAt(startedAt, stealMs);
         stealTaskRunning = false;
     }
 }
@@ -346,12 +367,14 @@ async function runUnifiedTick() {
     if (!unifiedSchedulerRunning || !loginReady) return;
     const now = Date.now();
     const dueFarm = now >= nextFarmRunAt;
+    const dueFriend = now >= nextFriendRunAt;
     const dueHelp = now >= nextHelpRunAt;
     const dueSteal = now >= nextStealRunAt;
-    if (!dueFarm && !dueHelp && !dueSteal) return;
+    if (!dueFarm && !dueFriend && !dueHelp && !dueSteal) return;
 
     const auto = getAutomation();
     if (dueFarm) await runFarmTick(auto);
+    if (dueFriend) await runFriendTick(auto);
     if (dueHelp) await runHelpTick(auto);
     if (dueSteal) await runStealTick(auto);
 }
@@ -364,6 +387,7 @@ function scheduleUnifiedNextTick() {
     const now = Date.now();
     const nextAt = Math.min(
         Number(nextFarmRunAt) || (now + 1000),
+        Number(nextFriendRunAt) || (now + 1000),
         Number(nextHelpRunAt) || (now + 1000),
         Number(nextStealRunAt) || (now + 1000)
     );
@@ -388,6 +412,7 @@ function startUnifiedScheduler() {
 function stopUnifiedScheduler() {
     unifiedSchedulerRunning = false;
     farmTaskRunning = false;
+    friendTaskRunning = false;
     helpTaskRunning = false;
     stealTaskRunning = false;
     getWorkerScheduler().clear('unified_next_tick');
@@ -560,11 +585,19 @@ async function startBot(config) {
         networkEvents.on('friends_updated', (friendsData) => {
             try {
                 const state = getUserState();
+                const resolveFriendIdentifier = (friend) => {
+                    const openId = String(friend && friend.open_id || '').trim();
+                    if (openId) return openId;
+                    const uin = String(friend && friend.uin || '').trim();
+                    if (uin) return uin;
+                    const gid = toNum(friend && friend.gid);
+                    return gid > 0 ? String(gid) : '';
+                };
                 const list = (friendsData || [])
                     .filter(f => toNum(f.gid) !== state.gid && f.name !== '小小农夫' && f.remark !== '小小农夫')
                     .map(f => ({
                         gid: toNum(f.gid),
-                        uin: String(f.uin || ''),
+                        uin: resolveFriendIdentifier(f),
                         name: f.remark || f.name || `GID:${toNum(f.gid)}`,
                         avatarUrl: String(f.avatar_url || '').trim(),
                     }));
@@ -599,14 +632,34 @@ async function startBot(config) {
         // 冷启动预热：优先使用最近一次缓存的好友快照，缩短 requiresGameFriend 的未知窗口
         try {
             if (CONFIG.accountId && !getRuntimeFriendsSnapshot(CONFIG.accountId)) {
-                const cachedFriends = await getCachedFriends(CONFIG.accountId);
+                let cachedFriends = await getCachedFriends(CONFIG.accountId);
+                let reusedSourceAccountId = '';
+                if ((!Array.isArray(cachedFriends) || cachedFriends.length === 0) && latest.gid > 0) {
+                    const reusableCache = await findReusableFriendsCache(CONFIG.accountId, {
+                        selfGid: latest.gid,
+                        selfName: latest.name,
+                        selfUin: CONFIG.uin,
+                        selfQq: CONFIG.uin,
+                        platform: CONFIG.platform,
+                    });
+                    if (reusableCache && Array.isArray(reusableCache.friends) && reusableCache.friends.length > 0) {
+                        cachedFriends = reusableCache.friends;
+                        reusedSourceAccountId = String(reusableCache.sourceAccountId || '').trim();
+                        await mergeFriendsCache(CONFIG.accountId, cachedFriends);
+                    }
+                }
                 if (Array.isArray(cachedFriends) && cachedFriends.length > 0) {
                     updateRuntimeFriendsSnapshot(cachedFriends, CONFIG.accountId);
-                    log('好友', `已预热好友缓存快照 ${cachedFriends.length} 人`, {
+                    const reused = !!reusedSourceAccountId;
+                    log('好友', reused
+                        ? `已复用历史好友缓存快照 ${cachedFriends.length} 人 (来源账号 ${reusedSourceAccountId})`
+                        : `已预热好友缓存快照 ${cachedFriends.length} 人`, {
                         module: 'friend',
                         event: 'friend_cache_preheat',
                         result: 'ok',
                         count: cachedFriends.length,
+                        reused,
+                        sourceAccountId: reusedSourceAccountId || undefined,
                     });
                 }
             }
@@ -863,11 +916,13 @@ function syncStatus() {
     const limits = require('../services/friend').getOperationLimits();
     const fullStats = require('../services/stats').getStats(statusData, userState, connected, limits);
     const nowMs = Date.now();
+    const friendAutoAcceptRemainSec = Math.max(0, Math.ceil((Number(nextFriendRunAt || 0) - nowMs) / 1000));
     const helpRemainSec = Math.max(0, Math.ceil((Number(nextHelpRunAt || 0) - nowMs) / 1000));
     const stealRemainSec = Math.max(0, Math.ceil((Number(nextStealRunAt || 0) - nowMs) / 1000));
     fullStats.nextChecks = {
         farmRemainSec: Math.max(0, Math.ceil((Number(nextFarmRunAt || 0) - nowMs) / 1000)),
-        friendRemainSec: Math.min(helpRemainSec || 0, stealRemainSec || 0),
+        friendRemainSec: Math.min(friendAutoAcceptRemainSec, helpRemainSec, stealRemainSec),
+        friendAutoAcceptRemainSec,
         helpRemainSec,
         stealRemainSec,
     };

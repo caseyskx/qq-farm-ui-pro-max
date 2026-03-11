@@ -179,18 +179,18 @@ function resolveModeMeta(mode?: string) {
   if (mode === 'alt') {
     return {
       label: '小号',
-      badge: 'ui-meta-chip ui-meta-chip--warning',
+      badgeTone: 'warning' as const,
     }
   }
   if (mode === 'safe') {
     return {
       label: '避险',
-      badge: 'ui-meta-chip ui-meta-chip--success',
+      badgeTone: 'success' as const,
     }
   }
   return {
     label: '主号',
-    badge: 'ui-meta-chip ui-meta-chip--brand',
+    badgeTone: 'brand' as const,
   }
 }
 
@@ -208,12 +208,12 @@ function resolveEffectiveMode(mode?: string) {
 
 function resolveAccountState(account: AccountItem) {
   if (account.connected) {
-    return { key: 'online', label: '在线', badge: 'ui-meta-chip ui-meta-chip--success' }
+    return { key: 'online', label: '在线', badgeTone: 'success' as const }
   }
   if (account.running) {
-    return { key: 'starting', label: '启动中', badge: 'ui-meta-chip ui-meta-chip--warning' }
+    return { key: 'starting', label: '启动中', badgeTone: 'warning' as const }
   }
-  return { key: 'offline', label: '已停止', badge: 'ui-meta-chip ui-meta-chip--neutral' }
+  return { key: 'offline', label: '已停止', badgeTone: 'neutral' as const }
 }
 
 function resolveDegradeReasonLabel(reason?: string) {
@@ -238,7 +238,7 @@ function resolveModeExecutionMeta(account: AccountItem) {
   if (effectiveMode !== configuredMode) {
     return {
       label: `生效:${resolveModeMeta(effectiveMode).label}`,
-      badge: 'ui-meta-chip ui-meta-chip--info',
+      badgeTone: 'info' as const,
       note: degradeLabel || '当前已按更保守模式执行',
       noteClass: 'ownership-note-info',
     }
@@ -247,7 +247,7 @@ function resolveModeExecutionMeta(account: AccountItem) {
   if (account.collaborationEnabled) {
     return {
       label: '协同命中',
-      badge: 'ui-meta-chip ui-meta-chip--info',
+      badgeTone: 'info' as const,
       note: '同区 / 游戏好友约束已命中',
       noteClass: 'ownership-note-info',
     }
@@ -256,7 +256,7 @@ function resolveModeExecutionMeta(account: AccountItem) {
   if (degradeLabel) {
     return {
       label: '独立执行',
-      badge: 'ui-meta-chip ui-meta-chip--neutral',
+      badgeTone: 'neutral' as const,
       note: degradeLabel,
       noteClass: 'ownership-note-muted',
     }
@@ -297,14 +297,14 @@ function resolveOwnerMeta(account: AccountItem) {
   if (!owner) {
     return {
       label: '未归属 / 系统账号',
-      badge: 'ui-meta-chip ui-meta-chip--neutral',
+      badgeTone: 'neutral' as const,
       section: 'unowned',
     }
   }
   if (owner === currentUsername.value) {
     return {
       label: '我自己登录的账号',
-      badge: 'ui-meta-chip ui-meta-chip--brand',
+      badgeTone: 'brand' as const,
       section: 'mine',
     }
   }
@@ -312,13 +312,13 @@ function resolveOwnerMeta(account: AccountItem) {
   if (role === 'admin') {
     return {
       label: `其他管理员: ${owner}`,
-      badge: 'ui-meta-chip ui-meta-chip--owner',
+      badgeTone: 'owner' as const,
       section: 'other_admin',
     }
   }
   return {
     label: `普通用户: ${owner}`,
-    badge: 'ui-meta-chip ui-meta-chip--warning',
+    badgeTone: 'warning' as const,
     section: 'other_user',
   }
 }
@@ -554,7 +554,8 @@ const latestHistoryHighlight = computed(() => {
       createHistoryMetaItem({
         key: 'latest-status',
         text: resolveActionHistoryMeta(latest.status).label,
-        class: resolveActionHistoryMeta(latest.status).badge,
+        surface: 'meta',
+        tone: resolveActionHistoryMeta(latest.status).badgeTone,
       }),
       createHistoryMetaItem({
         key: 'latest-time',
@@ -607,7 +608,8 @@ const recentHistoryCards = computed(() => createHistoryRecentItems(
     badges: [
       {
         text: resolveActionHistoryMeta(item.status).label,
-        class: resolveActionHistoryMeta(item.status).badge,
+        surface: 'meta',
+        tone: resolveActionHistoryMeta(item.status).badgeTone,
       },
     ],
     detailLines: item.detailLines || [],
@@ -971,18 +973,18 @@ function resolveActionHistoryMeta(status: ActionHistoryStatus) {
   if (status === 'success') {
     return {
       label: '执行成功',
-      badge: 'ui-meta-chip ui-meta-chip--success',
+      badgeTone: 'success' as const,
     }
   }
   if (status === 'warning') {
     return {
       label: '部分失败',
-      badge: 'ui-meta-chip ui-meta-chip--warning',
+      badgeTone: 'warning' as const,
     }
   }
   return {
     label: '执行失败',
-    badge: 'ui-meta-chip ui-meta-chip--danger',
+    badgeTone: 'danger' as const,
   }
 }
 
@@ -1699,10 +1701,10 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <div class="ui-mobile-record-badges">
-                  <BaseBadge :class="resolveOwnerMeta(account).badge">
+                  <BaseBadge surface="meta" :tone="resolveOwnerMeta(account).badgeTone">
                     {{ resolveOwnerMeta(account).label }}
                   </BaseBadge>
-                  <BaseBadge :class="resolveAccountState(account).badge">
+                  <BaseBadge surface="meta" :tone="resolveAccountState(account).badgeTone">
                     {{ resolveAccountState(account).label }}
                   </BaseBadge>
                 </div>
@@ -1710,10 +1712,10 @@ onBeforeUnmount(() => {
 
               <div class="ui-mobile-record-body">
                 <div class="ui-mobile-record-badges">
-                  <BaseBadge :class="resolveModeMeta(resolveAccountMode(account.accountMode)).badge">
+                  <BaseBadge surface="meta" :tone="resolveModeMeta(resolveAccountMode(account.accountMode)).badgeTone">
                     配置:{{ resolveModeMeta(resolveAccountMode(account.accountMode)).label }}
                   </BaseBadge>
-                  <BaseBadge v-if="resolveModeExecutionMeta(account)" :class="resolveModeExecutionMeta(account)?.badge">
+                  <BaseBadge v-if="resolveModeExecutionMeta(account)" surface="meta" :tone="resolveModeExecutionMeta(account)?.badgeTone">
                     {{ resolveModeExecutionMeta(account)?.label }}
                   </BaseBadge>
                 </div>
@@ -1842,7 +1844,7 @@ onBeforeUnmount(() => {
                 </div>
               </td>
               <td class="px-4 py-4 align-top">
-                <BaseBadge :class="resolveOwnerMeta(account).badge">
+                <BaseBadge surface="meta" :tone="resolveOwnerMeta(account).badgeTone">
                   {{ resolveOwnerMeta(account).label }}
                 </BaseBadge>
               </td>
@@ -1856,11 +1858,11 @@ onBeforeUnmount(() => {
               </td>
               <td class="px-4 py-4 align-top">
                 <div class="space-y-2">
-                  <BaseBadge :class="resolveModeMeta(resolveAccountMode(account.accountMode)).badge">
+                  <BaseBadge surface="meta" :tone="resolveModeMeta(resolveAccountMode(account.accountMode)).badgeTone">
                     配置:{{ resolveModeMeta(resolveAccountMode(account.accountMode)).label }}
                   </BaseBadge>
                   <div v-if="resolveModeExecutionMeta(account)" class="flex flex-wrap items-center gap-2">
-                    <BaseBadge :class="resolveModeExecutionMeta(account)?.badge">
+                    <BaseBadge surface="meta" :tone="resolveModeExecutionMeta(account)?.badgeTone">
                       {{ resolveModeExecutionMeta(account)?.label }}
                     </BaseBadge>
                   </div>
@@ -1874,7 +1876,7 @@ onBeforeUnmount(() => {
                 </div>
               </td>
               <td class="px-4 py-4 align-top">
-                <BaseBadge :class="resolveAccountState(account).badge">
+                <BaseBadge surface="meta" :tone="resolveAccountState(account).badgeTone">
                   {{ resolveAccountState(account).label }}
                 </BaseBadge>
               </td>

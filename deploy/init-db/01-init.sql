@@ -316,6 +316,42 @@ CREATE TABLE IF NOT EXISTS `system_settings` (
     PRIMARY KEY (`setting_key`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `update_jobs` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `job_key` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+    `kind` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'app_update',
+    `scope` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'app',
+    `strategy` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'rolling',
+    `status` VARCHAR(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+    `source_version` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `target_version` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `batch_key` VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `preserve_current` TINYINT(1) NOT NULL DEFAULT 0,
+    `require_drain` TINYINT(1) NOT NULL DEFAULT 0,
+    `drain_node_ids` JSON DEFAULT NULL,
+    `note` VARCHAR(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `created_by` VARCHAR(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `target_agent_id` VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `claim_agent_id` VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `progress_percent` INT NOT NULL DEFAULT 0,
+    `summary_message` VARCHAR(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `payload_json` JSON DEFAULT NULL,
+    `result_json` JSON DEFAULT NULL,
+    `error_message` VARCHAR(500) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+    `claimed_at` DATETIME DEFAULT NULL,
+    `started_at` DATETIME DEFAULT NULL,
+    `finished_at` DATETIME DEFAULT NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_update_jobs_job_key` (`job_key`),
+    KEY `idx_update_jobs_status_created` (`status`, `created_at`),
+    KEY `idx_update_jobs_kind_status` (`kind`, `status`),
+    KEY `idx_update_jobs_scope_status` (`scope`, `status`),
+    KEY `idx_update_jobs_batch_key` (`batch_key`),
+    KEY `idx_update_jobs_target_status` (`target_agent_id`, `status`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `report_logs` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `account_id` VARCHAR(50) NOT NULL COMMENT '账号ID',

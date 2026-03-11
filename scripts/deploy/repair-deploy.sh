@@ -4,7 +4,9 @@ set -Eeuo pipefail
 
 DEPLOY_DIR="${DEPLOY_DIR:-$(pwd)}"
 DEPLOY_BASE_DIR="${DEPLOY_BASE_DIR:-/opt}"
-CURRENT_LINK="${CURRENT_LINK:-${DEPLOY_BASE_DIR}/qq-farm-bot-current}"
+STACK_NAME="${STACK_NAME:-qq-farm}"
+CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
+CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
 REPO_SLUG="${REPO_SLUG:-smdk000/qq-farm-ui-pro-max}"
 REPO_REF="${REPO_REF:-main}"
 RAW_BASE_URL="${RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}}"
@@ -19,11 +21,40 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STACK_LAYOUT_PATH="${SCRIPT_DIR}/stack-layout.sh"
+if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+    BOOTSTRAP_DIR="${TMPDIR:-/tmp}/qq-farm-deploy-bootstrap/${REPO_SLUG//\//_}/${REPO_REF}"
+    mkdir -p "${BOOTSTRAP_DIR}"
+    STACK_LAYOUT_PATH="${BOOTSTRAP_DIR}/stack-layout.sh"
+    if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+        command -v curl >/dev/null 2>&1 || {
+            echo "[ERROR] 缺少 stack-layout.sh 且系统未安装 curl，无法继续执行。" >&2
+            exit 1
+        }
+        curl -fsSL "${RAW_BASE_URL}/scripts/deploy/stack-layout.sh" -o "${STACK_LAYOUT_PATH}"
+    fi
+fi
+# shellcheck source=stack-layout.sh
+. "${STACK_LAYOUT_PATH}"
+CURRENT_LINK_EXPLICIT=0
+STACK_DIR_NAME=""
+
+if [ -n "${CURRENT_LINK_INPUT}" ]; then
+    CURRENT_LINK_EXPLICIT=1
+fi
 
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+refresh_stack_layout() {
+    STACK_NAME="$(normalize_stack_name "${STACK_NAME:-qq-farm}")"
+    STACK_DIR_NAME="$(stack_dir_name "${STACK_NAME}")"
+    if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
+        CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
+    fi
+}
 
 trap 'print_error "部署包修复失败，请检查上方日志。"' ERR
 
@@ -32,6 +63,10 @@ parse_args() {
         case "$1" in
             --deploy-dir)
                 DEPLOY_DIR="${2:-}"
+                shift 2
+                ;;
+            --stack-name)
+                STACK_NAME="${2:-}"
                 shift 2
                 ;;
             --backup)
@@ -52,6 +87,8 @@ parse_args() {
                 ;;
         esac
     done
+
+    refresh_stack_layout
 }
 
 copy_file_if_needed() {
@@ -84,7 +121,7 @@ resolve_deploy_dir() {
     fi
 
     local latest=""
-    latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name qq-farm-bot 2>/dev/null | sort | tail -n 1)"
+    latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name "${STACK_DIR_NAME:-$(stack_dir_name "${STACK_NAME}")}" 2>/dev/null | sort | tail -n 1)"
     if [ -n "${latest}" ]; then
         DEPLOY_DIR="${latest}"
         return 0
@@ -103,10 +140,16 @@ backup_bundle() {
         .env.example \
         README.md \
         update-app.sh \
+        update-agent.sh \
+        install-update-agent-service.sh \
+        install-or-update.sh \
+        manual-config-wizard.sh \
         repair-mysql.sh \
         repair-deploy.sh \
+        stack-layout.sh \
         fresh-install.sh \
         quick-deploy.sh \
+        verify-stack.sh \
         init-db/01-init.sql; do
         if [ -e "${DEPLOY_DIR}/${path}" ]; then
             files+=("${path}")
@@ -140,6 +183,12 @@ sync_bundle() {
     local bundle_repair_deploy=""
     local bundle_fresh=""
     local bundle_quick=""
+    local bundle_install_or_update=""
+    local bundle_update_agent=""
+    local bundle_install_update_agent=""
+    local bundle_manual_config_wizard=""
+    local bundle_stack_layout=""
+    local bundle_verify_stack=""
 
     mkdir -p "${init_dir}"
 
@@ -156,6 +205,12 @@ sync_bundle() {
         bundle_repair_deploy="${SCRIPT_DIR}/repair-deploy.sh"
         bundle_fresh="${SCRIPT_DIR}/fresh-install.sh"
         bundle_quick="${SCRIPT_DIR}/quick-deploy.sh"
+        bundle_install_or_update="${SCRIPT_DIR}/install-or-update.sh"
+        bundle_update_agent="${SCRIPT_DIR}/update-agent.sh"
+        bundle_install_update_agent="${SCRIPT_DIR}/install-update-agent-service.sh"
+        bundle_manual_config_wizard="${SCRIPT_DIR}/manual-config-wizard.sh"
+        bundle_stack_layout="${SCRIPT_DIR}/stack-layout.sh"
+        bundle_verify_stack="${SCRIPT_DIR}/verify-stack.sh"
     elif [ -f "${SCRIPT_DIR}/docker-compose.yml" ] \
         && [ -f "${SCRIPT_DIR}/.env.example" ] \
         && [ -f "${SCRIPT_DIR}/init-db/01-init.sql" ]; then
@@ -168,6 +223,12 @@ sync_bundle() {
         bundle_repair_deploy="${bundle_dir}/repair-deploy.sh"
         bundle_fresh="${bundle_dir}/fresh-install.sh"
         bundle_quick="${bundle_dir}/quick-deploy.sh"
+        bundle_install_or_update="${bundle_dir}/install-or-update.sh"
+        bundle_update_agent="${bundle_dir}/update-agent.sh"
+        bundle_install_update_agent="${bundle_dir}/install-update-agent-service.sh"
+        bundle_manual_config_wizard="${bundle_dir}/manual-config-wizard.sh"
+        bundle_stack_layout="${bundle_dir}/stack-layout.sh"
+        bundle_verify_stack="${bundle_dir}/verify-stack.sh"
     fi
 
     if [ -n "${bundle_dir}" ]; then
@@ -185,6 +246,36 @@ sync_bundle() {
         copy_file_if_needed "${bundle_repair_deploy}" "${DEPLOY_DIR}/repair-deploy.sh"
         copy_file_if_needed "${bundle_fresh}" "${DEPLOY_DIR}/fresh-install.sh"
         copy_file_if_needed "${bundle_quick}" "${DEPLOY_DIR}/quick-deploy.sh"
+        if [ -n "${bundle_install_or_update}" ] && [ -f "${bundle_install_or_update}" ]; then
+            copy_file_if_needed "${bundle_install_or_update}" "${DEPLOY_DIR}/install-or-update.sh"
+        else
+            download_file "scripts/deploy/install-or-update.sh" "${DEPLOY_DIR}/install-or-update.sh"
+        fi
+        if [ -n "${bundle_update_agent}" ] && [ -f "${bundle_update_agent}" ]; then
+            copy_file_if_needed "${bundle_update_agent}" "${DEPLOY_DIR}/update-agent.sh"
+        else
+            download_file "scripts/deploy/update-agent.sh" "${DEPLOY_DIR}/update-agent.sh"
+        fi
+        if [ -n "${bundle_install_update_agent}" ] && [ -f "${bundle_install_update_agent}" ]; then
+            copy_file_if_needed "${bundle_install_update_agent}" "${DEPLOY_DIR}/install-update-agent-service.sh"
+        else
+            download_file "scripts/deploy/install-update-agent-service.sh" "${DEPLOY_DIR}/install-update-agent-service.sh"
+        fi
+        if [ -n "${bundle_manual_config_wizard}" ] && [ -f "${bundle_manual_config_wizard}" ]; then
+            copy_file_if_needed "${bundle_manual_config_wizard}" "${DEPLOY_DIR}/manual-config-wizard.sh"
+        else
+            download_file "scripts/deploy/manual-config-wizard.sh" "${DEPLOY_DIR}/manual-config-wizard.sh"
+        fi
+        if [ -n "${bundle_stack_layout}" ] && [ -f "${bundle_stack_layout}" ]; then
+            copy_file_if_needed "${bundle_stack_layout}" "${DEPLOY_DIR}/stack-layout.sh"
+        else
+            download_file "scripts/deploy/stack-layout.sh" "${DEPLOY_DIR}/stack-layout.sh"
+        fi
+        if [ -n "${bundle_verify_stack}" ] && [ -f "${bundle_verify_stack}" ]; then
+            copy_file_if_needed "${bundle_verify_stack}" "${DEPLOY_DIR}/verify-stack.sh"
+        else
+            download_file "scripts/deploy/verify-stack.sh" "${DEPLOY_DIR}/verify-stack.sh"
+        fi
     else
         if [ "${PRESERVE_COMPOSE_LAYOUT}" != "1" ]; then
             download_file "deploy/docker-compose.yml" "${DEPLOY_DIR}/docker-compose.yml"
@@ -200,6 +291,12 @@ sync_bundle() {
         download_file "scripts/deploy/repair-deploy.sh" "${DEPLOY_DIR}/repair-deploy.sh"
         download_file "scripts/deploy/fresh-install.sh" "${DEPLOY_DIR}/fresh-install.sh"
         download_file "scripts/deploy/quick-deploy.sh" "${DEPLOY_DIR}/quick-deploy.sh"
+        download_file "scripts/deploy/install-or-update.sh" "${DEPLOY_DIR}/install-or-update.sh"
+        download_file "scripts/deploy/update-agent.sh" "${DEPLOY_DIR}/update-agent.sh"
+        download_file "scripts/deploy/install-update-agent-service.sh" "${DEPLOY_DIR}/install-update-agent-service.sh"
+        download_file "scripts/deploy/manual-config-wizard.sh" "${DEPLOY_DIR}/manual-config-wizard.sh"
+        download_file "scripts/deploy/stack-layout.sh" "${DEPLOY_DIR}/stack-layout.sh"
+        download_file "scripts/deploy/verify-stack.sh" "${DEPLOY_DIR}/verify-stack.sh"
     fi
 
     if [ ! -f "${DEPLOY_DIR}/.env" ] && [ -f "${DEPLOY_DIR}/.env.example" ]; then
@@ -209,16 +306,22 @@ sync_bundle() {
 
     chmod +x \
         "${DEPLOY_DIR}/update-app.sh" \
+        "${DEPLOY_DIR}/update-agent.sh" \
+        "${DEPLOY_DIR}/install-update-agent-service.sh" \
+        "${DEPLOY_DIR}/install-or-update.sh" \
+        "${DEPLOY_DIR}/manual-config-wizard.sh" \
+        "${DEPLOY_DIR}/stack-layout.sh" \
         "${DEPLOY_DIR}/repair-mysql.sh" \
         "${DEPLOY_DIR}/repair-deploy.sh" \
         "${DEPLOY_DIR}/fresh-install.sh" \
-        "${DEPLOY_DIR}/quick-deploy.sh"
+        "${DEPLOY_DIR}/quick-deploy.sh" \
+        "${DEPLOY_DIR}/verify-stack.sh"
 }
 
 run_db_repair_if_requested() {
     if [ "${RUN_DB_REPAIR}" = "1" ]; then
         print_info "执行数据库修复脚本..."
-        "${DEPLOY_DIR}/repair-mysql.sh" --deploy-dir "${DEPLOY_DIR}"
+        bash "${DEPLOY_DIR}/repair-mysql.sh" --deploy-dir "${DEPLOY_DIR}"
     fi
 }
 
@@ -241,6 +344,11 @@ main() {
     echo "部署目录: ${DEPLOY_DIR}"
     echo "当前版本链接: ${CURRENT_LINK}"
     echo "主程序更新命令: ${DEPLOY_DIR}/update-app.sh"
+    echo "统一安装/更新入口: ${DEPLOY_DIR}/install-or-update.sh"
+    echo "手动修复向导: ${DEPLOY_DIR}/manual-config-wizard.sh"
+    echo "安装后核验脚本: ${DEPLOY_DIR}/verify-stack.sh"
+    echo "后台更新代理: ${DEPLOY_DIR}/update-agent.sh --once"
+    echo "安装代理常驻服务: ${DEPLOY_DIR}/install-update-agent-service.sh"
     echo "数据库修复命令: ${DEPLOY_DIR}/repair-mysql.sh --backup"
     echo ""
 }

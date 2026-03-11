@@ -5,6 +5,7 @@ const { createModuleLogger } = require('./logger');
 const { initJwtSecretPersistence } = require('./jwt-service');
 
 const logger = createModuleLogger('database');
+const EMPTY_ACCOUNT_UIN_DB_PREFIX = '__ACCOUNT_ID__:';
 
 let initPromise = null;
 let logFlushHandle = null;
@@ -157,23 +158,180 @@ function bufferedInsertLog(accountId, action, result, details) {
     }
 }
 
+function normalizeFriendCacheEntry(friend) {
+    const gid = Number(friend && friend.gid);
+    if (!Number.isFinite(gid) || gid <= 0) return null;
+    return {
+        gid,
+        uin: String((friend && (friend.uin || friend.open_id)) || '').trim(),
+        name: String((friend && (friend.name || friend.remark)) || '').trim(),
+        avatarUrl: String((friend && (friend.avatarUrl || friend.avatar_url)) || '').trim(),
+    };
+}
+
+function isGenericFriendName(name, gid) {
+    const text = String(name || '').trim();
+    return !text || text === `GID:${gid}`;
+}
+
+function mergeFriendCacheEntries(currentList = [], incomingList = []) {
+    const merged = new Map();
+
+    for (const item of currentList) {
+        const normalized = normalizeFriendCacheEntry(item);
+        if (!normalized) continue;
+        merged.set(normalized.gid, {
+            gid: normalized.gid,
+            uin: normalized.uin,
+            name: normalized.name || `GID:${normalized.gid}`,
+            avatarUrl: normalized.avatarUrl,
+        });
+    }
+
+    for (const item of incomingList) {
+        const normalized = normalizeFriendCacheEntry(item);
+        if (!normalized) continue;
+        const prev = merged.get(normalized.gid) || {
+            gid: normalized.gid,
+            uin: '',
+            name: `GID:${normalized.gid}`,
+            avatarUrl: '',
+        };
+
+        const nextName = !isGenericFriendName(normalized.name, normalized.gid)
+            ? normalized.name
+            : (!isGenericFriendName(prev.name, normalized.gid) ? prev.name : `GID:${normalized.gid}`);
+
+        merged.set(normalized.gid, {
+            gid: normalized.gid,
+            uin: normalized.uin || prev.uin,
+            name: nextName,
+            avatarUrl: normalized.avatarUrl || prev.avatarUrl,
+        });
+    }
+
+    return Array.from(merged.values())
+        .sort((a, b) => Number(a.gid || 0) - Number(b.gid || 0));
+}
+
+function extractAccountIdFromFriendsCacheKey(key) {
+    const match = String(key || '').match(/^account:(.+):friends_cache$/);
+    return match ? String(match[1] || '').trim() : '';
+}
+
+function decodePlaceholderAccountUin(value) {
+    const normalized = String(value || '').trim();
+    if (!normalized.startsWith(EMPTY_ACCOUNT_UIN_DB_PREFIX)) {
+        return normalized;
+    }
+    return '';
+}
+
+function parseJsonObject(raw) {
+    if (!raw || typeof raw !== 'string') return {};
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+async function findRelatedAccountIdsForFriendsCache(accountId, options = {}) {
+    const normalizedAccountId = String(accountId || '').trim();
+    const platform = String(options.platform || '').trim();
+    const selfName = String(options.selfName || '').trim();
+    const identityRefs = new Set(
+        [options.selfUin, options.selfQq]
+            .map(value => String(value || '').trim())
+            .filter(Boolean)
+    );
+
+    if (!normalizedAccountId || !platform || (!selfName && identityRefs.size === 0)) {
+        return [];
+    }
+
+    try {
+        const pool = getPool();
+        if (!pool || typeof pool.query !== 'function') return [];
+
+        const [rows] = await pool.query(
+            'SELECT id, uin, nick, name, platform, auth_data, last_login_at, updated_at FROM accounts WHERE id <> ? AND platform = ?',
+            [normalizedAccountId, platform]
+        );
+
+        return (Array.isArray(rows) ? rows : [])
+            .map((row) => {
+                const authData = parseJsonObject(row && row.auth_data);
+                return {
+                    accountId: String(row && row.id || '').trim(),
+                    uin: decodePlaceholderAccountUin(row && row.uin),
+                    qq: String(authData.qq || '').trim(),
+                    authUin: String(authData.uin || '').trim(),
+                    name: String(row && row.name || '').trim(),
+                    nick: String(row && row.nick || '').trim(),
+                    lastLoginAt: row && row.last_login_at ? new Date(row.last_login_at).getTime() : 0,
+                    updatedAt: row && row.updated_at ? new Date(row.updated_at).getTime() : 0,
+                };
+            })
+            .filter((row) => {
+                if (!row.accountId) return false;
+                if (identityRefs.size > 0) {
+                    if (identityRefs.has(row.uin) || identityRefs.has(row.qq) || identityRefs.has(row.authUin)) {
+                        return true;
+                    }
+                }
+                if (!selfName) return false;
+                return row.name === selfName || row.nick === selfName;
+            })
+            .sort((a, b) => (b.lastLoginAt - a.lastLoginAt) || (b.updatedAt - a.updatedAt))
+            .map(row => row.accountId);
+    } catch (e) {
+        logger.error(`find related account ids for friends cache failed: ${e.message}`);
+        return [];
+    }
+}
+
+function scoreReusableFriendsCache(friendsList = [], options = {}) {
+    const selfGid = Number(options.selfGid) || 0;
+    const selfName = String(options.selfName || '').trim();
+
+    if (selfGid > 0) {
+        return friendsList.some(item => Number(item && item.gid) === selfGid) ? 100 : 0;
+    }
+    if (selfName) {
+        return friendsList.some(item => String(item && item.name || '').trim() === selfName) ? 10 : 0;
+    }
+    return 0;
+}
+
+async function writeFriendsCache(accountId, friendsList) {
+    const redis = getRedisClient();
+    if (!redis) return;
+    const mapped = mergeFriendCacheEntries([], friendsList);
+    if (!mapped.length) return;
+    await redis.set(`account:${accountId}:friends_cache`, JSON.stringify(mapped), 'EX', 86400 * 3);
+}
+
 async function updateFriendsCache(accountId, friendsList) {
     try {
-        const redis = getRedisClient();
-        if (!redis) return;
-        const valid = (friendsList || []).filter(f => f && f.gid);
-        if (!valid.length) return;
-
-        const mapped = valid.map(f => ({
-            gid: Number(f.gid),
-            uin: String(f.uin || ''),
-            name: String(f.name || f.remark || ''),
-            avatarUrl: String(f.avatarUrl || f.avatar_url || '')
-        }));
-
-        await redis.set(`account:${accountId}:friends_cache`, JSON.stringify(mapped), 'EX', 86400 * 3); // 3 days Cache
+        await writeFriendsCache(accountId, friendsList); // 3 days Cache
     } catch (e) {
         logger.error(`save friends cache failed: ${e.message}`);
+    }
+}
+
+async function mergeFriendsCache(accountId, friendsList) {
+    try {
+        const normalizedAccountId = String(accountId || '').trim();
+        if (!normalizedAccountId) return;
+        const incoming = mergeFriendCacheEntries([], friendsList);
+        if (!incoming.length) return;
+        const current = await getCachedFriends(normalizedAccountId);
+        const merged = mergeFriendCacheEntries(current, incoming);
+        await writeFriendsCache(normalizedAccountId, merged);
+    } catch (e) {
+        logger.error(`merge friends cache failed: ${e.message}`);
     }
 }
 
@@ -194,6 +352,147 @@ async function getCachedFriends(accountId) {
         circuitBreaker.recordFailure();
         logger.error(`get friends cache failed: ${e.message}`);
         return [];
+    }
+}
+
+async function findReusableFriendsCache(accountId, options = {}) {
+    if (!circuitBreaker.isAvailable()) {
+        logger.warn(`Redis 熔断中，跳过共享好友缓存查询 (account: ${accountId})`);
+        return null;
+    }
+
+    const normalizedAccountId = String(accountId || '').trim();
+    const selfGid = Number(options.selfGid) || 0;
+    const selfName = String(options.selfName || '').trim();
+    const relatedAccountIds = await findRelatedAccountIdsForFriendsCache(normalizedAccountId, {
+        platform: options.platform,
+        selfName,
+        selfUin: options.selfUin,
+        selfQq: options.selfQq,
+    });
+    const relatedAccountIdSet = new Set(relatedAccountIds);
+    const relatedAccountScore = new Map(relatedAccountIds.map((id, index) => [id, Math.max(40, 80 - index)]));
+    if (!normalizedAccountId || (selfGid <= 0 && !selfName && relatedAccountIdSet.size === 0)) {
+        return null;
+    }
+
+    try {
+        const redis = getRedisClient();
+        if (!redis || typeof redis.keys !== 'function') return null;
+
+        const keys = await redis.keys('account:*:friends_cache');
+        let bestMatch = null;
+
+        for (const key of (Array.isArray(keys) ? keys : [])) {
+            const sourceAccountId = extractAccountIdFromFriendsCacheKey(key);
+            if (!sourceAccountId || sourceAccountId === normalizedAccountId) {
+                continue;
+            }
+
+            let parsed = [];
+            try {
+                parsed = JSON.parse((await redis.get(key)) || '[]');
+            } catch {
+                parsed = [];
+            }
+
+            const friends = mergeFriendCacheEntries([], parsed);
+            if (friends.length <= 1) continue;
+
+            const score = Math.max(
+                scoreReusableFriendsCache(friends, { selfGid, selfName }),
+                relatedAccountScore.get(sourceAccountId) || 0
+            );
+            if (score <= 0) continue;
+
+            const hasUsableOthers = friends.some(item => {
+                const gid = Number(item && item.gid) || 0;
+                return gid > 0 && gid !== selfGid;
+            });
+            if (!hasUsableOthers) continue;
+
+            if (!bestMatch || score > bestMatch.score || (score === bestMatch.score && friends.length > bestMatch.friends.length)) {
+                bestMatch = {
+                    score,
+                    sourceAccountId,
+                    friends,
+                };
+            }
+        }
+
+        circuitBreaker.recordSuccess();
+        if (!bestMatch) return null;
+        return {
+            sourceAccountId: bestMatch.sourceAccountId,
+            friends: bestMatch.friends,
+        };
+    } catch (e) {
+        circuitBreaker.recordFailure();
+        logger.error(`find reusable friends cache failed: ${e.message}`);
+        return null;
+    }
+}
+
+async function findFriendInSharedCaches(friendGid, options = {}) {
+    if (!circuitBreaker.isAvailable()) {
+        logger.warn(`Redis 熔断中，跳过共享好友昵称查询 (gid: ${friendGid})`);
+        return null;
+    }
+
+    const numericGid = Number(friendGid) || 0;
+    if (numericGid <= 0) {
+        return null;
+    }
+
+    try {
+        const redis = getRedisClient();
+        if (!redis || typeof redis.keys !== 'function') return null;
+
+        const preferredAccountId = String(options.accountId || '').trim();
+        const keys = await redis.keys('account:*:friends_cache');
+        const orderedKeys = (Array.isArray(keys) ? keys : []).sort((a, b) => {
+            const aId = extractAccountIdFromFriendsCacheKey(a);
+            const bId = extractAccountIdFromFriendsCacheKey(b);
+            if (preferredAccountId) {
+                if (aId === preferredAccountId && bId !== preferredAccountId) return -1;
+                if (bId === preferredAccountId && aId !== preferredAccountId) return 1;
+            }
+            return a.localeCompare(b);
+        });
+
+        let genericMatch = null;
+        for (const key of orderedKeys) {
+            const sourceAccountId = extractAccountIdFromFriendsCacheKey(key);
+            let parsed = [];
+            try {
+                parsed = JSON.parse((await redis.get(key)) || '[]');
+            } catch {
+                parsed = [];
+            }
+
+            const friends = mergeFriendCacheEntries([], parsed);
+            const matched = friends.find(item => Number(item && item.gid) === numericGid);
+            if (!matched) continue;
+
+            const candidate = {
+                sourceAccountId,
+                friend: matched,
+            };
+            if (!isGenericFriendName(matched.name, numericGid)) {
+                circuitBreaker.recordSuccess();
+                return candidate;
+            }
+            if (!genericMatch) {
+                genericMatch = candidate;
+            }
+        }
+
+        circuitBreaker.recordSuccess();
+        return genericMatch;
+    } catch (e) {
+        circuitBreaker.recordFailure();
+        logger.error(`find friend in shared caches failed: ${e.message}`);
+        return null;
     }
 }
 
@@ -539,7 +838,10 @@ module.exports = {
     transaction,
     bufferedInsertLog,
     updateFriendsCache,
+    mergeFriendsCache,
     getCachedFriends,
+    findReusableFriendsCache,
+    findFriendInSharedCaches,
     isRedisCacheAvailable,
     getAnnouncements,
     saveAnnouncement,

@@ -9,4 +9,4 @@ if [ "${ARCH}" != "aarch64" ] && [ "${ARCH}" != "arm64" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${SCRIPT_DIR}/fresh-install.sh" "$@"
+exec bash "${SCRIPT_DIR}/fresh-install.sh" "$@"

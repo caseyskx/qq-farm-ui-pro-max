@@ -7,6 +7,36 @@ function registerAccountStateRoutes({
     getLevelExpProgress,
     loadFriendsCacheApi,
 }) {
+    async function getCachedFriendsData(id) {
+        const { getCachedFriends } = loadFriendsCacheApi();
+        if (!getCachedFriends) return [];
+        const data = await getCachedFriends(id);
+        return Array.isArray(data) ? data : [];
+    }
+
+    function syncFriendsCache(id, data) {
+        const { updateFriendsCache, mergeFriendsCache } = loadFriendsCacheApi();
+        const syncFn = mergeFriendsCache || updateFriendsCache;
+        if (!syncFn || !Array.isArray(data) || data.length === 0) return;
+        syncFn(id, data).catch(() => { });
+    }
+
+    async function getFriendsWithFallback(id) {
+        try {
+            const data = await getProvider().getFriends(id);
+            if (Array.isArray(data) && data.length > 0) {
+                syncFriendsCache(id, data);
+                return data;
+            }
+            const cached = await getCachedFriendsData(id);
+            return cached.length > 0 ? cached : (Array.isArray(data) ? data : []);
+        } catch (err) {
+            const cached = await getCachedFriendsData(id);
+            if (cached.length > 0) return cached;
+            throw err;
+        }
+    }
+
     app.get('/api/status', accountOwnershipRequired, async (req, res) => {
         const id = await getAccId(req);
         if (!id) return res.json({ ok: false, error: '缺少账号标识 (x-account-id)' });
@@ -38,7 +68,7 @@ function registerAccountStateRoutes({
         const id = await getAccId(req);
         if (!id) return res.status(400).json({ ok: false });
         try {
-            const data = await getProvider().getFriends(id);
+            const data = await getFriendsWithFallback(id);
             res.json({ ok: true, data });
         } catch (e) {
             handleApiError(res, e);
@@ -49,23 +79,11 @@ function registerAccountStateRoutes({
         const id = await getAccId(req);
         if (!id) return res.status(400).json({ ok: false });
         try {
-            const { getCachedFriends, updateFriendsCache } = loadFriendsCacheApi();
-            let data = [];
-            if (getCachedFriends) {
-                data = await getCachedFriends(id);
+            let data = await getCachedFriendsData(id);
+            if (data.length === 0) {
+                data = await getFriendsWithFallback(id);
             }
-            const provider = getProvider();
-            if (Array.isArray(data) && data.length === 0 && provider && provider.getFriends) {
-                try {
-                    data = await provider.getFriends(id);
-                    if (Array.isArray(data) && data.length > 0 && updateFriendsCache) {
-                        updateFriendsCache(id, data).catch(() => { });
-                    }
-                } catch {
-                    // 忽略回退失败（如 Worker 未运行）
-                }
-            }
-            res.json({ ok: true, data: Array.isArray(data) ? data : [] });
+            res.json({ ok: true, data });
         } catch (e) {
             handleApiError(res, e);
         }

@@ -2,11 +2,12 @@
 
 <script setup lang="ts">
 import type { LoginBackgroundPreset } from '@/constants/ui-appearance'
-import type { ReportLogEntry } from '@/stores/setting'
+import type { ReportLogEntry, SystemUpdateBatchSummary, SystemUpdateClusterNode, SystemUpdateConfig, SystemUpdateDrainCutoverBlocker, SystemUpdateDrainCutoverReadiness, SystemUpdateJob, SystemUpdateOverview, SystemUpdateRuntimeAgent } from '@/stores/setting'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, watch, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import api from '@/api' // Apply config from server if possible
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
@@ -48,6 +49,72 @@ interface SystemSettingsHealthSnapshot {
   webAssets?: WebAssetsHealthSnapshot | null
 }
 
+interface QqFriendDiagnosticsCachePreviewItem {
+  gid?: number | string
+  name?: string
+  uin?: string
+}
+
+interface QqFriendDiagnosticsCacheEntry {
+  key: string
+  count: number
+  preview: QqFriendDiagnosticsCachePreviewItem[]
+}
+
+interface QqFriendDiagnosticsSnapshot {
+  file: string
+  fileName: string
+  appid: string
+  createdAt: string
+  qqVersion: string
+  miniProject: {
+    appid: string
+    projectname: string
+    openDataContext: boolean
+  }
+  authBridge: {
+    authoritySynchronized: boolean | null
+    shareFriendshipScope: number | null
+    getAuthStatusSeen: boolean
+    setAuthStatusSeen: boolean
+  }
+  hostFriendProtocol: {
+    reqCount: number
+    rspCount: number
+    latestRequest: {
+      selfUid: string
+      startIndex: number
+      socialStyle: number
+      socialSwitch: number
+      hasLocal: number
+    } | null
+    latestResponse: {
+      onlineInfoCount: number
+    } | null
+  }
+  summary: {
+    protocolLikely: string
+    latestOnlineInfoCount: number
+    cacheAccountCount: number
+    cacheFriendCount: number
+  }
+  redisCaches: QqFriendDiagnosticsCacheEntry[]
+  source?: {
+    path: string
+    name: string
+    size: number
+    modifiedAt: string
+  } | null
+  availableFiles?: Array<{
+    name: string
+    appid: string
+    size: number
+    modifiedAt: string
+  }>
+}
+
+const QQ_FRIEND_DIAGNOSTICS_APPID = '1112386029'
+
 function loadReportHistoryViewPreferences(): typeof DEFAULT_REPORT_HISTORY_VIEW_STATE {
   const fallback = DEFAULT_REPORT_HISTORY_VIEW_STATE
   const modeOptions = ['all', 'test', 'hourly', 'daily'] as const
@@ -88,7 +155,7 @@ const farmStore = useFarmStore()
 const friendStore = useFriendStore()
 const reportHistoryViewPrefs = loadReportHistoryViewPreferences()
 
-const { settings, loading, reportLogs, reportLogPagination, reportLogStats } = storeToRefs(settingStore)
+const { settings, loading, reportLogs, reportLogPagination, reportLogStats, systemUpdateOverview, systemUpdateJobs } = storeToRefs(settingStore)
 const { currentAccountId, accounts } = storeToRefs(accountStore)
 const { seeds } = storeToRefs(farmStore)
 const { friends } = storeToRefs(friendStore)
@@ -100,6 +167,7 @@ const trialSaving = ref(false)
 const timingSaving = ref(false)
 const reportTesting = ref(false)
 const reportSendingMode = ref<'hourly' | 'daily' | ''>('')
+const systemUpdateRefreshing = ref(false)
 const reportHistoryLoading = ref(false)
 const reportHistoryClearing = ref(false)
 const reportHistoryExporting = ref(false)
@@ -212,24 +280,40 @@ const reportHistoryStatsCards = computed(() => [
   },
 ])
 
+function collectShortIntervalRiskItems(payload: any = null) {
+  const source = payload && typeof payload === 'object' ? payload : buildSettingsPayload()
+  const intervals = source?.intervals && typeof source.intervals === 'object' ? source.intervals : {}
+  const items: string[] = []
+  const appendRisk = (value: any, label: string) => {
+    const seconds = Number(value)
+    if (Number.isFinite(seconds) && seconds < 60)
+      items.push(`${label} ${seconds} 秒`)
+  }
+
+  appendRisk(intervals.friendMin, '好友巡查最小')
+  appendRisk(intervals.friendMax, '好友巡查最大')
+  appendRisk(intervals.helpMin, '帮忙最小')
+  appendRisk(intervals.helpMax, '帮忙最大')
+  appendRisk(intervals.stealMin, '偷菜最小')
+  appendRisk(intervals.stealMax, '偷菜最大')
+
+  return items
+}
+
 // === 危险频率拦截警告 ===
-const timeWarningVisible = computed(() => {
+const farmIntervalHardBlockVisible = computed(() => {
   // eslint-disable-next-line ts/no-use-before-define
   if (!localSettings.value.intervals)
     return false
   // eslint-disable-next-line ts/no-use-before-define
-  const { farmMin, farmMax, friendMin, friendMax, helpMin, helpMax, stealMin, stealMax } = localSettings.value.intervals
+  const { farmMin, farmMax } = localSettings.value.intervals
   return (
     (typeof farmMin === 'number' && farmMin < 15)
     || (typeof farmMax === 'number' && farmMax < 15)
-    || (typeof friendMin === 'number' && friendMin < 60)
-    || (typeof friendMax === 'number' && friendMax < 60)
-    || (typeof helpMin === 'number' && helpMin < 60)
-    || (typeof helpMax === 'number' && helpMax < 60)
-    || (typeof stealMin === 'number' && stealMin < 60)
-    || (typeof stealMax === 'number' && stealMax < 60)
   )
 })
+
+const timeWarningVisible = computed(() => collectShortIntervalRiskItems().length > 0)
 
 // ============ 用户身份识别 ============
 const isAdmin = computed(() => {
@@ -284,9 +368,62 @@ const thirdPartyApiConfig = ref({
   aineisheKey: '',
 })
 const thirdPartyApiSaving = ref(false)
+const systemUpdateChecking = ref(false)
+const systemUpdateSaving = ref(false)
+const systemUpdateLaunching = ref(false)
+const systemUpdateNodeMutatingId = ref('')
+const systemUpdateRetryingKey = ref('')
+const systemUpdateCancellingKey = ref('')
 const systemHealthLoading = ref(false)
 const systemHealthError = ref('')
 const systemHealthSnapshot = ref<SystemSettingsHealthSnapshot | null>(null)
+const qqFriendDiagnosticsLoading = ref(false)
+const qqFriendDiagnosticsError = ref('')
+const qqFriendDiagnosticsSnapshot = ref<QqFriendDiagnosticsSnapshot | null>(null)
+const systemUpdateConfig = ref<SystemUpdateConfig>({
+  provider: 'github_release',
+  manifestUrl: '',
+  releaseApiUrl: '',
+  githubOwner: '',
+  githubRepo: '',
+  channel: 'stable',
+  allowPreRelease: false,
+  preferredStrategy: 'rolling',
+  preferredScope: 'app',
+  requireDrain: false,
+  agentMode: 'db_polling',
+  agentPollIntervalSec: 15,
+  defaultDrainNodeIds: [],
+})
+const systemUpdateDraft = ref({
+  targetVersion: '',
+  scope: 'app',
+  strategy: 'rolling',
+  preserveCurrent: false,
+  requireDrain: false,
+  note: '',
+  targetAgentIdsText: '',
+  drainNodeIdsText: '',
+})
+
+const systemUpdateProviderOptions = [
+  { label: 'GitHub Releases', value: 'github_release' },
+  { label: 'Manifest URL', value: 'manifest_url' },
+  { label: 'Custom Release API', value: 'release_api_url' },
+]
+
+const systemUpdateScopeOptions = [
+  { label: '仅主程序', value: 'app' },
+  { label: '单批 Worker', value: 'worker' },
+  { label: '整个集群', value: 'cluster' },
+]
+
+const systemUpdateStrategyOptions = [
+  { label: '原地覆盖', value: 'in_place' },
+  { label: '滚动更新', value: 'rolling' },
+  { label: '平行新目录安装', value: 'parallel_new_dir' },
+  { label: '排空后切换', value: 'drain_and_cutover' },
+]
 
 const webAssetsSnapshot = computed(() => systemHealthSnapshot.value?.webAssets ?? null)
 const systemHealthCheckedAtLabel = computed(() => formatTimestamp(systemHealthSnapshot.value?.checkedAt))
@@ -302,7 +439,40 @@ const systemHealthStatusClass = computed(() => {
     ? 'settings-health-pill ui-meta-chip--success'
     : 'settings-health-pill ui-meta-chip--warning'
 })
-void [webAssetsSnapshot, systemHealthCheckedAtLabel, systemHealthStatusLabel, systemHealthStatusClass]
+const qqFriendDiagnosticsStatusLabel = computed(() => {
+  if (!qqFriendDiagnosticsSnapshot.value)
+    return '未采集'
+  return qqFriendDiagnosticsSnapshot.value.summary.protocolLikely === 'qq-host-bridge'
+    ? '宿主桥接协议'
+    : '未识别'
+})
+const qqFriendDiagnosticsStatusClass = computed(() => {
+  if (!qqFriendDiagnosticsSnapshot.value)
+    return 'settings-health-pill ui-meta-chip--neutral'
+  return qqFriendDiagnosticsSnapshot.value.summary.protocolLikely === 'qq-host-bridge'
+    ? 'settings-health-pill ui-meta-chip--info'
+    : 'settings-health-pill ui-meta-chip--warning'
+})
+const qqFriendDiagnosticsCheckedAtLabel = computed(() => formatTimestamp(
+  qqFriendDiagnosticsSnapshot.value?.source?.modifiedAt
+  || qqFriendDiagnosticsSnapshot.value?.createdAt,
+))
+const qqFriendDiagnosticsRedisSummaryLabel = computed(() => {
+  const summary = qqFriendDiagnosticsSnapshot.value?.summary
+  if (!summary)
+    return '未获取'
+  return `${summary.cacheAccountCount} 个账号 / ${summary.cacheFriendCount} 个好友`
+})
+void [
+  webAssetsSnapshot,
+  systemHealthCheckedAtLabel,
+  systemHealthStatusLabel,
+  systemHealthStatusClass,
+  qqFriendDiagnosticsStatusLabel,
+  qqFriendDiagnosticsStatusClass,
+  qqFriendDiagnosticsCheckedAtLabel,
+  qqFriendDiagnosticsRedisSummaryLabel,
+]
 
 const trialCooldownOptions = [
   { label: '1 小时', value: 3600000 },
@@ -401,11 +571,88 @@ async function saveThirdPartyApiConfig() {
   }
 }
 
-function formatTimestamp(value?: number) {
-  if (!value)
+function formatTimestamp(value?: number | string | null) {
+  if (value === undefined || value === null || value === '' || value === 0)
     return '未获取'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime()))
+    return String(value)
+  return date.toLocaleString('zh-CN', { hour12: false })
 }
+
+const systemUpdateStatusLabel = computed(() => {
+  if (!systemUpdateOverview.value)
+    return '未检查'
+  if (systemUpdateOverview.value.runtime?.lastError)
+    return '检查失败'
+  return systemUpdateOverview.value.hasUpdate ? '检测到可更新版本' : '当前已是最新版本'
+})
+
+const systemUpdateLatestVersionLabel = computed(() => systemUpdateOverview.value?.latestRelease?.versionTag || '未获取')
+const systemUpdateCurrentVersionLabel = computed(() => systemUpdateOverview.value?.currentVersion || '未获取')
+const systemUpdateLastCheckLabel = computed(() => formatTimestamp(systemUpdateOverview.value?.runtime?.lastCheckAt || systemUpdateOverview.value?.releaseCache?.checkedAt))
+const systemUpdateSourceLabel = computed(() => systemUpdateOverview.value?.releaseCache?.source || '未配置')
+const activeSystemUpdateJob = computed<SystemUpdateJob | null>(() => systemUpdateOverview.value?.activeJob || systemUpdateJobs.value[0] || null)
+const systemUpdateDrainCutoverReadiness = computed<SystemUpdateDrainCutoverReadiness | null>(() => systemUpdateOverview.value?.drainCutoverReadiness || null)
+const systemUpdateDrainCutoverBlockers = computed<SystemUpdateDrainCutoverBlocker[]>(() => systemUpdateDrainCutoverReadiness.value?.blockers || [])
+const activeSystemUpdateBatch = computed<SystemUpdateBatchSummary | null>(() => {
+  const overviewBatch = systemUpdateOverview.value?.activeBatch || null
+  if (overviewBatch)
+    return overviewBatch
+
+  const batchKey = String(activeSystemUpdateJob.value?.batchKey || '').trim()
+  if (!batchKey)
+    return null
+
+  const batchJobs = systemUpdateJobs.value.filter(job => job.batchKey === batchKey)
+  if (batchJobs.length <= 1)
+    return null
+  const [primaryJob] = batchJobs
+  if (!primaryJob)
+    return null
+
+  const total = batchJobs.length
+  const pendingCount = batchJobs.filter(job => job.status === 'pending').length
+  const claimedCount = batchJobs.filter(job => job.status === 'claimed').length
+  const runningCount = batchJobs.filter(job => job.status === 'running').length
+  const succeededCount = batchJobs.filter(job => job.status === 'succeeded').length
+  const failedCount = batchJobs.filter(job => job.status === 'failed').length
+  const cancelledCount = batchJobs.filter(job => job.status === 'cancelled').length
+  const progressPercent = Math.round(batchJobs.reduce((sum, job) => sum + (Number(job.progressPercent) || 0), 0) / total)
+  return {
+    batchKey,
+    scope: primaryJob.scope,
+    strategy: primaryJob.strategy,
+    targetVersion: primaryJob.targetVersion,
+    sourceVersion: primaryJob.sourceVersion,
+    total,
+    pendingCount,
+    claimedCount,
+    runningCount,
+    succeededCount,
+    failedCount,
+    cancelledCount,
+    activeCount: pendingCount + claimedCount + runningCount,
+    progressPercent,
+    status: runningCount > 0 ? 'running' : (claimedCount > 0 ? 'claimed' : (pendingCount > 0 ? 'pending' : (failedCount > 0 ? 'failed' : 'succeeded'))),
+    targetAgentIds: Array.from(new Set(batchJobs.map(job => job.targetAgentId).filter(Boolean))),
+    claimAgentIds: Array.from(new Set(batchJobs.map(job => job.claimAgentId).filter(Boolean))),
+    drainNodeIds: Array.from(new Set(batchJobs.flatMap(job => job.drainNodeIds || []))),
+    jobs: batchJobs,
+    latestJobId: primaryJob.id,
+    latestJobKey: primaryJob.jobKey,
+    latestSummaryMessage: primaryJob.summaryMessage,
+    latestErrorMessage: primaryJob.errorMessage,
+    createdAt: Math.min(...batchJobs.map(job => job.createdAt || Date.now())),
+    updatedAt: Math.max(...batchJobs.map(job => job.updatedAt || job.createdAt || 0)),
+  }
+})
+const systemUpdateAgents = computed<SystemUpdateRuntimeAgent[]>(() => systemUpdateOverview.value?.runtime?.agentSummary || [])
+const systemUpdateClusterNodes = computed<SystemUpdateClusterNode[]>(() => systemUpdateOverview.value?.runtime?.clusterNodes || [])
+const SYSTEM_UPDATE_ACTIVE_STATUSES = ['pending', 'claimed', 'running'] as const
+const SYSTEM_UPDATE_AUTO_REFRESH_MS = 15000
+let systemUpdateAutoRefreshTimer: ReturnType<typeof window.setInterval> | null = null
+let systemUpdateAutoRefreshInFlight = false
 
 function describeWebAssetDir(dir: string | undefined, hasAssets: boolean | undefined, writable: boolean | undefined) {
   const parts = [dir || '-']
@@ -414,6 +661,367 @@ function describeWebAssetDir(dir: string | undefined, hasAssets: boolean | undef
   return parts.join(' · ')
 }
 void describeWebAssetDir
+
+function formatQqFriendBoolean(value: boolean | null | undefined, truthy = '是', falsy = '否') {
+  if (value === null || value === undefined)
+    return '未获取'
+  return value ? truthy : falsy
+}
+
+function formatQqFriendCachePreview(cache: QqFriendDiagnosticsCacheEntry) {
+  if (!cache.preview?.length)
+    return '无预览'
+  return cache.preview
+    .map((item) => {
+      const label = item.name || (item.gid ? `GID:${item.gid}` : '未知好友')
+      return item.gid ? `${label} (${item.gid})` : label
+    })
+    .join('、')
+}
+
+function formatQqFriendLatestRequest(snapshot: QqFriendDiagnosticsSnapshot | null) {
+  const request = snapshot?.hostFriendProtocol?.latestRequest
+  if (!request)
+    return '未观测到'
+  return `startIndex=${request.startIndex} · socialStyle=${request.socialStyle} · socialSwitch=${request.socialSwitch} · hasLocal=${request.hasLocal}`
+}
+
+function normalizeNodeIdList(text: string) {
+  return Array.from(new Set(String(text || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)))
+}
+
+function syncSystemUpdateForms(overview?: SystemUpdateOverview | null) {
+  const next = overview || systemUpdateOverview.value
+  if (!next)
+    return
+  systemUpdateConfig.value = {
+    ...systemUpdateConfig.value,
+    ...(next.config || {}),
+  }
+  systemUpdateDraft.value = {
+    ...systemUpdateDraft.value,
+    targetVersion: next.latestRelease?.versionTag || systemUpdateDraft.value.targetVersion,
+    scope: next.config?.preferredScope || systemUpdateDraft.value.scope,
+    strategy: next.config?.preferredStrategy || systemUpdateDraft.value.strategy,
+    requireDrain: next.config?.requireDrain ?? systemUpdateDraft.value.requireDrain,
+    targetAgentIdsText: systemUpdateDraft.value.targetAgentIdsText,
+    drainNodeIdsText: next.config?.defaultDrainNodeIds?.join(',') || systemUpdateDraft.value.drainNodeIdsText,
+  }
+}
+
+async function loadSystemUpdateData() {
+  if (!isAdmin.value)
+    return
+  const [overview] = await Promise.all([
+    settingStore.fetchSystemUpdateOverview(),
+    settingStore.fetchSystemUpdateJobs(8),
+  ])
+  if (overview)
+    syncSystemUpdateForms(overview)
+}
+
+function shouldAutoRefreshSystemUpdate() {
+  if (!isAdmin.value)
+    return false
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+    return false
+
+  const activeStatus = String(activeSystemUpdateJob.value?.status || '')
+  if (SYSTEM_UPDATE_ACTIVE_STATUSES.includes(activeStatus as typeof SYSTEM_UPDATE_ACTIVE_STATUSES[number]))
+    return true
+
+  return (systemUpdateOverview.value?.runtime?.agentSummary?.length || 0) > 0
+    || (systemUpdateOverview.value?.runtime?.clusterNodes?.length || 0) > 0
+}
+
+async function refreshSystemUpdateStatus(options: { silent?: boolean } = {}) {
+  if (!isAdmin.value)
+    return
+  if (!options.silent)
+    systemUpdateRefreshing.value = true
+
+  try {
+    await loadSystemUpdateData()
+  }
+  catch (e: any) {
+    if (!options.silent)
+      showAlert(`刷新更新状态失败: ${e?.message || '未知错误'}`, 'danger')
+  }
+  finally {
+    if (!options.silent)
+      systemUpdateRefreshing.value = false
+  }
+}
+
+function stopSystemUpdateAutoRefresh() {
+  if (systemUpdateAutoRefreshTimer !== null) {
+    window.clearInterval(systemUpdateAutoRefreshTimer)
+    systemUpdateAutoRefreshTimer = null
+  }
+}
+
+function startSystemUpdateAutoRefresh() {
+  if (systemUpdateAutoRefreshTimer !== null || !isAdmin.value || typeof window === 'undefined')
+    return
+
+  systemUpdateAutoRefreshTimer = window.setInterval(async () => {
+    if (systemUpdateAutoRefreshInFlight || !shouldAutoRefreshSystemUpdate())
+      return
+
+    systemUpdateAutoRefreshInFlight = true
+    try {
+      await refreshSystemUpdateStatus({ silent: true })
+    }
+    finally {
+      systemUpdateAutoRefreshInFlight = false
+    }
+  }, SYSTEM_UPDATE_AUTO_REFRESH_MS)
+}
+
+async function checkSystemUpdateNow() {
+  systemUpdateChecking.value = true
+  try {
+    const res = await settingStore.checkSystemUpdate()
+    if (res.ok && res.data) {
+      syncSystemUpdateForms(res.data)
+      await settingStore.fetchSystemUpdateJobs(8)
+      showAlert(res.data.hasUpdate ? `检测到新版本 ${res.data.latestRelease?.versionTag || ''}` : '当前已经是最新版本')
+    }
+    else {
+      showAlert(`检查更新失败: ${res.error}`, 'danger')
+    }
+  }
+  finally {
+    systemUpdateChecking.value = false
+  }
+}
+
+async function saveSystemUpdateConfigForm() {
+  systemUpdateSaving.value = true
+  try {
+    const res = await settingStore.saveSystemUpdateConfig(systemUpdateConfig.value)
+    if (res.ok && res.data) {
+      systemUpdateConfig.value = { ...systemUpdateConfig.value, ...res.data }
+      if (systemUpdateOverview.value) {
+        systemUpdateOverview.value = {
+          ...systemUpdateOverview.value,
+          config: res.data,
+        }
+      }
+      showAlert('系统更新配置已保存')
+    }
+    else {
+      showAlert(`保存失败: ${res.error}`, 'danger')
+    }
+  }
+  finally {
+    systemUpdateSaving.value = false
+  }
+}
+
+async function createSystemUpdateTask() {
+  systemUpdateLaunching.value = true
+  try {
+    const payload = {
+      targetVersion: systemUpdateDraft.value.targetVersion,
+      scope: systemUpdateDraft.value.scope,
+      strategy: systemUpdateDraft.value.strategy,
+      preserveCurrent: systemUpdateDraft.value.preserveCurrent,
+      requireDrain: systemUpdateDraft.value.requireDrain,
+      note: systemUpdateDraft.value.note,
+      targetAgentIds: normalizeNodeIdList(systemUpdateDraft.value.targetAgentIdsText),
+      drainNodeIds: normalizeNodeIdList(systemUpdateDraft.value.drainNodeIdsText),
+    }
+    const res = await settingStore.createSystemUpdateJob(payload)
+    if (res.ok) {
+      await refreshSystemUpdateStatus({ silent: true })
+      const createdCount = Number(res.data?.createdCount || (Array.isArray(res.data?.jobs) ? res.data.jobs.length : (res.data?.job ? 1 : 0))) || 1
+      showAlert(`更新任务已创建，共 ${createdCount} 个，目标版本 ${payload.targetVersion || '未指定'}`)
+    }
+    else {
+      const readiness = res.data?.drainCutoverReadiness as SystemUpdateDrainCutoverReadiness | undefined
+      if (readiness?.blockerCount) {
+        const firstBlocker = readiness.blockers?.[0]
+        const blockerLabel = firstBlocker
+          ? `${firstBlocker.accountName || firstBlocker.accountId}${firstBlocker.nodeId ? ` @ ${firstBlocker.nodeId}` : ''}`
+          : '存在运行中账号'
+        showAlert(`创建任务失败: ${res.error}。阻断对象: ${blockerLabel}`, 'danger')
+      }
+      else {
+        showAlert(`创建任务失败: ${res.error}`, 'danger')
+      }
+    }
+  }
+  finally {
+    systemUpdateLaunching.value = false
+  }
+}
+
+function describeSystemUpdateJob(job?: SystemUpdateJob | null) {
+  if (!job)
+    return '暂无任务'
+  const progress = Number.isFinite(job.progressPercent) ? `${job.progressPercent}%` : '-'
+  const base = `${job.scope} / ${job.strategy} / ${job.status}`
+  return job.summaryMessage ? `${base} · ${progress} · ${job.summaryMessage}` : `${base} · ${progress}`
+}
+
+function describeSystemUpdateNode(node: SystemUpdateClusterNode) {
+  const parts = [
+    node.connected ? '在线' : '离线',
+    node.draining ? '排空中' : '接流中',
+    `账号 ${node.assignedCount}`,
+  ]
+  return parts.join(' · ')
+}
+
+function describeSystemUpdateAgent(agent: SystemUpdateRuntimeAgent) {
+  const parts = [
+    agent.role || 'host_agent',
+    agent.version || '-',
+    formatTimestamp(agent.updatedAt),
+  ]
+  if (agent.managedNodeIds?.length)
+    parts.push(`管理节点 ${agent.managedNodeIds.join(', ')}`)
+  return parts.join(' · ')
+}
+
+function describeSystemUpdateDrainCutoverReadiness(readiness?: SystemUpdateDrainCutoverReadiness | null) {
+  if (!readiness)
+    return '未获取切换预检结果'
+  if (readiness.canDrainCutover)
+    return `当前没有发现排空切换阻断账号，目标节点运行账号 ${readiness.targetedRunningAccountCount} 个`
+  return `发现 ${readiness.blockerCount} 个阻断账号，其中 ${readiness.reloginRequiredCount} 个在切换后通常需要重新登录`
+}
+
+function describeSystemUpdateBatch(batch?: SystemUpdateBatchSummary | null) {
+  if (!batch)
+    return '暂无批次任务'
+  const parts = [
+    `${batch.scope} / ${batch.strategy} / ${batch.status}`,
+    `总计 ${batch.total}`,
+    `进度 ${batch.progressPercent}%`,
+  ]
+  if (batch.runningCount)
+    parts.push(`运行中 ${batch.runningCount}`)
+  if (batch.succeededCount)
+    parts.push(`成功 ${batch.succeededCount}`)
+  if (batch.failedCount)
+    parts.push(`失败 ${batch.failedCount}`)
+  return parts.join(' · ')
+}
+
+function canCancelSystemUpdateJob(job?: SystemUpdateJob | null) {
+  return job ? ['pending', 'claimed'].includes(job.status) : false
+}
+
+function getBatchCancelableCount(batch?: SystemUpdateBatchSummary | null) {
+  if (!batch)
+    return 0
+  return Number(batch.pendingCount || 0) + Number(batch.claimedCount || 0)
+}
+
+function isSystemUpdateTargetAgentSelected(agentId: string) {
+  return normalizeNodeIdList(systemUpdateDraft.value.targetAgentIdsText).includes(agentId)
+}
+
+function toggleSystemUpdateTargetAgent(agentId: string) {
+  const next = new Set(normalizeNodeIdList(systemUpdateDraft.value.targetAgentIdsText))
+  if (next.has(agentId))
+    next.delete(agentId)
+  else
+    next.add(agentId)
+  systemUpdateDraft.value.targetAgentIdsText = Array.from(next).join(',')
+}
+
+async function toggleSystemUpdateNodeDrain(node: SystemUpdateClusterNode, draining: boolean) {
+  systemUpdateNodeMutatingId.value = node.nodeId
+  try {
+    const res = await settingStore.setSystemUpdateNodeDrain(node.nodeId, draining)
+    if (res.ok) {
+      await refreshSystemUpdateStatus({ silent: true })
+      showAlert(draining ? `节点 ${node.nodeId} 已进入排空状态` : `节点 ${node.nodeId} 已恢复接流`)
+    }
+    else {
+      showAlert(`更新节点状态失败: ${res.error}`, 'danger')
+    }
+  }
+  finally {
+    systemUpdateNodeMutatingId.value = ''
+  }
+}
+
+async function retrySystemUpdateJobNow(job: SystemUpdateJob) {
+  systemUpdateRetryingKey.value = `job:${job.id}`
+  try {
+    const res = await settingStore.retrySystemUpdateJob(job.id)
+    if (res.ok) {
+      await refreshSystemUpdateStatus({ silent: true })
+      showAlert(`已重新创建任务 ${job.jobKey} 的重试任务`)
+    }
+    else {
+      showAlert(`重试任务失败: ${res.error}`, 'danger')
+    }
+  }
+  finally {
+    systemUpdateRetryingKey.value = ''
+  }
+}
+
+async function retrySystemUpdateBatchNow(batch: SystemUpdateBatchSummary) {
+  systemUpdateRetryingKey.value = `batch:${batch.batchKey}`
+  try {
+    const res = await settingStore.retrySystemUpdateBatch(batch.batchKey)
+    if (res.ok) {
+      await refreshSystemUpdateStatus({ silent: true })
+      const createdCount = Number(res.data?.createdCount || 0)
+      showAlert(`已重新创建批次 ${batch.batchKey} 的失败子任务，共 ${createdCount} 个`)
+    }
+    else {
+      showAlert(`重试批次失败: ${res.error}`, 'danger')
+    }
+  }
+  finally {
+    systemUpdateRetryingKey.value = ''
+  }
+}
+
+async function cancelSystemUpdateJobNow(job: SystemUpdateJob) {
+  systemUpdateCancellingKey.value = `job:${job.id}`
+  try {
+    const res = await settingStore.cancelSystemUpdateJob(job.id)
+    if (res.ok) {
+      await refreshSystemUpdateStatus({ silent: true })
+      showAlert(`任务 ${job.jobKey} 已取消`)
+    }
+    else {
+      showAlert(`取消任务失败: ${res.error}`, 'danger')
+    }
+  }
+  finally {
+    systemUpdateCancellingKey.value = ''
+  }
+}
+
+async function cancelSystemUpdateBatchNow(batch: SystemUpdateBatchSummary) {
+  systemUpdateCancellingKey.value = `batch:${batch.batchKey}`
+  try {
+    const res = await settingStore.cancelSystemUpdateBatch(batch.batchKey)
+    if (res.ok) {
+      await refreshSystemUpdateStatus({ silent: true })
+      const cancelledCount = Number(res.data?.cancelledCount || 0)
+      showAlert(`已取消批次 ${batch.batchKey} 中 ${cancelledCount} 个待执行子任务`)
+    }
+    else {
+      showAlert(`取消批次失败: ${res.error}`, 'danger')
+    }
+  }
+  finally {
+    systemUpdateCancellingKey.value = ''
+  }
+}
 
 async function loadSystemSettingsHealth(showFailureAlert = false) {
   if (!isAdmin.value)
@@ -436,6 +1044,38 @@ async function loadSystemSettingsHealth(showFailureAlert = false) {
   finally {
     systemHealthLoading.value = false
   }
+}
+
+async function loadQqFriendDiagnostics(showFailureAlert = false) {
+  if (!isAdmin.value)
+    return
+  qqFriendDiagnosticsLoading.value = true
+  try {
+    const res = await api.get('/api/qq-friend-diagnostics', {
+      params: { appid: QQ_FRIEND_DIAGNOSTICS_APPID },
+    })
+    if (res.data?.ok) {
+      qqFriendDiagnosticsSnapshot.value = (res.data.data || null) as QqFriendDiagnosticsSnapshot | null
+      qqFriendDiagnosticsError.value = ''
+      return
+    }
+    throw new Error(res.data?.error || 'QQ 好友诊断返回异常')
+  }
+  catch (e: any) {
+    qqFriendDiagnosticsError.value = e.response?.data?.error || e.message || 'QQ 好友诊断加载失败'
+    if (showFailureAlert)
+      showAlert(`加载 QQ 好友诊断失败: ${qqFriendDiagnosticsError.value}`, 'danger')
+  }
+  finally {
+    qqFriendDiagnosticsLoading.value = false
+  }
+}
+
+async function refreshAdminHealthPanels(showFailureAlert = false) {
+  await Promise.all([
+    loadSystemSettingsHealth(showFailureAlert),
+    loadQqFriendDiagnostics(showFailureAlert),
+  ])
 }
 
 const modalVisible = ref(false)
@@ -966,12 +1606,12 @@ const defaultReportConfig = {
 const defaultIntervals = {
   farmMin: 30,
   farmMax: 200,
-  friendMin: 100,
-  friendMax: 600,
-  helpMin: 100,
-  helpMax: 600,
-  stealMin: 100,
-  stealMax: 600,
+  friendMin: 60,
+  friendMax: 180,
+  helpMin: 60,
+  helpMax: 180,
+  stealMin: 60,
+  stealMax: 180,
 }
 
 const defaultFriendQuietHours = {
@@ -1431,11 +2071,17 @@ async function loadData() {
   if (isAdmin.value) {
     loadTimingConfig()
     loadClusterConfig()
+    loadSystemUpdateData()
     loadSystemSettingsHealth()
+    loadQqFriendDiagnostics()
   }
   else {
+    systemUpdateOverview.value = null
+    systemUpdateJobs.value = []
     systemHealthSnapshot.value = null
     systemHealthError.value = ''
+    qqFriendDiagnosticsSnapshot.value = null
+    qqFriendDiagnosticsError.value = ''
   }
 }
 
@@ -1443,6 +2089,11 @@ onMounted(async () => {
   await hydrateReportHistoryViewState()
   await loadData()
   enableReportHistoryViewSync()
+  startSystemUpdateAutoRefresh()
+})
+
+onBeforeUnmount(() => {
+  stopSystemUpdateAutoRefresh()
 })
 
 // 【关键修复】仅监听 accountId 字符串值，而非 currentAccount 对象引用
@@ -1455,6 +2106,13 @@ watch(() => currentAccountId.value, () => {
   closeReportLogDetail()
   loadData()
 })
+
+watch(() => isAdmin.value, (enabled) => {
+  if (enabled)
+    startSystemUpdateAutoRefresh()
+  else
+    stopSystemUpdateAutoRefresh()
+}, { immediate: false })
 
 // 好友过滤开关切换时自动加载好友列表
 watch(() => localSettings.value.automation.stealFriendFilterEnabled, (enabled) => {
@@ -1686,6 +2344,9 @@ const diffModalTitle = ref('确认保存改动')
 const diffModalConfirmText = ref('确认并保存')
 const diffModalHint = ref('提示：点击「确认并保存」后，后端调度器将立即应用新策略。')
 let diffConfirmAction: null | (() => Promise<void>) = null
+const shortIntervalRiskModalVisible = ref(false)
+const shortIntervalRiskItems = ref<string[]>([])
+let shortIntervalRiskConfirmAction: null | (() => Promise<void>) = null
 
 // 翻译映射
 const fieldLabels: Record<string, string> = {
@@ -1900,6 +2561,21 @@ function closeDiffModal() {
   diffConfirmAction = null
 }
 
+function closeShortIntervalRiskModal() {
+  shortIntervalRiskModalVisible.value = false
+  shortIntervalRiskConfirmAction = null
+  shortIntervalRiskItems.value = []
+}
+
+function openShortIntervalRiskModal(
+  items: string[],
+  onConfirm: () => Promise<void>,
+) {
+  shortIntervalRiskItems.value = [...items]
+  shortIntervalRiskConfirmAction = onConfirm
+  shortIntervalRiskModalVisible.value = true
+}
+
 function openDiffModal(
   changes: Array<{ label: string, from: string, to: string }>,
   options: {
@@ -1924,10 +2600,25 @@ async function handleDiffModalConfirm() {
     await action()
 }
 
-async function persistAccountSettings(successMessage: string | null = '账号设置已保存') {
+async function handleShortIntervalRiskModalConfirm() {
+  const action = shortIntervalRiskConfirmAction
+  closeShortIntervalRiskModal()
+  if (action)
+    await action()
+}
+
+async function persistAccountSettings(
+  successMessage: string | null = '账号设置已保存',
+  options: {
+    acknowledgeShortIntervalRisk?: boolean
+  } = {},
+) {
   saving.value = true
   try {
-    const res = await settingStore.saveSettings(currentAccountId.value, buildSettingsPayload())
+    const payload = buildSettingsPayload()
+    if (options.acknowledgeShortIntervalRisk)
+      payload.acknowledgeShortIntervalRisk = true
+    const res = await settingStore.saveSettings(currentAccountId.value, payload)
     if (res.ok) {
       if (successMessage)
         showAlert(successMessage)
@@ -1942,6 +2633,18 @@ async function persistAccountSettings(successMessage: string | null = '账号设
   }
 }
 
+async function persistAccountSettingsWithRiskConfirm(successMessage: string | null = '账号设置已保存') {
+  const payload = buildSettingsPayload()
+  const riskItems = isAdmin.value ? [] : collectShortIntervalRiskItems(payload)
+  if (riskItems.length === 0)
+    return await persistAccountSettings(successMessage)
+
+  openShortIntervalRiskModal(riskItems, async () => {
+    await persistAccountSettings(successMessage, { acknowledgeShortIntervalRisk: true })
+  })
+  return null
+}
+
 async function saveAccountSettings() {
   if (!currentAccountId.value)
     return
@@ -1950,13 +2653,13 @@ async function saveAccountSettings() {
   if (changes.length > 0) {
     openDiffModal(changes, {
       onConfirm: async () => {
-        await persistAccountSettings('账号设置已保存')
+        await persistAccountSettingsWithRiskConfirm('账号设置已保存')
       },
     })
     return
   }
 
-  await persistAccountSettings('账号设置已保存')
+  await persistAccountSettingsWithRiskConfirm('账号设置已保存')
 }
 
 async function runAfterEnsuringAccountSettingsSaved(
@@ -1968,6 +2671,18 @@ async function runAfterEnsuringAccountSettingsSaved(
   },
 ) {
   const execute = async () => {
+    const payload = buildSettingsPayload()
+    const riskItems = isAdmin.value ? [] : collectShortIntervalRiskItems(payload)
+    if (riskItems.length > 0) {
+      openShortIntervalRiskModal(riskItems, async () => {
+        const saveRes = await persistAccountSettings(null, { acknowledgeShortIntervalRisk: true })
+        if (!saveRes?.ok)
+          return
+        await action()
+      })
+      return
+    }
+
     const saveRes = await persistAccountSettings(null)
     if (!saveRes.ok)
       return
@@ -2701,11 +3416,19 @@ async function restoreTimingDefaults() {
           </div>
 
           <!-- 极值警告 -->
-          <div v-if="localSettings.riskPromptEnabled && timeWarningVisible && !isAdmin" class="settings-risk-alert mb-3 flex items-start gap-2 rounded-md p-3 text-sm">
+          <div v-if="farmIntervalHardBlockVisible && !isAdmin" class="settings-risk-alert mb-3 flex items-start gap-2 rounded-md p-3 text-sm">
             <div class="i-carbon-warning-alt mt-0.5 shrink-0 text-lg" />
             <div>
-              <strong>危险的轮询设定！</strong><br>
-              农田循环下限不能低于 15秒，好友/帮忙/偷菜巡查不能低于 60秒，否则极易触发腾讯风控致使账号被封。请上调参数后再保存！
+              <strong>农场轮询过低，无法保存。</strong><br>
+              普通用户农田循环下限仍为 15 秒；低于该值会被后端直接拦截。
+            </div>
+          </div>
+
+          <div v-if="timeWarningVisible && !isAdmin" class="settings-risk-alert mb-3 flex items-start gap-2 rounded-md p-3 text-sm">
+            <div class="i-carbon-warning-alt mt-0.5 shrink-0 text-lg" />
+            <div>
+              <strong>好友相关巡查低于 60 秒，风险极高。</strong><br>
+              保存时会要求你再次确认；确认后仍可保存，但更容易触发腾讯风控或出现 1002003。
             </div>
           </div>
 
@@ -2861,6 +3584,9 @@ async function restoreTimingDefaults() {
               min="1"
             />
           </div>
+          <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            好友巡查用于综合好友扫描节拍；若帮忙/偷菜仍保持默认值 60~180 秒，会自动跟随好友巡查区间。单次扫描耗时超过设定值时，下一轮会在完成后尽快补跑。
+          </p>
 
           <div class="settings-section-divider mt-4 flex flex-wrap items-center gap-4 pt-3">
             <BaseSwitch
@@ -3081,7 +3807,7 @@ async function restoreTimingDefaults() {
           <div class="settings-friend-panel relative rounded-2xl p-5 transition-all" :class="localSettings.automation.friend ? 'settings-friend-panel-active' : 'settings-friend-panel-inactive'">
             <!-- 灰化遮罩：总开关关闭时覆盖内容区 -->
             <div v-if="!localSettings.automation.friend" class="settings-friend-overlay absolute inset-0 z-10 flex items-center justify-center rounded-2xl">
-              <span class="settings-friend-overlay-badge rounded-lg px-4 py-2 text-sm font-bold shadow-lg">
+              <span class="settings-friend-overlay-badge ui-glass-chip rounded-lg px-4 py-2 text-sm font-bold shadow-lg">
                 🔒 请先开启上方「自动好友互动」总开关
               </span>
             </div>
@@ -3110,7 +3836,9 @@ async function restoreTimingDefaults() {
                   </label>
                   <p class="hint-text glass-text-muted ml-1 text-[10px] leading-tight opacity-70">
                     成熟后等待几秒再偷，模拟真人操作节奏，推荐 3~10 秒。
-                    <span class="recommend-badge recommend-conditional">推荐 3 秒</span>
+                    <BaseBadge surface="meta" tone="warning" class="recommend-badge">
+                      推荐 3 秒
+                    </BaseBadge>
                   </p>
                 </template>
                 <template v-else>
@@ -3886,8 +4614,8 @@ async function restoreTimingDefaults() {
           <BaseButton
             variant="secondary"
             size="sm"
-            :loading="systemHealthLoading"
-            @click="loadSystemSettingsHealth(true)"
+            :loading="systemHealthLoading || qqFriendDiagnosticsLoading"
+            @click="refreshAdminHealthPanels(true)"
           >
             <div class="i-carbon-renew mr-1" /> 刷新状态
           </BaseButton>
@@ -3928,6 +4656,11 @@ async function restoreTimingDefaults() {
           <div v-if="systemHealthError" class="settings-health-alert flex items-start gap-2 rounded-xl p-4 text-sm">
             <div class="i-carbon-warning-alt mt-0.5 shrink-0 text-base" />
             <div>{{ systemHealthError }}</div>
+          </div>
+
+          <div v-if="qqFriendDiagnosticsError" class="settings-health-alert flex items-start gap-2 rounded-xl p-4 text-sm">
+            <div class="i-carbon-warning-alt mt-0.5 shrink-0 text-base" />
+            <div>{{ qqFriendDiagnosticsError }}</div>
           </div>
 
           <template v-if="webAssetsSnapshot">
@@ -3976,6 +4709,164 @@ async function restoreTimingDefaults() {
               </div>
             </div>
           </template>
+
+          <div class="settings-health-primary-card rounded-xl p-4">
+            <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div class="settings-health-primary-label text-xs font-semibold tracking-wide uppercase">
+                  QQ 好友协议诊断
+                </div>
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold" :class="qqFriendDiagnosticsStatusClass">
+                    {{ qqFriendDiagnosticsStatusLabel }}
+                  </span>
+                  <span class="settings-health-primary-note text-xs">
+                    AppID：{{ QQ_FRIEND_DIAGNOSTICS_APPID }}
+                  </span>
+                </div>
+              </div>
+              <div class="settings-health-primary-note text-xs md:text-right">
+                最近快照：{{ qqFriendDiagnosticsCheckedAtLabel }}
+              </div>
+            </div>
+
+            <template v-if="qqFriendDiagnosticsSnapshot">
+              <div class="grid grid-cols-1 mt-4 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    QQ 版本
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ qqFriendDiagnosticsSnapshot.qqVersion || '未获取' }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    小游戏运行时
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ qqFriendDiagnosticsSnapshot.miniProject?.projectname || '未获取' }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    openDataContext
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ formatQqFriendBoolean(qqFriendDiagnosticsSnapshot.miniProject?.openDataContext, '已启用', '未启用') }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    最新 onlineInfoCount
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ qqFriendDiagnosticsSnapshot.summary?.latestOnlineInfoCount || 0 }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    授权已同步
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ formatQqFriendBoolean(qqFriendDiagnosticsSnapshot.authBridge?.authoritySynchronized) }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    好友授权 Scope
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ qqFriendDiagnosticsSnapshot.authBridge?.shareFriendshipScope ?? '未获取' }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    Redis 缓存摘要
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ qqFriendDiagnosticsRedisSummaryLabel }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    历史快照数
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ qqFriendDiagnosticsSnapshot.availableFiles?.length || 0 }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 mt-3 gap-3 xl:grid-cols-2">
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    最新诊断文件
+                  </div>
+                  <div class="settings-health-card-value mt-2 break-all text-sm font-medium">
+                    {{ qqFriendDiagnosticsSnapshot.source?.name || qqFriendDiagnosticsSnapshot.fileName || '未获取' }}
+                  </div>
+                  <div class="settings-health-card-note mt-2 text-xs">
+                    {{ qqFriendDiagnosticsSnapshot.source?.path || qqFriendDiagnosticsSnapshot.file || '未获取路径' }}
+                  </div>
+                </div>
+
+                <div class="settings-health-card rounded-xl p-4">
+                  <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                    最新 NTKernel 请求样本
+                  </div>
+                  <div class="settings-health-card-value mt-2 text-sm font-medium">
+                    {{ formatQqFriendLatestRequest(qqFriendDiagnosticsSnapshot) }}
+                  </div>
+                  <div class="settings-health-card-note mt-2 text-xs">
+                    已观测请求 {{ qqFriendDiagnosticsSnapshot.hostFriendProtocol?.reqCount || 0 }} 次 / 响应 {{ qqFriendDiagnosticsSnapshot.hostFriendProtocol?.rspCount || 0 }} 次
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="qqFriendDiagnosticsSnapshot.redisCaches?.length" class="mt-3">
+                <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                  Redis 好友缓存预览
+                </div>
+                <div class="grid grid-cols-1 mt-3 gap-3 xl:grid-cols-3">
+                  <div
+                    v-for="cache in qqFriendDiagnosticsSnapshot.redisCaches"
+                    :key="cache.key"
+                    class="settings-health-card rounded-xl p-4"
+                  >
+                    <div class="settings-health-card-label text-xs font-semibold tracking-wide uppercase">
+                      {{ cache.key.replace(/^account:(.+):friends_cache$/, '账号 $1') }}
+                    </div>
+                    <div class="settings-health-card-value mt-2 text-sm font-medium">
+                      {{ cache.count }} 个好友
+                    </div>
+                    <div class="settings-health-card-note mt-2 break-all text-xs">
+                      {{ cache.key }}
+                    </div>
+                    <div class="settings-health-card-value mt-3 text-sm leading-6">
+                      {{ formatQqFriendCachePreview(cache) }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div v-else-if="!qqFriendDiagnosticsLoading" class="settings-health-card mt-4 rounded-xl p-4">
+              <div class="settings-health-card-value text-sm font-medium">
+                暂无 QQ 好友诊断快照
+              </div>
+              <div class="settings-health-card-note mt-2 text-xs">
+                可先运行 `scripts/utils/collect-qq-friend-signals.sh`，然后刷新本页查看最新宿主桥接状态。
+              </div>
+            </div>
+          </div>
 
           <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div class="settings-health-status-card rounded-xl p-4" :class="(systemHealthSnapshot?.missingRequiredKeys?.length || 0) > 0 ? 'settings-health-status-card-warning' : 'settings-health-status-card-success'">
@@ -4144,6 +5035,446 @@ async function restoreTimingDefaults() {
             @click="handleSaveTiming"
           >
             保存时间参数设置
+          </BaseButton>
+        </div>
+      </div>
+
+      <div v-if="isAdmin" class="card glass-panel h-full flex flex-col rounded-lg shadow lg:col-span-2">
+        <div class="settings-card-divider px-4 py-3">
+          <h3 class="glass-text-main flex items-center gap-2 text-base font-bold">
+            <div class="i-carbon-upgrade" />
+            系统更新中心
+          </h3>
+        </div>
+
+        <div class="p-4 space-y-4">
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div class="border border-white/10 rounded-lg bg-black/10 p-3">
+              <div class="glass-text-muted text-[11px] tracking-widest uppercase">
+                当前版本
+              </div>
+              <div class="glass-text-main mt-1 text-sm font-bold font-mono">
+                {{ systemUpdateCurrentVersionLabel }}
+              </div>
+            </div>
+            <div class="border border-white/10 rounded-lg bg-black/10 p-3">
+              <div class="glass-text-muted text-[11px] tracking-widest uppercase">
+                最新版本
+              </div>
+              <div class="glass-text-main mt-1 text-sm font-bold font-mono">
+                {{ systemUpdateLatestVersionLabel }}
+              </div>
+            </div>
+            <div class="border border-white/10 rounded-lg bg-black/10 p-3">
+              <div class="glass-text-muted text-[11px] tracking-widest uppercase">
+                最近检查
+              </div>
+              <div class="glass-text-main mt-1 text-sm font-bold">
+                {{ systemUpdateLastCheckLabel }}
+              </div>
+            </div>
+            <div class="border border-white/10 rounded-lg bg-black/10 p-3">
+              <div class="glass-text-muted text-[11px] tracking-widest uppercase">
+                当前状态
+              </div>
+              <div class="glass-text-main mt-1 text-sm font-bold">
+                {{ systemUpdateStatusLabel }}
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-system-info-alert mt-2 flex items-start gap-2 rounded-md p-3 text-sm">
+            <div class="i-carbon-information mt-0.5 shrink-0 text-base" />
+            <div class="space-y-1">
+              <p><strong>版本来源：</strong>{{ systemUpdateSourceLabel }}</p>
+              <p v-if="systemUpdateOverview?.runtime?.lastError">
+                <strong>最近错误：</strong>{{ systemUpdateOverview.runtime.lastError }}
+              </p>
+              <p>当前已经接上宿主机更新代理链路，现阶段可实际执行 <strong>scope=app / worker / cluster</strong>，以及 <strong>strategy=in_place / rolling / drain_and_cutover</strong>。</p>
+              <p>集群节点已经支持 <strong>排空 / 恢复接流</strong>，调度器会避开排空节点并把账号迁移到可用节点。</p>
+              <p>Worker / Cluster 任务建议明确选择目标代理；若启用排空且未手填节点，会优先使用该代理上报的托管节点列表。</p>
+              <p>当存在活跃任务或代理心跳时，此页会每 15 秒自动刷新一次状态。</p>
+            </div>
+          </div>
+
+          <div
+            class="border rounded-lg p-3 space-y-2"
+            :class="systemUpdateDrainCutoverReadiness?.canDrainCutover ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-amber-500/20 bg-amber-500/10'"
+          >
+            <div class="glass-text-main flex items-center gap-2 text-sm font-bold">
+              <div class="i-carbon-arrows-vertical" />
+              排空切换预检
+            </div>
+            <div class="glass-text-muted text-sm">
+              {{ describeSystemUpdateDrainCutoverReadiness(systemUpdateDrainCutoverReadiness) }}
+            </div>
+            <div v-if="systemUpdateDrainCutoverReadiness && !systemUpdateDrainCutoverReadiness.canDrainCutover" class="glass-text-muted text-[11px]">
+              当前版本已经验证过：集群调度可用，但尚未实现账号运行态热迁移；若账号只剩一次性登录凭据，切换后通常需要重新登录。
+            </div>
+            <div v-if="systemUpdateDrainCutoverBlockers.length" class="space-y-2">
+              <div
+                v-for="blocker in systemUpdateDrainCutoverBlockers"
+                :key="`${blocker.nodeId}:${blocker.accountId}`"
+                class="border border-white/8 rounded-lg bg-black/10 p-2"
+              >
+                <div class="glass-text-main text-xs font-semibold">
+                  {{ blocker.accountName || blocker.accountId }} · {{ blocker.nodeId || '未分配节点' }}
+                </div>
+                <div class="glass-text-muted mt-1 text-[11px]">
+                  {{ blocker.platform || '-' }} · {{ blocker.credentialKind || '-' }} · {{ blocker.message }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <BaseSelect
+              v-model="systemUpdateConfig.provider"
+              label="版本源类型"
+              :options="systemUpdateProviderOptions"
+            />
+            <BaseInput
+              v-model="systemUpdateConfig.manifestUrl"
+              label="Manifest URL"
+              type="text"
+              placeholder="https://example.com/update-manifest.json"
+            />
+            <BaseInput
+              v-model="systemUpdateConfig.releaseApiUrl"
+              label="自定义 Release API"
+              type="text"
+              placeholder="https://api.github.com/repos/owner/repo/releases/latest"
+            />
+            <BaseInput
+              v-model="systemUpdateConfig.githubOwner"
+              label="GitHub Owner"
+              type="text"
+              placeholder="owner"
+            />
+            <BaseInput
+              v-model="systemUpdateConfig.githubRepo"
+              label="GitHub Repo"
+              type="text"
+              placeholder="repo"
+            />
+            <BaseSelect
+              v-model="systemUpdateConfig.preferredScope"
+              label="默认更新范围"
+              :options="systemUpdateScopeOptions"
+            />
+            <BaseSelect
+              v-model="systemUpdateConfig.preferredStrategy"
+              label="默认更新策略"
+              :options="systemUpdateStrategyOptions"
+            />
+            <div class="grid grid-cols-2 gap-3">
+              <BaseSwitch v-model="systemUpdateConfig.allowPreRelease" label="允许预发布版本" />
+              <BaseSwitch v-model="systemUpdateConfig.requireDrain" label="默认要求排空" />
+            </div>
+          </div>
+
+          <div class="border border-white/10 rounded-lg bg-black/10 p-3 space-y-3">
+            <div class="glass-text-main text-sm font-bold">
+              创建更新任务
+            </div>
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <BaseInput
+                v-model="systemUpdateDraft.targetVersion"
+                label="目标版本"
+                type="text"
+                placeholder="v4.5.19"
+              />
+              <BaseSelect
+                v-model="systemUpdateDraft.scope"
+                label="任务范围"
+                :options="systemUpdateScopeOptions"
+              />
+              <BaseSelect
+                v-model="systemUpdateDraft.strategy"
+                label="执行策略"
+                :options="systemUpdateStrategyOptions"
+              />
+              <BaseInput
+                v-model="systemUpdateDraft.targetAgentIdsText"
+                label="目标代理"
+                type="text"
+                placeholder="agent-a,agent-b"
+              />
+              <BaseInput
+                v-model="systemUpdateDraft.drainNodeIdsText"
+                label="排空节点"
+                type="text"
+                placeholder="worker-a,worker-b"
+              />
+              <BaseInput
+                v-model="systemUpdateDraft.note"
+                label="任务备注"
+                type="text"
+                placeholder="例如：夜间滚动更新"
+              />
+              <div class="grid grid-cols-2 gap-3">
+                <BaseSwitch v-model="systemUpdateDraft.preserveCurrent" label="保留旧版本目录" />
+                <BaseSwitch v-model="systemUpdateDraft.requireDrain" label="执行前先排空" />
+              </div>
+            </div>
+          </div>
+
+          <div class="border border-white/10 rounded-lg bg-black/10 p-3 space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <div class="glass-text-main text-sm font-bold">
+                当前活跃任务
+              </div>
+              <BaseButton
+                v-if="canCancelSystemUpdateJob(activeSystemUpdateJob)"
+                size="sm"
+                variant="outline"
+                :loading="systemUpdateCancellingKey === `job:${activeSystemUpdateJob?.id}`"
+                @click="activeSystemUpdateJob && cancelSystemUpdateJobNow(activeSystemUpdateJob)"
+              >
+                取消任务
+              </BaseButton>
+            </div>
+            <div class="glass-text-muted text-sm">
+              {{ describeSystemUpdateJob(activeSystemUpdateJob) }}
+            </div>
+            <div v-if="activeSystemUpdateJob" class="glass-text-muted text-xs">
+              任务号 {{ activeSystemUpdateJob.jobKey }} · 创建于 {{ formatTimestamp(activeSystemUpdateJob.createdAt) }} · 目标 {{ activeSystemUpdateJob.targetVersion || '-' }} · 目标代理 {{ activeSystemUpdateJob.targetAgentId || '-' }} · 执行代理 {{ activeSystemUpdateJob.claimAgentId || '-' }}
+            </div>
+            <div v-if="activeSystemUpdateJob?.errorMessage" class="glass-text-muted text-[11px]">
+              失败原因：{{ activeSystemUpdateJob.errorMessage }}
+            </div>
+            <div v-if="activeSystemUpdateJob?.result?.logFile" class="glass-text-muted break-all text-[11px] font-mono">
+              代理日志：{{ activeSystemUpdateJob.result.logFile }}
+            </div>
+          </div>
+
+          <div v-if="activeSystemUpdateBatch" class="border border-white/10 rounded-lg bg-black/10 p-3 space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <div class="glass-text-main text-sm font-bold">
+                当前批次进度
+              </div>
+              <div class="flex flex-wrap justify-end gap-2">
+                <BaseButton
+                  v-if="getBatchCancelableCount(activeSystemUpdateBatch) > 0"
+                  size="sm"
+                  variant="outline"
+                  :loading="systemUpdateCancellingKey === `batch:${activeSystemUpdateBatch.batchKey}`"
+                  @click="cancelSystemUpdateBatchNow(activeSystemUpdateBatch)"
+                >
+                  取消剩余子任务
+                </BaseButton>
+                <BaseButton
+                  v-if="activeSystemUpdateBatch.failedCount > 0"
+                  size="sm"
+                  variant="outline"
+                  :loading="systemUpdateRetryingKey === `batch:${activeSystemUpdateBatch.batchKey}`"
+                  @click="retrySystemUpdateBatchNow(activeSystemUpdateBatch)"
+                >
+                  重试失败子任务
+                </BaseButton>
+              </div>
+            </div>
+            <div class="glass-text-muted text-sm">
+              {{ describeSystemUpdateBatch(activeSystemUpdateBatch) }}
+            </div>
+            <div class="glass-text-muted text-[11px]">
+              批次号 {{ activeSystemUpdateBatch.batchKey || '-' }} · 目标版本 {{ activeSystemUpdateBatch.targetVersion || '-' }} · 目标代理 {{ activeSystemUpdateBatch.targetAgentIds.join(', ') || '-' }}
+            </div>
+            <div class="glass-text-muted text-[11px]">
+              待执行 {{ activeSystemUpdateBatch.pendingCount }} · 已认领 {{ activeSystemUpdateBatch.claimedCount }} · 运行中 {{ activeSystemUpdateBatch.runningCount }} · 成功 {{ activeSystemUpdateBatch.succeededCount }} · 失败 {{ activeSystemUpdateBatch.failedCount }}
+            </div>
+            <div v-if="activeSystemUpdateBatch.drainNodeIds?.length" class="glass-text-muted text-[11px]">
+              默认排空节点：{{ activeSystemUpdateBatch.drainNodeIds.join(', ') }}
+            </div>
+            <div v-if="activeSystemUpdateBatch.latestSummaryMessage" class="glass-text-muted text-[11px]">
+              最近进度：{{ activeSystemUpdateBatch.latestSummaryMessage }}
+            </div>
+            <div v-if="activeSystemUpdateBatch.latestErrorMessage" class="glass-text-muted text-[11px]">
+              最近错误：{{ activeSystemUpdateBatch.latestErrorMessage }}
+            </div>
+          </div>
+
+          <div class="border border-white/10 rounded-lg bg-black/10 p-3 space-y-2">
+            <div class="glass-text-main text-sm font-bold">
+              更新代理状态
+            </div>
+            <div v-if="!systemUpdateOverview?.runtime?.agentSummary?.length" class="glass-text-muted text-sm">
+              暂无代理心跳
+            </div>
+            <div
+              v-for="agent in systemUpdateAgents"
+              :key="agent.nodeId"
+              class="border border-white/8 rounded-lg bg-black/10 p-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="glass-text-main flex items-center gap-2 text-sm font-semibold">
+                    <span class="truncate">{{ agent.nodeId }}</span>
+                    <BaseBadge :tone="agent.status === 'error' ? 'danger' : 'success'">
+                      {{ agent.status || 'idle' }}
+                    </BaseBadge>
+                  </div>
+                  <div class="glass-text-muted mt-1 text-xs">
+                    {{ describeSystemUpdateAgent(agent) }}
+                  </div>
+                  <div v-if="agent.targetVersion" class="glass-text-muted mt-1 text-[11px]">
+                    当前目标版本 {{ agent.targetVersion }} {{ agent.jobStatus ? `· ${agent.jobStatus}` : '' }}
+                  </div>
+                </div>
+                <div class="shrink-0">
+                  <BaseButton
+                    size="sm"
+                    :variant="isSystemUpdateTargetAgentSelected(agent.nodeId) ? 'secondary' : 'outline'"
+                    @click="toggleSystemUpdateTargetAgent(agent.nodeId)"
+                  >
+                    {{ isSystemUpdateTargetAgentSelected(agent.nodeId) ? '取消目标' : '设为目标' }}
+                  </BaseButton>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="border border-white/10 rounded-lg bg-black/10 p-3 space-y-2">
+            <div class="glass-text-main text-sm font-bold">
+              集群节点排空
+            </div>
+            <div v-if="!systemUpdateClusterNodes.length" class="glass-text-muted text-sm">
+              暂无 Worker 节点心跳
+            </div>
+            <div
+              v-for="node in systemUpdateClusterNodes"
+              :key="node.nodeId"
+              class="border border-white/8 rounded-lg bg-black/10 p-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="glass-text-main flex items-center gap-2 text-sm font-semibold">
+                    <span class="truncate">{{ node.nodeId }}</span>
+                    <BaseBadge
+                      :tone="node.draining ? 'warning' : (node.connected ? 'success' : 'neutral')"
+                    >
+                      {{ node.draining ? '排空中' : (node.connected ? '在线' : '离线') }}
+                    </BaseBadge>
+                  </div>
+                  <div class="glass-text-muted mt-1 text-xs">
+                    {{ node.role || 'worker' }} · {{ node.version || '-' }} · {{ formatTimestamp(node.updatedAt) }}
+                  </div>
+                  <div class="glass-text-muted mt-1 text-[11px]">
+                    {{ describeSystemUpdateNode(node) }}
+                  </div>
+                  <div v-if="node.assignedAccountIds?.length" class="glass-text-muted mt-1 break-all text-[11px] font-mono">
+                    账号: {{ node.assignedAccountIds.join(', ') }}
+                  </div>
+                </div>
+                <div class="shrink-0">
+                  <BaseButton
+                    size="sm"
+                    :variant="node.draining ? 'secondary' : 'outline'"
+                    :loading="systemUpdateNodeMutatingId === node.nodeId"
+                    :loading-label="node.draining ? '恢复中' : '排空中'"
+                    @click="toggleSystemUpdateNodeDrain(node, !node.draining)"
+                  >
+                    {{ node.draining ? '恢复接流' : '执行排空' }}
+                  </BaseButton>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="border border-white/10 rounded-lg bg-black/10 p-3 space-y-2">
+            <div class="glass-text-main text-sm font-bold">
+              最近更新任务
+            </div>
+            <div v-if="systemUpdateJobs.length === 0" class="glass-text-muted text-sm">
+              暂无更新任务
+            </div>
+            <div
+              v-for="job in systemUpdateJobs"
+              :key="job.id"
+              class="border border-white/8 rounded-lg bg-black/10 p-3"
+            >
+              <div class="glass-text-main flex items-center justify-between gap-2 text-sm font-semibold">
+                <span>{{ job.targetVersion || '-' }}</span>
+                <span class="text-xs font-mono uppercase">{{ job.status }}</span>
+              </div>
+              <div class="glass-text-muted mt-1 text-xs">
+                {{ describeSystemUpdateJob(job) }}
+              </div>
+              <div class="glass-text-muted mt-1 text-[11px]">
+                {{ formatTimestamp(job.createdAt) }} · {{ job.createdBy || 'system' }} · 目标 {{ job.targetAgentId || '-' }} · 执行 {{ job.claimAgentId || '-' }}
+              </div>
+              <div v-if="job.batchKey" class="glass-text-muted mt-1 text-[11px]">
+                批次：{{ job.batchKey }}
+              </div>
+              <div v-if="job.drainNodeIds?.length" class="glass-text-muted mt-1 text-[11px]">
+                排空节点：{{ job.drainNodeIds.join(', ') }}
+              </div>
+              <div v-if="job.errorMessage" class="glass-text-muted mt-1 text-[11px]">
+                失败原因：{{ job.errorMessage }}
+              </div>
+              <div v-if="job.result?.logFile" class="glass-text-muted mt-1 break-all text-[11px] font-mono">
+                代理日志：{{ job.result.logFile }}
+              </div>
+              <div v-if="canCancelSystemUpdateJob(job) || job.status === 'failed' || job.status === 'cancelled'" class="mt-2 flex flex-wrap gap-2">
+                <BaseButton
+                  v-if="canCancelSystemUpdateJob(job)"
+                  size="sm"
+                  variant="outline"
+                  :loading="systemUpdateCancellingKey === `job:${job.id}`"
+                  @click="cancelSystemUpdateJobNow(job)"
+                >
+                  取消任务
+                </BaseButton>
+                <BaseButton
+                  v-if="job.status === 'failed' || job.status === 'cancelled'"
+                  size="sm"
+                  variant="outline"
+                  :loading="systemUpdateRetryingKey === `job:${job.id}`"
+                  @click="retrySystemUpdateJobNow(job)"
+                >
+                  重试此任务
+                </BaseButton>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel mt-auto flex flex-wrap justify-end gap-2 px-4 py-3">
+          <BaseButton
+            variant="ghost"
+            size="sm"
+            :loading="systemUpdateRefreshing"
+            class="settings-footer-button"
+            @click="refreshSystemUpdateStatus()"
+          >
+            刷新状态
+          </BaseButton>
+          <BaseButton
+            variant="ghost"
+            size="sm"
+            :loading="systemUpdateChecking"
+            class="settings-footer-button"
+            @click="checkSystemUpdateNow"
+          >
+            检查更新
+          </BaseButton>
+          <BaseButton
+            variant="secondary"
+            size="sm"
+            :loading="systemUpdateSaving"
+            class="settings-footer-button"
+            @click="saveSystemUpdateConfigForm"
+          >
+            保存更新配置
+          </BaseButton>
+          <BaseButton
+            variant="primary"
+            size="sm"
+            :loading="systemUpdateLaunching"
+            class="settings-footer-button"
+            @click="createSystemUpdateTask"
+          >
+            创建更新任务
           </BaseButton>
         </div>
       </div>
@@ -4432,13 +5763,13 @@ async function restoreTimingDefaults() {
                           boxShadow: `0 0 0 4px ${bundle.theme.color}22`,
                         }"
                       />
-                      <span class="settings-theme-bundle-badge rounded-full px-2.5 py-1 text-[10px]">
+                      <BaseBadge as="div" surface="glass-dark" class="settings-theme-bundle-badge rounded-full px-2.5 py-1 text-[10px]">
                         {{ bundle.theme.name }}
-                      </span>
+                      </BaseBadge>
                     </div>
-                    <div class="settings-theme-bundle-badge absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
+                    <BaseBadge as="div" surface="glass-dark" class="settings-theme-bundle-badge absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
                       {{ bundle.preset.title }}
-                    </div>
+                    </BaseBadge>
                   </div>
 
                   <div class="settings-theme-bundle-body p-3 space-y-2">
@@ -4714,10 +6045,10 @@ async function restoreTimingDefaults() {
                   玻璃拟态预览
                 </div>
               </div>
-              <div class="settings-preview-chip absolute bottom-3 left-3 rounded-full px-2.5 py-1 text-[10px]">
+              <div class="settings-preview-chip ui-glass-chip absolute bottom-3 left-3 rounded-full px-2.5 py-1 text-[10px]">
                 遮罩 {{ appStore.loginBackgroundOverlayOpacity }}%
               </div>
-              <div class="settings-preview-chip absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
+              <div class="settings-preview-chip ui-glass-chip absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
                 模糊 {{ appStore.loginBackgroundBlur }}px
               </div>
             </button>
@@ -4728,7 +6059,7 @@ async function restoreTimingDefaults() {
             >
               <div v-if="loginPreviewUsesCustomBackground" class="absolute inset-0" :style="appScenePreviewMaskStyle" />
               <div class="settings-preview-overlay-soft absolute inset-0" />
-              <div class="settings-preview-chip absolute left-3 top-3 rounded-full px-2.5 py-1 text-[10px]">
+              <div class="settings-preview-chip ui-glass-chip absolute left-3 top-3 rounded-full px-2.5 py-1 text-[10px]">
                 主界面氛围预览
               </div>
               <div class="absolute inset-0 flex gap-3 p-4">
@@ -4750,7 +6081,7 @@ async function restoreTimingDefaults() {
                   </div>
                 </div>
               </div>
-              <div class="settings-preview-chip absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
+              <div class="settings-preview-chip ui-glass-chip absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
                 {{ appStore.backgroundScope === 'login_only' ? '当前未对主界面启用' : `遮罩 ${appStore.appBackgroundOverlayOpacity}% / 模糊 ${appStore.appBackgroundBlur}px` }}
               </div>
             </div>
@@ -4806,12 +6137,12 @@ async function restoreTimingDefaults() {
                     WebkitBackdropFilter: `blur(${preset.blur}px)`,
                   }"
                 />
-                <div class="settings-theme-bundle-badge absolute left-3 top-3 rounded-full px-2.5 py-1 text-[10px]">
+                <BaseBadge as="div" surface="glass-dark" class="settings-theme-bundle-badge absolute left-3 top-3 rounded-full px-2.5 py-1 text-[10px]">
                   {{ preset.themeKey === appStore.colorTheme ? '当前主题推荐' : (preset.badge || '预设') }}
-                </div>
-                <div class="settings-theme-bundle-badge absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
+                </BaseBadge>
+                <BaseBadge as="div" surface="glass-dark" class="settings-theme-bundle-badge absolute bottom-3 right-3 rounded-full px-2.5 py-1 text-[10px]">
                   {{ preset.overlayOpacity }}% / {{ preset.blur }}px
-                </div>
+                </BaseBadge>
               </div>
 
               <div class="p-3 space-y-2">
@@ -4851,10 +6182,10 @@ async function restoreTimingDefaults() {
             <div v-if="loginPreviewUsesCustomBackground" class="absolute inset-0" :style="loginPreviewMaskStyle" />
             <div v-else class="settings-preview-modal-sheen absolute inset-0" />
 
-            <div class="settings-preview-chip absolute left-5 top-5 z-20 rounded-full px-4 py-1.5 text-xs">
+            <div class="settings-preview-chip ui-glass-chip absolute left-5 top-5 z-20 rounded-full px-4 py-1.5 text-xs">
               登录页玻璃拟态预览
             </div>
-            <div class="settings-preview-chip absolute left-5 top-16 z-20 rounded-full px-4 py-1.5 text-xs">
+            <div class="settings-preview-chip ui-glass-chip absolute left-5 top-16 z-20 rounded-full px-4 py-1.5 text-xs">
               遮罩 {{ appStore.loginBackgroundOverlayOpacity }}% · 模糊 {{ appStore.loginBackgroundBlur }}px
             </div>
 
@@ -4924,12 +6255,12 @@ async function restoreTimingDefaults() {
                         登录按钮预览
                       </div>
                       <div class="settings-preview-form-grid grid grid-cols-2 gap-3 text-center text-xs">
-                        <div class="settings-preview-form-chip rounded-2xl px-4 py-3">
+                        <BaseBadge as="div" surface="glass-soft" class="settings-preview-form-chip rounded-2xl px-4 py-3">
                           自动化
-                        </div>
-                        <div class="settings-preview-form-chip rounded-2xl px-4 py-3">
+                        </BaseBadge>
+                        <BaseBadge as="div" surface="glass-soft" class="settings-preview-form-chip rounded-2xl px-4 py-3">
                           多账号
-                        </div>
+                        </BaseBadge>
                       </div>
                     </div>
                   </div>
@@ -5050,6 +6381,30 @@ async function restoreTimingDefaults() {
         </div>
         <p class="settings-system-warning-note text-[10px] italic">
           {{ diffModalHint }}
+        </p>
+      </div>
+    </ConfirmModal>
+
+    <ConfirmModal
+      :show="shortIntervalRiskModalVisible"
+      title="确认高风险时间配置"
+      confirm-text="确认仍然保存"
+      cancel-text="返回调整"
+      type="danger"
+      @confirm="handleShortIntervalRiskModalConfirm"
+      @cancel="closeShortIntervalRiskModal"
+    >
+      <div class="text-left space-y-4">
+        <p class="glass-text-muted text-sm leading-relaxed">
+          检测到以下好友相关巡查时间低于 60 秒，继续保存会显著提高风控概率：
+        </p>
+        <div class="settings-system-diff-panel max-h-60 overflow-y-auto rounded-xl p-2">
+          <div v-for="item in shortIntervalRiskItems" :key="item" class="settings-system-diff-row p-2 text-xs">
+            <span class="settings-risk-item">{{ item }}</span>
+          </div>
+        </div>
+        <p class="settings-system-warning-note text-[10px] italic">
+          提示：确认后系统会立即应用这些高风险时间配置，请仅在你明确理解风险时继续。
         </p>
       </div>
     </ConfirmModal>
@@ -5389,11 +6744,6 @@ async function restoreTimingDefaults() {
 }
 
 .settings-theme-bundle-badge {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(15, 23, 42, 0.36);
-  color: var(--ui-text-on-brand);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   white-space: nowrap;
 }
 
@@ -5577,6 +6927,11 @@ async function restoreTimingDefaults() {
   color: var(--ui-status-danger);
 }
 
+.settings-risk-item {
+  color: var(--ui-status-danger);
+  font-weight: 600;
+}
+
 .settings-mode-badge,
 .settings-health-pill,
 .settings-result-badge,
@@ -5674,9 +7029,7 @@ async function restoreTimingDefaults() {
 }
 
 .settings-friend-overlay-badge {
-  border: 1px solid var(--ui-border-subtle);
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 76%, var(--ui-overlay-backdrop));
-  color: var(--ui-text-1);
+  white-space: nowrap;
 }
 
 .settings-friend-title-active {
@@ -5713,16 +7066,13 @@ async function restoreTimingDefaults() {
 .settings-preview-brand-card,
 .settings-preview-form-panel,
 .settings-preview-input,
-.settings-preview-form-chip,
-.settings-preview-close,
-.settings-preview-chip {
+.settings-preview-close {
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
 
-.settings-preview-chip,
 .settings-preview-brand-panel,
 .settings-preview-form-header,
 .settings-preview-form-copy,
@@ -5732,8 +7082,7 @@ async function restoreTimingDefaults() {
 
 .settings-preview-sidebar,
 .settings-preview-panel,
-.settings-preview-input,
-.settings-preview-form-chip {
+.settings-preview-input {
   background: rgba(255, 255, 255, 0.13);
 }
 
@@ -5768,9 +7117,7 @@ async function restoreTimingDefaults() {
 .dark .settings-preview-sidebar,
 .dark .settings-preview-panel,
 .dark .settings-preview-input,
-.dark .settings-preview-form-chip,
-.dark .settings-preview-close,
-.dark .settings-preview-chip {
+.dark .settings-preview-close {
   background: rgba(2, 6, 23, 0.26);
 }
 

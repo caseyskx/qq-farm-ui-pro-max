@@ -108,3 +108,94 @@ test('requiring network does not create scheduler until timed work is actually n
         restoreConfig();
     }
 });
+
+test('encodeMsg encrypts empty request bodies for QQ friend RPC compatibility', async () => {
+    const encryptCalls = [];
+    const restoreConfig = mockModule(configModulePath, {
+        CONFIG: {
+            accountId: '',
+            heartbeatInterval: 30000,
+            clientVersion: 'test',
+            platform: 'qq',
+            os: 'ios',
+            serverUrl: 'ws://localhost',
+        },
+    });
+    const restoreScheduler = mockModule(schedulerModulePath, {
+        createScheduler() {
+            return {
+                setTimeoutTask() {},
+                setIntervalTask() {},
+                clear() {},
+                clearAll() {},
+            };
+        },
+    });
+    const restoreStatus = mockModule(statusModulePath, {
+        updateStatusFromLogin() {},
+        updateStatusGold() {},
+        updateStatusLevel() {},
+    });
+    const restoreStats = mockModule(statsModulePath, {
+        recordOperation() {},
+    });
+    const restoreProto = mockModule(protoModulePath, {
+        types: {
+            GateMessage: {
+                create(value) {
+                    return value;
+                },
+                encode(value) {
+                    return {
+                        finish() {
+                            return value;
+                        },
+                    };
+                },
+            },
+        },
+    });
+    const restoreUtils = mockModule(utilsModulePath, {
+        toLong(value) { return value; },
+        toNum(value) { return Number(value) || 0; },
+        syncServerTime() {},
+        log() {},
+        logWarn() {},
+    });
+    const restoreStore = mockModule(storeModulePath, {
+        getSuspendUntil() { return 0; },
+        getTimingConfig() { return {}; },
+    });
+    const restoreBreaker = mockModule(circuitBreakerModulePath, {
+        circuitBreaker: {
+            allowRequest() { return true; },
+        },
+    });
+    const restoreCrypto = mockModule(cryptoWasmModulePath, {
+        async encryptBuffer(buffer) {
+            encryptCalls.push(Buffer.from(buffer).length);
+            return Buffer.from('enc:empty');
+        },
+    });
+
+    try {
+        delete require.cache[networkModulePath];
+        const network = require(networkModulePath);
+
+        const encoded = await network.__testEncodeMsg('svc', 'SyncAll', Buffer.alloc(0));
+        assert.deepEqual(encryptCalls, [0]);
+        assert.equal(Buffer.isBuffer(encoded.body), true);
+        assert.equal(encoded.body.toString(), 'enc:empty');
+    } finally {
+        delete require.cache[networkModulePath];
+        restoreCrypto();
+        restoreBreaker();
+        restoreStore();
+        restoreUtils();
+        restoreProto();
+        restoreStats();
+        restoreStatus();
+        restoreScheduler();
+        restoreConfig();
+    }
+});

@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { MetaBadgeTone } from '@/utils/ui-badge'
 import { useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import LandCard from '@/components/LandCard.vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
 import { useAccountStore } from '@/stores/account'
@@ -73,7 +75,7 @@ const farmConnectionState = computed(() => {
   if (!currentAccountId.value) {
     return {
       label: '未选择账号',
-      badgeClass: 'farm-panel-state-badge--neutral',
+      badgeTone: 'neutral' as MetaBadgeTone,
       note: '先选择账号，再查看土地和一键操作。',
     }
   }
@@ -81,7 +83,7 @@ const farmConnectionState = computed(() => {
   if (loading.value || statusLoading.value) {
     return {
       label: '同步中',
-      badgeClass: 'farm-panel-state-badge--info',
+      badgeTone: 'info' as MetaBadgeTone,
       note: '正在刷新连接状态和土地数据。',
     }
   }
@@ -89,23 +91,23 @@ const farmConnectionState = computed(() => {
   if (!status.value?.connection?.connected) {
     return {
       label: '账号离线',
-      badgeClass: 'farm-panel-state-badge--warning',
+      badgeTone: 'warning' as MetaBadgeTone,
       note: '请先运行账号或检查网络连接。',
     }
   }
 
   return {
     label: realtimeConnected.value ? '实时在线' : '在线快照',
-    badgeClass: 'farm-panel-state-badge--success',
+    badgeTone: 'success' as MetaBadgeTone,
     note: `当前已载入 ${lands.value?.length || 0} 块土地，可直接查看成熟与空闲分布。`,
   }
 })
 
 const farmSummaryCards = computed(() => [
-  { key: 'harvestable', icon: 'i-carbon-clean', label: '可收', value: summary.value?.harvestable || 0, tone: 'farm-summary-pill--warning' },
-  { key: 'growing', icon: 'i-carbon-sprout', label: '生长', value: summary.value?.growing || 0, tone: 'farm-summary-pill--brand' },
-  { key: 'empty', icon: 'i-carbon-checkbox', label: '空闲', value: summary.value?.empty || 0, tone: 'farm-summary-pill--neutral' },
-  { key: 'dead', icon: 'i-carbon-warning', label: '枯萎', value: summary.value?.dead || 0, tone: 'farm-summary-pill--danger' },
+  { key: 'harvestable', icon: 'i-carbon-clean', label: '可收', value: summary.value?.harvestable || 0, tone: 'warning' as MetaBadgeTone },
+  { key: 'growing', icon: 'i-carbon-sprout', label: '生长', value: summary.value?.growing || 0, tone: 'brand' as MetaBadgeTone },
+  { key: 'empty', icon: 'i-carbon-checkbox', label: '空闲', value: summary.value?.empty || 0, tone: 'neutral' as MetaBadgeTone },
+  { key: 'dead', icon: 'i-carbon-warning', label: '枯萎', value: summary.value?.dead || 0, tone: 'danger' as MetaBadgeTone },
 ])
 
 const activeOperationMeta = computed(() => operations.find(op => op.type === currentOperatingType.value) ?? null)
@@ -166,21 +168,23 @@ onUnmounted(() => {
               {{ farmConnectionState.note }}
             </p>
           </div>
-          <span class="farm-panel-state-badge" :class="farmConnectionState.badgeClass">
+          <BaseBadge surface="meta" :tone="farmConnectionState.badgeTone" class="farm-panel-state-badge">
             {{ farmConnectionState.label }}
-          </span>
+          </BaseBadge>
         </div>
 
         <div class="farm-panel-summary ui-bulk-actions">
-          <div
+          <BaseBadge
             v-for="item in farmSummaryCards"
             :key="item.key"
-            class="farm-summary-pill flex items-center gap-1.5 rounded-full px-3 py-1"
-            :class="item.tone"
+            as="div"
+            surface="meta"
+            :tone="item.tone"
+            class="farm-summary-pill"
           >
             <div :class="item.icon" />
             <span class="font-medium">{{ item.label }}: {{ item.value }}</span>
-          </div>
+          </BaseBadge>
         </div>
 
         <div class="farm-panel-actions ui-bulk-actions">
@@ -256,7 +260,6 @@ onUnmounted(() => {
 .farm-panel-shell,
 .farm-panel-toolbar,
 .farm-panel-summary,
-.farm-panel-summary-neutral,
 .farm-panel-empty-state {
   border: 1px solid var(--ui-border-subtle) !important;
 }
@@ -300,36 +303,13 @@ onUnmounted(() => {
   align-items: center;
   min-height: 1.85rem;
   padding: 0.25rem 0.7rem;
-  border: 1px solid transparent;
+  border-width: 1px;
+  border-style: solid;
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
-}
-
-.farm-panel-state-badge--neutral {
-  border-color: var(--ui-border-subtle);
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent);
-  color: var(--ui-text-2);
-}
-
-.farm-panel-state-badge--info {
-  border-color: color-mix(in srgb, var(--ui-status-info) 24%, var(--ui-border-subtle));
-  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent);
-  color: var(--ui-status-info);
-}
-
-.farm-panel-state-badge--warning {
-  border-color: color-mix(in srgb, var(--ui-status-warning) 24%, var(--ui-border-subtle));
-  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent);
-  color: var(--ui-status-warning);
-}
-
-.farm-panel-state-badge--success {
-  border-color: color-mix(in srgb, var(--ui-status-success) 24%, var(--ui-border-subtle));
-  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent);
-  color: var(--ui-status-success);
 }
 
 .farm-panel-summary {
@@ -338,6 +318,14 @@ onUnmounted(() => {
   gap: 0.75rem;
   padding: 0;
   border: none !important;
+}
+
+.farm-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.85rem;
+  padding: 0.25rem 0.75rem;
 }
 
 .farm-panel-actions {
@@ -415,25 +403,6 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--ui-status-warning) 88%, black 12%);
 }
 
-.farm-summary-pill--brand {
-  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-brand-700) 72%, var(--ui-text-1) 28%) !important;
-}
-
-.farm-summary-pill--warning {
-  background: color-mix(in srgb, var(--ui-status-warning) 14%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1) 22%) !important;
-}
-
-.farm-summary-pill--danger {
-  background: color-mix(in srgb, var(--ui-status-danger) 14%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1) 22%) !important;
-}
-
-.farm-panel-summary-neutral {
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
-}
-
 .farm-panel-empty-state {
   background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
 }
@@ -451,11 +420,6 @@ onUnmounted(() => {
   color: var(--ui-text-2);
   font-size: 0.8rem;
   line-height: 1.5;
-}
-
-.farm-summary-pill--neutral {
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent) !important;
-  color: var(--ui-text-2) !important;
 }
 
 @media (max-width: 767px) {

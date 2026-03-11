@@ -243,16 +243,16 @@ const AUTOMATION_SCHEMA = {
 };
 
 const INTERVALS_SCHEMA = {
-    farm: { type: 'integer', min: 1, max: 86400, default: 300, label: '农场巡查间隔(秒)' },
-    friend: { type: 'integer', min: 1, max: 86400, default: 900, label: '好友巡查间隔(秒)' },
+    farm: { type: 'integer', min: 1, max: 86400, default: 30, label: '农场巡查间隔(秒)' },
+    friend: { type: 'integer', min: 1, max: 86400, default: 60, label: '好友巡查间隔(秒)' },
     farmMin: { type: 'integer', min: 1, max: 86400, default: 30, label: '农场最小间隔(秒)' },
     farmMax: { type: 'integer', min: 1, max: 86400, default: 200, label: '农场最大间隔(秒)' },
-    friendMin: { type: 'integer', min: 1, max: 86400, default: 100, label: '好友最小间隔(秒)' },
-    friendMax: { type: 'integer', min: 1, max: 86400, default: 600, label: '好友最大间隔(秒)' },
-    helpMin: { type: 'integer', min: 1, max: 86400, default: 100, label: '帮忙最小间隔(秒)' },
-    helpMax: { type: 'integer', min: 1, max: 86400, default: 600, label: '帮忙最大间隔(秒)' },
-    stealMin: { type: 'integer', min: 1, max: 86400, default: 100, label: '偷菜最小间隔(秒)' },
-    stealMax: { type: 'integer', min: 1, max: 86400, default: 600, label: '偷菜最大间隔(秒)' },
+    friendMin: { type: 'integer', min: 1, max: 86400, default: 60, label: '好友最小间隔(秒)' },
+    friendMax: { type: 'integer', min: 1, max: 86400, default: 180, label: '好友最大间隔(秒)' },
+    helpMin: { type: 'integer', min: 1, max: 86400, default: 60, label: '帮忙最小间隔(秒)' },
+    helpMax: { type: 'integer', min: 1, max: 86400, default: 180, label: '帮忙最大间隔(秒)' },
+    stealMin: { type: 'integer', min: 1, max: 86400, default: 60, label: '偷菜最小间隔(秒)' },
+    stealMax: { type: 'integer', min: 1, max: 86400, default: 180, label: '偷菜最大间隔(秒)' },
 };
 
 const FRIEND_QUIET_HOURS_SCHEMA = {

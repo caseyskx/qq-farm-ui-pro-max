@@ -1,4 +1,6 @@
+const { CONFIG } = require('../config/config');
 const { getFruitName, getPlantByFruitId, getPlantById, getPlantName } = require('../config/gameConfig');
+const { cacheFriendSeeds, resolveFriendSeedAccountId } = require('./friend-cache-seeds');
 const { sendMsgAsync } = require('../utils/network');
 const { types } = require('../utils/proto');
 const { logWarn, toNum, toTimeSec } = require('../utils/utils');
@@ -135,12 +137,36 @@ function normalizeInteractRecord(record, index) {
     return normalized;
 }
 
+function buildFriendSeedsFromInteractRecords(records) {
+    const deduped = new Map();
+    for (const record of (Array.isArray(records) ? records : [])) {
+        const gid = toNum(record && record.visitorGid);
+        if (gid <= 0) continue;
+        if (deduped.has(gid)) continue;
+        const nick = String(record && record.nick || '').trim();
+        const avatarUrl = String(record && record.avatarUrl || '').trim();
+        deduped.set(gid, {
+            gid,
+            name: nick === `GID:${gid}` ? '' : nick,
+            avatarUrl,
+        });
+    }
+    return Array.from(deduped.values());
+}
+
 async function getInteractRecords(limit = 50) {
     const reply = await fetchInteractReply();
     const records = Array.isArray(reply && reply.records) ? reply.records : [];
     const normalized = records
         .map((record, index) => normalizeInteractRecord(record, index))
         .sort((a, b) => (b.serverTimeSec - a.serverTimeSec) || (b.visitorGid - a.visitorGid) || (b.actionType - a.actionType));
+    const accountId = resolveFriendSeedAccountId(CONFIG.accountId);
+    if (accountId) {
+        await cacheFriendSeeds(buildFriendSeedsFromInteractRecords(normalized), {
+            accountId,
+            immediate: true,
+        });
+    }
     const max = Math.max(1, Math.min(200, Number(limit) || 50));
     return normalized.slice(0, max);
 }

@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import api from '@/api'
 import DisclaimerModal from '@/components/DisclaimerModal.vue'
 import NotificationPanel from '@/components/NotificationPanel.vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import { useAppStore } from '@/stores/app'
@@ -504,7 +505,7 @@ const copyrightText = computed(() => appStore.copyrightText)
       </div>
 
       <div class="relative z-20 mb-4 mt-4 px-4 text-center lg:mt-6" :class="{ 'hidden lg:block': activeTab === 'register' }">
-        <div class="login-footer-pill inline-flex items-center justify-center gap-1.5 rounded-full px-5 py-2.5 backdrop-blur-md transition-all">
+        <BaseBadge as="div" surface="glass-soft" class="login-footer-pill inline-flex items-center justify-center gap-1.5 rounded-full px-5 py-2.5 backdrop-blur-md transition-all">
           <p class="glass-text-main flex items-center gap-1 text-xs font-bold tracking-wide drop-shadow-sm">
             {{ copyrightText }}
             <span class="mx-1.5 opacity-30">|</span>
@@ -513,7 +514,7 @@ const copyrightText = computed(() => appStore.copyrightText)
               {{ supportQqGroup }}
             </a>
           </p>
-        </div>
+        </BaseBadge>
       </div>
     </div>
 
@@ -604,8 +605,7 @@ const copyrightText = computed(() => appStore.copyrightText)
 .login-feature-card,
 .login-community-card,
 .login-tab-shell,
-.login-trial-card,
-.login-footer-pill {
+.login-trial-card {
   border: 1px solid color-mix(in srgb, var(--ui-text-on-brand) 14%, var(--ui-border-subtle)) !important;
 }
 

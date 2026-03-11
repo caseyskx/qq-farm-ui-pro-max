@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import BaseBadge from '@/components/ui/BaseBadge.vue'
+
 defineProps<{
   label?: string
   size?: 'sm' | 'md' | 'lg'
@@ -29,9 +31,15 @@ const model = defineModel<boolean>()
     <!-- Hint 文字说明 - 直接显示在开关下方 -->
     <p v-if="hint" class="hint-text glass-text-muted ml-1 text-[10px] leading-tight opacity-70">
       {{ hint }}
-      <span v-if="recommend === 'on'" class="recommend-badge recommend-on">推荐开启</span>
-      <span v-else-if="recommend === 'off'" class="recommend-badge recommend-off">推荐关闭</span>
-      <span v-else-if="recommend === 'conditional'" class="recommend-badge recommend-conditional">视情况而定</span>
+      <BaseBadge v-if="recommend === 'on'" surface="meta" tone="success" class="recommend-badge">
+        推荐开启
+      </BaseBadge>
+      <BaseBadge v-else-if="recommend === 'off'" surface="meta" tone="danger" class="recommend-badge">
+        推荐关闭
+      </BaseBadge>
+      <BaseBadge v-else-if="recommend === 'conditional'" surface="meta" tone="warning" class="recommend-badge">
+        视情况而定
+      </BaseBadge>
     </p>
   </div>
 </template>
@@ -39,27 +47,16 @@ const model = defineModel<boolean>()
 <style scoped>
 /* 下方文字说明中的推荐标签 */
 .recommend-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   margin-left: 6px;
-  border-radius: 9999px;
-  padding: 1px 6px;
+  min-height: 1.15rem;
+  padding: 0.05rem 0.4rem;
   font-size: 9px;
   font-weight: 600;
-}
-
-.recommend-badge.recommend-on {
-  background-color: var(--ui-status-success-soft);
-  color: var(--ui-status-success);
-}
-
-.recommend-badge.recommend-off {
-  background-color: var(--ui-status-danger-soft);
-  color: var(--ui-status-danger);
-}
-
-.recommend-badge.recommend-conditional {
-  background-color: var(--ui-status-warning-soft);
-  color: var(--ui-status-warning);
+  line-height: 1;
+  vertical-align: middle;
+  box-shadow: none;
 }
 
 .ui-switch-track {

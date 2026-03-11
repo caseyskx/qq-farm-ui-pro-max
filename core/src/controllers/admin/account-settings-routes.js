@@ -73,19 +73,16 @@ function mergeAutomationConfig(automationRaw, stealFilter, stealFriendFilter, sk
     };
 }
 
-function blockShortIntervalsForUser(res, inputSettings) {
+function blockHardIntervalsForUser(res, inputSettings) {
     const ints = inputSettings.intervals || {};
     const checkBlock = (val, threshold) => {
         return val !== undefined && Number.parseInt(val, 10) < threshold;
     };
 
-    if (checkBlock(ints.farm, 15) || checkBlock(ints.farmMin, 15) || checkBlock(ints.farmMax, 15)
-        || checkBlock(ints.friend, 60) || checkBlock(ints.friendMin, 60) || checkBlock(ints.friendMax, 60)
-        || checkBlock(ints.helpMin, 60) || checkBlock(ints.helpMax, 60)
-        || checkBlock(ints.stealMin, 60) || checkBlock(ints.stealMax, 60)) {
+    if (checkBlock(ints.farm, 15) || checkBlock(ints.farmMin, 15) || checkBlock(ints.farmMax, 15)) {
         res.status(400).json({
             ok: false,
-            error: '系统保护拦截：此配置设定的轮询时间过度短频，将导致腾讯 1002003 风控锁定。根据系统防线，普通用户农田循环下限为 15秒，好友/帮忙/偷菜巡查下限为 60秒。请上调参数后再保存！',
+            error: '系统保护拦截：此配置设定的农场轮询时间过度短频，将导致腾讯 1002003 风控锁定。根据系统防线，普通用户农田循环下限为 15秒。请上调参数后再保存！',
         });
         return true;
     }
@@ -100,6 +97,43 @@ function blockShortIntervalsForUser(res, inputSettings) {
         return true;
     }
     return false;
+}
+
+function collectShortIntervalRiskItems(inputSettings) {
+    const ints = inputSettings && typeof inputSettings.intervals === 'object'
+        ? inputSettings.intervals
+        : {};
+    const riskItems = [];
+    const checkRisk = (key, label, threshold = 60) => {
+        const parsed = Number.parseInt(ints[key], 10);
+        if (Number.isFinite(parsed) && parsed < threshold) {
+            riskItems.push({ key, label, value: parsed, threshold });
+        }
+    };
+
+    checkRisk('friend', '好友巡查间隔');
+    checkRisk('friendMin', '好友巡查最小');
+    checkRisk('friendMax', '好友巡查最大');
+    checkRisk('helpMin', '帮忙最小');
+    checkRisk('helpMax', '帮忙最大');
+    checkRisk('stealMin', '偷菜最小');
+    checkRisk('stealMax', '偷菜最大');
+
+    return riskItems;
+}
+
+function requireShortIntervalRiskAcknowledgement(res, inputSettings) {
+    const riskItems = collectShortIntervalRiskItems(inputSettings);
+    if (riskItems.length === 0) return false;
+    if (inputSettings.acknowledgeShortIntervalRisk === true) return false;
+
+    res.status(400).json({
+        ok: false,
+        error: '检测到好友相关巡查时间低于 60 秒，风控风险极高。请确认风险后再保存。',
+        requiresRiskConfirmation: true,
+        riskItems,
+    });
+    return true;
 }
 
 function registerAccountSettingsRoutes({
@@ -128,11 +162,16 @@ function registerAccountSettingsRoutes({
                 }
             }
 
-            if (req.currentUser?.role !== 'admin' && blockShortIntervalsForUser(res, inputSettings)) {
-                return;
+            if (req.currentUser?.role !== 'admin') {
+                if (blockHardIntervalsForUser(res, inputSettings)) return;
+                if (requireShortIntervalRiskAcknowledgement(res, inputSettings)) return;
             }
 
-            const { strictValidation, ...settingsToValidate } = inputSettings;
+            const {
+                strictValidation,
+                acknowledgeShortIntervalRisk,
+                ...settingsToValidate
+            } = inputSettings;
             const validation = validateSettings(settingsToValidate);
             if (!validation.valid) {
                 adminLogger.warn('配置校验警告', { accountId: id, errors: validation.errors });

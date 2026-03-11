@@ -1,7 +1,9 @@
 import type { Component } from 'vue'
+import type { MetaBadgeTone } from '@/utils/ui-badge'
 
 export type ActionButtonVariant = 'primary' | 'secondary' | 'danger' | 'success' | 'ghost' | 'outline' | 'text'
 export type ActionButtonSize = 'sm' | 'md' | 'lg'
+export type BadgeSurface = 'badge' | 'meta' | 'glass' | 'glass-soft' | 'glass-dark'
 
 export interface StatCardDefinition {
   key: string
@@ -38,7 +40,20 @@ export interface ActionButtonDefinition {
   loading?: boolean
   loadingLabel?: string
   disabled?: boolean
+  block?: boolean
+  stopPropagation?: boolean
   title?: string
+  class?: string
+  show?: boolean
+  onClick?: (event: MouseEvent) => void
+}
+
+export interface IconActionDefinition {
+  key: string
+  iconClass: string
+  title?: string
+  danger?: boolean
+  disabled?: boolean
   class?: string
   show?: boolean
   onClick?: (event: MouseEvent) => void
@@ -66,6 +81,64 @@ export interface ToggleOptionDefinition {
   title?: string
   show?: boolean
   onClick?: (event: MouseEvent) => void
+}
+
+export interface RecordMetricFieldDefinition {
+  key: string
+  label: string
+  iconClass?: string
+  class?: string
+  labelClass?: string
+  bodyClass?: string
+  props?: Record<string, any>
+  show?: boolean
+  onClick?: (event: MouseEvent) => void
+}
+
+export interface RecordDisplayBadgeDefinition {
+  text: string
+  class?: string
+  show?: boolean
+}
+
+export interface RecordDisplayFieldDefinition {
+  key: string
+  label: string
+  value?: string
+  secondaryValue?: string
+  note?: string
+  noteClass?: string
+  dotClass?: string
+  badges?: RecordDisplayBadgeDefinition[]
+  toggleItems?: ToggleOptionDefinition[]
+  class?: string
+  show?: boolean
+}
+
+export interface RecordHeroDefinition {
+  key: string
+  title: string
+  subline?: string
+  nickname?: string
+  platformLabel?: string
+  zoneLabel?: string
+  avatarUrl?: string
+  hint?: string
+  badges?: RecordDisplayBadgeDefinition[]
+  actions?: ActionButtonDefinition[]
+  show?: boolean
+}
+
+export interface RecordStateDefinition {
+  key: string
+  selected?: boolean
+  current?: boolean
+  glowClass?: string
+  selectionClass?: string
+  selectionIconClass?: string
+  mobileCardClass?: string
+  tableRowClass?: string
+  show?: boolean
 }
 
 export interface PageHeaderTextDefinition {
@@ -136,12 +209,16 @@ export interface HistoryMetaItemDefinition {
   key: string
   text: string
   iconClass?: string
+  surface?: BadgeSurface
+  tone?: MetaBadgeTone
   class?: string
   show?: boolean
 }
 
 export interface HistoryRecentBadgeDefinition {
   text: string
+  surface?: BadgeSurface
+  tone?: MetaBadgeTone
   class?: string
 }
 
@@ -302,6 +379,14 @@ export function createActionButtons<T extends ActionButtonDefinition[]>(actions:
   return actions
 }
 
+export function createIconAction(action: IconActionDefinition): IconActionDefinition {
+  return action
+}
+
+export function createIconActions<T extends IconActionDefinition[]>(actions: T): T {
+  return actions
+}
+
 export function createChip(chip: ChipDefinition): ChipDefinition {
   return chip
 }
@@ -316,6 +401,38 @@ export function createToggleOption(option: ToggleOptionDefinition): ToggleOption
 
 export function createToggleOptions<T extends ToggleOptionDefinition[]>(options: T): T {
   return options
+}
+
+export function createRecordMetricField(definition: RecordMetricFieldDefinition): RecordMetricFieldDefinition {
+  return definition
+}
+
+export function createRecordMetricFields<T extends RecordMetricFieldDefinition[]>(definitions: T): T {
+  return definitions
+}
+
+export function createRecordDisplayBadge(definition: RecordDisplayBadgeDefinition): RecordDisplayBadgeDefinition {
+  return definition
+}
+
+export function createRecordDisplayBadges<T extends RecordDisplayBadgeDefinition[]>(definitions: T): T {
+  return definitions
+}
+
+export function createRecordDisplayField(definition: RecordDisplayFieldDefinition): RecordDisplayFieldDefinition {
+  return definition
+}
+
+export function createRecordDisplayFields<T extends RecordDisplayFieldDefinition[]>(definitions: T): T {
+  return definitions
+}
+
+export function createRecordHero(definition: RecordHeroDefinition): RecordHeroDefinition {
+  return definition
+}
+
+export function createRecordState(definition: RecordStateDefinition): RecordStateDefinition {
+  return definition
 }
 
 export function createPageHeaderText(definition: PageHeaderTextDefinition): PageHeaderTextDefinition {

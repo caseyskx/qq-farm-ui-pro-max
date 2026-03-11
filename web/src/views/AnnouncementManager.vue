@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import api from '@/api'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSwitch from '@/components/ui/BaseSwitch.vue'
@@ -273,7 +274,9 @@ onMounted(() => {
                 {{ currentEdit.title || '（未输入主标题）' }}
               </p>
               <div class="mt-3 flex items-center justify-center gap-2 text-xs">
-                <span v-if="currentEdit.version" class="announcement-preview-badge rounded-full px-2 py-0.5">{{ currentEdit.version }}</span>
+                <BaseBadge v-if="currentEdit.version" surface="meta" tone="info" class="announcement-preview-badge rounded-full px-2 py-0.5">
+                  {{ currentEdit.version }}
+                </BaseBadge>
                 <span v-if="currentEdit.publish_date" class="announcement-preview-date">{{ currentEdit.publish_date }}</span>
               </div>
               <div class="announcement-preview-content mt-4 whitespace-pre-wrap text-sm leading-relaxed">
@@ -324,10 +327,12 @@ onMounted(() => {
             <div class="ui-mobile-record-head">
               <div class="ui-mobile-record-body">
                 <div class="ui-mobile-record-badges">
-                  <span v-if="item.version" class="announcement-preview-badge rounded px-2 py-0.5 text-xs">{{ item.version }}</span>
-                  <span class="announcement-item-status rounded px-2 py-0.5 text-xs">
+                  <BaseBadge v-if="item.version" surface="meta" tone="info" class="announcement-preview-badge rounded px-2 py-0.5 text-xs">
+                    {{ item.version }}
+                  </BaseBadge>
+                  <BaseBadge surface="meta" :tone="item.enabled ? 'success' : 'neutral'" class="announcement-item-status rounded px-2 py-0.5 text-xs">
                     {{ item.enabled ? '已启用' : '已禁用 / 草稿' }}
-                  </span>
+                  </BaseBadge>
                 </div>
                 <h3 class="announcement-item-title ui-mobile-record-title">
                   {{ item.title || '（无题）' }}
@@ -478,8 +483,11 @@ onMounted(() => {
 }
 
 .announcement-preview-badge {
-  background: color-mix(in srgb, var(--ui-status-info) 12%, transparent);
-  color: var(--ui-status-info);
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  line-height: 1;
 }
 
 .announcement-preview-date {
@@ -491,8 +499,11 @@ onMounted(() => {
 }
 
 .announcement-item-status {
-  background: color-mix(in srgb, var(--ui-bg-surface) 88%, transparent);
-  color: var(--ui-text-2);
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  line-height: 1;
 }
 
 .announcement-list {

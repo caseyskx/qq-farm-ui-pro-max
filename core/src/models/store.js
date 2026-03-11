@@ -1596,6 +1596,11 @@ function normalizeAccountRuntimeSnapshot(raw) {
     };
 }
 
+function normalizeOptionalTimestamp(value) {
+    const time = Math.max(0, Number(value) || 0);
+    return time > 0 ? time : null;
+}
+
 function normalizeAccountIdentityFields(raw) {
     const input = (raw && typeof raw === 'object') ? raw : {};
     const platform = String(input.platform || 'qq').trim() || 'qq';
@@ -1631,12 +1636,17 @@ function buildAccountAuthData(acc) {
         }
     });
 
+    const lastLoginAt = normalizeOptionalTimestamp((acc && acc.lastLoginAt) !== undefined
+        ? acc.lastLoginAt
+        : existing.lastLoginAt);
+
     return {
         ...existing,
         uin: identity.uin,
         qq: identity.qq,
         code: identity.code,
         authTicket: identity.authTicket,
+        lastLoginAt,
         runtimeSnapshot: normalizeAccountRuntimeSnapshot(runtimeSource),
     };
 }
@@ -1650,6 +1660,9 @@ async function loadAccountsFromDB() {
         const mapped = rows.map((r) => {
             const authData = parseAccountAuthData(r.auth_data);
             const runtimeSnapshot = normalizeAccountRuntimeSnapshot(authData.runtimeSnapshot);
+            const lastLoginAt = normalizeOptionalTimestamp(
+                r.last_login_at ? new Date(r.last_login_at).getTime() : authData.lastLoginAt,
+            );
             const identity = normalizeAccountIdentityFields({
                 platform: r.platform || 'qq',
                 uin: decodePersistedAccountUin(r.uin) || authData.uin || '',
@@ -1676,6 +1689,7 @@ async function loadAccountsFromDB() {
                 uptime: runtimeSnapshot.uptime,
                 lastStatusAt: runtimeSnapshot.lastStatusAt,
                 lastOnlineAt: runtimeSnapshot.lastOnlineAt,
+                lastLoginAt,
                 createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
                 updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
             };
@@ -1767,6 +1781,7 @@ async function persistPendingAccounts(options = {}) {
             ? String(identity.uin || identity.qq || '').trim()
             : String(identity.uin || '').trim();
         const persistedUin = encodePersistedAccountUin(acc.id, primaryUin);
+        const lastLoginAt = normalizeOptionalTimestamp(acc.lastLoginAt);
         const authData = JSON.stringify(buildAccountAuthData({
             ...acc,
             ...identity,
@@ -1774,7 +1789,7 @@ async function persistPendingAccounts(options = {}) {
 
         try {
             await pool.query(
-                "INSERT INTO accounts (id, uin, nick, name, platform, running, code, username, avatar, auth_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE uin=COALESCE(NULLIF(VALUES(uin),''), uin), nick=VALUES(nick), name=VALUES(name), platform=VALUES(platform), running=VALUES(running), code=COALESCE(NULLIF(VALUES(code),''), code), username=VALUES(username), avatar=COALESCE(NULLIF(VALUES(avatar),''), avatar), auth_data=COALESCE(NULLIF(VALUES(auth_data),''), auth_data)",
+                "INSERT INTO accounts (id, uin, nick, name, platform, running, code, username, avatar, last_login_at, auth_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE uin=COALESCE(NULLIF(VALUES(uin),''), uin), nick=VALUES(nick), name=VALUES(name), platform=VALUES(platform), running=VALUES(running), code=COALESCE(NULLIF(VALUES(code),''), code), username=VALUES(username), avatar=COALESCE(NULLIF(VALUES(avatar),''), avatar), last_login_at=COALESCE(VALUES(last_login_at), last_login_at), auth_data=COALESCE(NULLIF(VALUES(auth_data),''), auth_data)",
                 [
                     acc.id,
                     persistedUin,
@@ -1785,6 +1800,7 @@ async function persistPendingAccounts(options = {}) {
                     identity.code,
                     acc.username || '',
                     acc.avatar || '',
+                    lastLoginAt ? new Date(lastLoginAt) : null,
                     authData,
                 ]
             );
@@ -1873,6 +1889,9 @@ async function getAccountFull(accountId) {
             try { authData = JSON.parse(authData); } catch { authData = null; }
         }
         const runtimeSnapshot = normalizeAccountRuntimeSnapshot(authData && authData.runtimeSnapshot);
+        const lastLoginAt = normalizeOptionalTimestamp(
+            row.last_login_at ? new Date(row.last_login_at).getTime() : (authData && authData.lastLoginAt),
+        );
         const identity = normalizeAccountIdentityFields({
             platform: row.platform || 'qq',
             uin: decodePersistedAccountUin(row.uin) || String((authData && authData.uin) || ''),
@@ -1899,6 +1918,7 @@ async function getAccountFull(accountId) {
             uptime: runtimeSnapshot.uptime,
             lastStatusAt: runtimeSnapshot.lastStatusAt,
             lastOnlineAt: runtimeSnapshot.lastOnlineAt,
+            lastLoginAt,
             createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
             updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
         };
@@ -1919,6 +1939,20 @@ function normalizeAccountsData(raw) {
     if (accounts.length === 0) nextId = 1;
     if (nextId <= maxId) nextId = maxId + 1;
     return { accounts, nextId };
+}
+
+function shouldBumpAccountUpdatedAt(existing, payload) {
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(payload || {}, key);
+    const normalizeText = (value) => String(value || '').trim();
+
+    if (hasOwn('lastLoginAt')) return true;
+    if (hasOwn('running') && !!payload.running !== !!(existing && existing.running)) return true;
+
+    const trackedFields = ['name', 'nick', 'platform', 'uin', 'qq', 'code', 'authTicket', 'avatar', 'username'];
+    return trackedFields.some((field) => {
+        if (!hasOwn(field)) return false;
+        return normalizeText(payload[field]) !== normalizeText(existing && existing[field]);
+    });
 }
 
 function createAccountRecord(acc, forcedId) {
@@ -1948,6 +1982,7 @@ function createAccountRecord(acc, forcedId) {
         uptime: Math.max(0, Number(acc.uptime) || 0),
         lastStatusAt: Math.max(0, Number(acc.lastStatusAt) || 0),
         lastOnlineAt: Math.max(0, Number(acc.lastOnlineAt) || 0),
+        lastLoginAt: normalizeOptionalTimestamp(acc.lastLoginAt),
         createdAt: Math.max(0, Number(acc.createdAt) || 0) || now,
         updatedAt: Math.max(0, Number(acc.updatedAt) || 0) || now,
     };
@@ -1978,15 +2013,24 @@ function addOrUpdateAccount(acc) {
                 data.nextId = numericTouchedId + 1;
             }
         } else if (idx >= 0) {
+            const existing = data.accounts[idx];
             const merged = {
-                ...data.accounts[idx],
+                ...existing,
                 ...payload,
-                name: payload.name !== undefined ? payload.name : data.accounts[idx].name,
+                name: payload.name !== undefined ? payload.name : existing.name,
             };
+            const explicitUpdatedAt = normalizeOptionalTimestamp(payload.updatedAt);
+            const nextUpdatedAt = explicitUpdatedAt
+                || (shouldBumpAccountUpdatedAt(existing, payload)
+                    ? Date.now()
+                    : (normalizeOptionalTimestamp(existing.updatedAt) || Date.now()));
             data.accounts[idx] = {
                 ...merged,
                 ...normalizeAccountIdentityFields(merged),
-                updatedAt: Date.now(),
+                lastLoginAt: payload.lastLoginAt !== undefined
+                    ? normalizeOptionalTimestamp(payload.lastLoginAt)
+                    : normalizeOptionalTimestamp(merged.lastLoginAt),
+                updatedAt: nextUpdatedAt,
             };
             touchedAccountId = String(data.accounts[idx].id || '');
         } else if (createIfMissing) {
@@ -2009,6 +2053,34 @@ function addOrUpdateAccount(acc) {
         ...data,
         touchedAccountId,
     };
+}
+
+async function markAccountLoginSuccess(accountId, options = {}) {
+    const resolvedId = resolveAccountId(accountId);
+    if (!resolvedId) return null;
+
+    const loginAt = normalizeOptionalTimestamp(options && options.timestamp) || Date.now();
+    const payload = {
+        id: resolvedId,
+        lastLoginAt: loginAt,
+        updatedAt: loginAt,
+    };
+    if (options && options.running !== undefined) {
+        payload.running = !!options.running;
+    }
+    if (options && options.connected !== undefined) {
+        payload.connected = !!options.connected;
+    }
+
+    const data = addOrUpdateAccount(payload);
+    try {
+        await persistAccountsNow(resolvedId);
+    } catch (e) {
+        logStoreError('记录账号最近登录时间失败', e, { accountId: resolvedId });
+    }
+
+    const accounts = Array.isArray(data && data.accounts) ? data.accounts : [];
+    return accounts.find(item => String(item && item.id || '') === resolvedId) || null;
 }
 
 function deleteAccount(id) {
@@ -2238,6 +2310,7 @@ module.exports = {
     ensureMainAccountUnique,
     resolveAccountZone,
     addOrUpdateAccount,
+    markAccountLoginSuccess,
     deleteAccount,
     getAdminPasswordHash,
     setAdminPasswordHash,

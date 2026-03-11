@@ -19,23 +19,84 @@ const settingStore = useSettingStore()
 
 const { currentAccountId, accounts } = storeToRefs(accountStore)
 const { seeds } = storeToRefs(farmStore)
-const { cachedFriends: friends, loading: friendsLoading } = storeToRefs(friendStore)
+const { friends: liveFriends, cachedFriends, loading: friendsLoading } = storeToRefs(friendStore)
 const { settings, loading: settingsLoading } = storeToRefs(settingStore)
 
 const avatarErrorKeys = ref<Set<string>>(new Set())
+const plantImageErrorKeys = ref<Set<number>>(new Set())
+const plantImageFallbackIndex = ref<Record<number, number>>({})
 
-function getFriendAvatar(friend: any) {
-  const direct = String(friend?.avatarUrl || friend?.avatar_url || '').trim()
+function getSafeImageUrl(url: string) {
+  const normalized = String(url || '').trim()
+  if (!normalized)
+    return ''
+  if (normalized.startsWith('http://'))
+    return normalized.replace('http://', 'https://')
+  return normalized
+}
+
+function getFriendSelectionId(friend: any) {
+  const candidates = [friend?.gid, friend?.friendGid, friend?.id]
+  for (const candidate of candidates) {
+    const resolved = Number(candidate || 0)
+    if (Number.isFinite(resolved) && resolved > 0)
+      return resolved
+  }
+  return 0
+}
+
+function getFriendDisplayName(friend: any) {
+  const direct = String(friend?.name || friend?.remark || friend?.nick || friend?.userName || '').trim()
   if (direct)
     return direct
-  const uin = String(friend?.uin || friend?.id || '').trim()
+  const gid = getFriendSelectionId(friend)
+  return gid > 0 ? `GID:${gid}` : '未命名好友'
+}
+
+function getFriendSecondaryLabel(friend: any) {
+  const uin = String(friend?.uin || '').trim()
+  if (uin)
+    return `QQ ${uin}`
+  const gid = getFriendSelectionId(friend)
+  return gid > 0 ? `GID ${gid}` : '--'
+}
+
+const resolvedFriends = computed(() => {
+  const merged = new Map<number, any>()
+  for (const source of [liveFriends.value, cachedFriends.value]) {
+    for (const friend of Array.isArray(source) ? source : []) {
+      const gid = getFriendSelectionId(friend)
+      if (!gid)
+        continue
+      const prev = merged.get(gid) || {}
+      merged.set(gid, {
+        ...prev,
+        ...friend,
+        gid,
+        id: friend?.id ?? prev.id ?? gid,
+        uin: String(friend?.uin || prev.uin || '').trim(),
+        name: getFriendDisplayName({ ...prev, ...friend, gid }),
+        avatarUrl: String(friend?.avatarUrl || friend?.avatar_url || prev.avatarUrl || '').trim(),
+      })
+    }
+  }
+  return Array.from(merged.values())
+})
+
+function getFriendAvatar(friend: any) {
+  const direct = getSafeImageUrl(friend?.avatarUrl || friend?.avatar_url || '')
+  if (direct)
+    return direct
+  const gid = String(getFriendSelectionId(friend) || '')
+  const idCandidate = String(friend?.id || '').trim()
+  const uin = String(friend?.uin || '').trim() || (idCandidate && idCandidate !== gid ? idCandidate : '')
   if (uin)
     return `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=100`
   return ''
 }
 
 function getFriendAvatarKey(friend: any) {
-  const key = String(friend?.gid || friend?.uin || friend?.id || '').trim()
+  const key = String(getFriendSelectionId(friend) || friend?.uin || friend?.id || '').trim()
   return key || String(friend?.name || '').trim()
 }
 
@@ -90,7 +151,7 @@ const activeTab = ref<'friends' | 'plants'>('friends')
 const searchQuery = ref('')
 const selectedAccount = ref<string>(currentAccountId.value || '')
 const footerSelectionSummary = computed(() => activeTab.value === 'friends'
-  ? `当前名单 ${localSettings.value.automation.stealFriendFilterIds.length}/${friends.value?.length || 0}`
+  ? `当前名单 ${localSettings.value.automation.stealFriendFilterIds.length}/${resolvedFriends.value.length || 0}`
   : `当前作物 ${localSettings.value.automation.stealFilterPlantIds.length}/${seeds.value?.length || 0}`)
 
 function syncLocalSettings() {
@@ -116,12 +177,21 @@ async function loadData() {
     if (currentAccountId.value !== selectedAccount.value) {
       accountStore.setCurrentAccount({ id: selectedAccount.value } as any)
     }
+    avatarErrorKeys.value.clear()
+    plantImageErrorKeys.value.clear()
+    plantImageFallbackIndex.value = {}
+    cropAnalytics.value = {}
+    liveFriends.value = []
+    cachedFriends.value = []
     await settingStore.fetchSettings(selectedAccount.value)
     syncLocalSettings()
 
     // 加载全部种子和好友(使用本地缓存避免风控)
-    farmStore.fetchSeeds(selectedAccount.value)
-    friendStore.fetchCachedFriends(selectedAccount.value)
+    await farmStore.fetchSeeds(selectedAccount.value)
+    await friendStore.fetchCachedFriends(selectedAccount.value)
+    if (!cachedFriends.value.length) {
+      await friendStore.fetchFriends(selectedAccount.value)
+    }
 
     try {
       const res = await api.get('/api/analytics', {
@@ -147,6 +217,12 @@ onMounted(() => {
     selectedAccount.value = String(accounts.value[0]?.id || accounts.value[0]?.uin || '')
   }
   loadData()
+})
+
+watch(() => accounts.value, (nextAccounts) => {
+  if (!selectedAccount.value && nextAccounts.length > 0) {
+    selectedAccount.value = String(nextAccounts[0]?.id || nextAccounts[0]?.uin || '')
+  }
 })
 
 watch(() => selectedAccount.value, () => {
@@ -216,14 +292,19 @@ function invertAllPlants() {
 // === Friends Logic ===
 
 const filteredFriends = computed(() => {
-  if (!friends.value)
+  if (!resolvedFriends.value.length)
     return []
-  let res = [...friends.value]
+  let res = [...resolvedFriends.value]
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
     res = res.filter((f) => {
-      const name = String(f.name || f.nick || f.userName || f.id || '').toLowerCase()
-      return name.includes(q)
+      const keywords = [
+        getFriendDisplayName(f),
+        getFriendSecondaryLabel(f),
+        String(f?.remark || ''),
+        String(f?.nick || ''),
+      ]
+      return keywords.some(keyword => keyword.toLowerCase().includes(q))
     })
   }
   return res
@@ -246,25 +327,66 @@ function toggleFriend(id: number) {
 
 function selectAllFriends() {
   const currentSet = new Set(localSettings.value.automation.stealFriendFilterIds)
-  filteredFriends.value.forEach(f => currentSet.add(Number(f.gid || f.id)))
+  filteredFriends.value.forEach(f => currentSet.add(getFriendSelectionId(f)))
   localSettings.value.automation.stealFriendFilterIds = Array.from(currentSet)
 }
 
 function clearAllFriends() {
   const currentSet = new Set(localSettings.value.automation.stealFriendFilterIds)
-  filteredFriends.value.forEach(f => currentSet.delete(Number(f.gid || f.id)))
+  filteredFriends.value.forEach(f => currentSet.delete(getFriendSelectionId(f)))
   localSettings.value.automation.stealFriendFilterIds = Array.from(currentSet)
 }
 
 function invertAllFriends() {
   const currentArr = localSettings.value.automation.stealFriendFilterIds
-  const filteredIds = filteredFriends.value.map(f => Number(f.gid || f.id))
+  const filteredIds = filteredFriends.value.map(f => getFriendSelectionId(f))
   const newArr = currentArr.filter((id: number) => !filteredIds.includes(id))
   filteredIds.forEach((id: number) => {
     if (!currentArr.includes(id))
       newArr.push(id)
   })
   localSettings.value.automation.stealFriendFilterIds = newArr
+}
+
+function getPlantImageCandidates(seed: any) {
+  const seedId = Number(seed?.seedId || 0)
+  return [
+    getSafeImageUrl(seed?.seedImage || ''),
+    getSafeImageUrl(seed?.image || ''),
+    getSafeImageUrl(cropAnalytics.value[seedId]?.image || ''),
+    seedId > 0 ? `https://qzonestyle.gtimg.cn/qzone/sngapp/app/appstore/app_100371286/crop/${seedId}.png` : '',
+  ].filter((item, index, list) => !!item && list.indexOf(item) === index)
+}
+
+function getPlantImage(seed: any) {
+  const seedId = Number(seed?.seedId || 0)
+  const fallbackIndex = plantImageFallbackIndex.value[seedId] || 0
+  return getPlantImageCandidates(seed)[fallbackIndex] || ''
+}
+
+function canShowPlantImage(seed: any) {
+  const seedId = Number(seed?.seedId || 0)
+  return !!getPlantImage(seed) && !plantImageErrorKeys.value.has(seedId)
+}
+
+function handlePlantImageError(seed: any, event: Event) {
+  const seedId = Number(seed?.seedId || 0)
+  if (!seedId)
+    return
+  const candidates = getPlantImageCandidates(seed)
+  const currentIndex = plantImageFallbackIndex.value[seedId] || 0
+  if (currentIndex < candidates.length - 1) {
+    plantImageFallbackIndex.value = {
+      ...plantImageFallbackIndex.value,
+      [seedId]: currentIndex + 1,
+    }
+    const nextImage = candidates[currentIndex + 1]
+    if (event.target instanceof HTMLImageElement && nextImage) {
+      event.target.src = nextImage
+      return
+    }
+  }
+  plantImageErrorKeys.value.add(seedId)
 }
 
 // === Save Logic ===
@@ -339,7 +461,7 @@ void getPlantCheckClasses
 </script>
 
 <template>
-  <div class="steal-settings-page ui-page-shell ui-page-density-relaxed relative min-h-full w-full pb-28">
+  <div class="steal-settings-page ui-page-shell ui-page-density-relaxed ui-page-with-fixed-footer relative min-h-full w-full">
     <!-- Header -->
     <div class="steal-page-header mb-6 flex flex-col justify-between gap-4 pb-4 md:flex-row md:items-center">
       <div>
@@ -385,7 +507,7 @@ void getPlantCheckClasses
             :class="getStealTabClasses(activeTab === 'friends')"
             @click="activeTab = 'friends'; searchQuery = ''"
           >
-            👥 好友偷菜名单 ({{ localSettings.automation.stealFriendFilterIds.length }}/{{ friends.length }})
+            👥 好友偷菜名单 ({{ localSettings.automation.stealFriendFilterIds.length }}/{{ resolvedFriends.length }})
           </button>
           <button
             class="steal-tab whitespace-nowrap border-b-2 px-4 py-2 font-medium transition-colors"
@@ -520,10 +642,10 @@ void getPlantCheckClasses
 
           <div
             v-for="friend in filteredFriends"
-            :key="friend.gid || friend.id"
+            :key="getFriendSelectionId(friend)"
             class="group flex cursor-pointer select-none items-center justify-between border rounded-lg p-3 transition-all"
-            :class="getFriendCardClasses(isFriendSelected(Number(friend.gid || friend.id)))"
-            @click="toggleFriend(Number(friend.gid || friend.id))"
+            :class="getFriendCardClasses(isFriendSelected(getFriendSelectionId(friend)))"
+            @click="toggleFriend(getFriendSelectionId(friend))"
           >
             <div class="flex items-center gap-3 overflow-hidden">
               <div class="steal-avatar-shell relative h-10 w-10 flex shrink-0 items-center justify-center overflow-hidden rounded-full shadow-sm">
@@ -532,25 +654,26 @@ void getPlantCheckClasses
                   :src="getFriendAvatar(friend)"
                   class="z-10 h-full w-full object-cover"
                   loading="lazy"
+                  referrerpolicy="no-referrer"
                   @error="handleFriendAvatarError(friend)"
                 >
                 <div v-else class="steal-avatar-fallback i-carbon-user absolute inset-0 z-0 flex items-center justify-center text-xl" />
               </div>
               <div class="min-w-0 flex flex-col">
-                <span class="glass-text-main w-full truncate text-sm font-bold" :title="friend.name || friend.nick || String(friend.id)">
-                  {{ friend.name || friend.nick || '- -' }}
+                <span class="glass-text-main w-full truncate text-sm font-bold" :title="getFriendDisplayName(friend)">
+                  {{ getFriendDisplayName(friend) }}
                 </span>
                 <span class="glass-text-muted mt-0.5 text-xs font-mono" title="QQ/uId">
-                  {{ friend.id }}
+                  {{ getFriendSecondaryLabel(friend) }}
                 </span>
               </div>
             </div>
             <div class="flex shrink-0 flex-col items-end pl-2">
               <div
                 class="h-[22px] w-[22px] flex items-center justify-center rounded-full transition-colors"
-                :class="getFriendCheckClasses(isFriendSelected(Number(friend.gid || friend.id)))"
+                :class="getFriendCheckClasses(isFriendSelected(getFriendSelectionId(friend)))"
               >
-                <div v-if="isFriendSelected(Number(friend.gid || friend.id))" class="i-carbon-checkmark text-sm" />
+                <div v-if="isFriendSelected(getFriendSelectionId(friend))" class="i-carbon-checkmark text-sm" />
               </div>
             </div>
           </div>
@@ -581,10 +704,12 @@ void getPlantCheckClasses
             <div class="min-w-0 flex flex-1 items-start gap-3">
               <div class="steal-plant-thumb relative h-12 w-12 flex shrink-0 items-center justify-center overflow-hidden rounded-lg p-1 shadow-sm">
                 <img
-                  :src="cropAnalytics[seed.seedId]?.image || `https://qzonestyle.gtimg.cn/qzone/sngapp/app/appstore/app_100371286/crop/${seed.seedId}.png`"
+                  v-if="canShowPlantImage(seed)"
+                  :src="getPlantImage(seed)"
                   class="z-10 max-h-full max-w-full object-contain drop-shadow-sm"
                   loading="lazy"
-                  @error="(e) => (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%25%22 height=%22100%25%22%3E%3Crect width=%22100%25%22 height=%22100%25%22 fill=%22transparent%22/%3E%3C/svg%3E'"
+                  referrerpolicy="no-referrer"
+                  @error="handlePlantImageError(seed, $event)"
                 >
                 <div class="steal-plant-thumb-icon i-carbon-sprout absolute inset-0 z-0 flex items-center justify-center text-2xl" />
               </div>
@@ -594,7 +719,7 @@ void getPlantCheckClasses
                     <span class="glass-text-main truncate text-[15px] font-extrabold" :title="seed.name">
                       {{ seed.name }}
                     </span>
-                    <span class="steal-level-pill glass-text-muted shrink-0 rounded px-1.5 py-0.5 text-xs font-bold">
+                    <span class="steal-level-pill ui-meta-chip--neutral shrink-0 rounded px-1.5 py-0.5 text-xs font-bold">
                       Lv {{ cropAnalytics[seed.seedId]?.level || seed.requiredLevel }}
                     </span>
                   </div>
@@ -602,10 +727,10 @@ void getPlantCheckClasses
 
                 <div class="mt-1.5 space-y-1.5">
                   <div class="flex items-center gap-1.5 text-xs">
-                    <div class="steal-metric-pill steal-metric-pill-info whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
+                    <div class="steal-metric-pill ui-meta-chip--info whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
                       时经: <span class="font-bold">{{ cropAnalytics[seed.seedId]?.expPerHour ?? '-' }}</span>
                     </div>
-                    <div class="steal-metric-pill steal-metric-pill-warning whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
+                    <div class="steal-metric-pill ui-meta-chip--warning whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
                       时润: <span class="font-bold">{{ cropAnalytics[seed.seedId]?.profitPerHour ?? '-' }}</span>
                     </div>
                   </div>
@@ -629,7 +754,7 @@ void getPlantCheckClasses
       </div>
 
       <!-- Footer Action -->
-      <div class="steal-footer-bar glass-panel fixed bottom-0 left-0 right-0 z-40 flex flex-col items-stretch gap-3 border-t-0 p-4 lg:left-64 sm:flex-row sm:items-center sm:justify-end">
+      <div class="steal-footer-bar ui-fixed-footer-bar glass-panel flex flex-col items-stretch gap-3 border-t-0 p-4 sm:flex-row sm:items-center sm:justify-end">
         <div class="steal-footer-meta min-w-0 flex items-center justify-between gap-3 sm:mr-auto sm:justify-start">
           <span class="glass-text-muted truncate text-sm font-medium">
             {{ footerSelectionSummary }}
@@ -714,7 +839,8 @@ void getPlantCheckClasses
 .steal-toolbar-chip {
   border: 1px solid var(--ui-border-subtle) !important;
   border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--ui-bg-surface) 68%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 92%, transparent) !important;
+  box-shadow: 0 18px 44px -30px var(--ui-shadow-panel) !important;
 }
 
 .steal-controls-panel {
@@ -729,11 +855,12 @@ void getPlantCheckClasses
 
 .steal-tab-active {
   border-color: var(--ui-brand-500) !important;
-  color: color-mix(in srgb, var(--ui-brand-700) 76%, var(--ui-text-1)) !important;
+  color: var(--ui-text-1) !important;
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--ui-text-on-brand) 22%, transparent);
 }
 
 .steal-tab-idle {
-  color: var(--ui-text-2) !important;
+  color: color-mix(in srgb, var(--ui-text-1) 72%, var(--ui-text-3)) !important;
 }
 
 .steal-tab-idle:hover {
@@ -750,7 +877,7 @@ void getPlantCheckClasses
 .steal-inline-select {
   border: 1px solid var(--ui-border-subtle) !important;
   border-radius: 0.375rem;
-  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 96%, transparent) !important;
 }
 
 .steal-bulk-button {
@@ -784,7 +911,7 @@ void getPlantCheckClasses
 
 .steal-list-card,
 .steal-plant-card {
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 96%, transparent) !important;
 }
 
 .steal-list-card-idle {
@@ -798,7 +925,7 @@ void getPlantCheckClasses
 .steal-avatar-shell,
 .steal-plant-thumb {
   border: 1px solid var(--ui-border-subtle) !important;
-  background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 94%, transparent) !important;
 }
 
 .steal-check-indicator,
@@ -820,18 +947,13 @@ void getPlantCheckClasses
   background: color-mix(in srgb, var(--ui-bg-surface) 72%, transparent) !important;
 }
 
-.steal-level-pill {
-  background: color-mix(in srgb, var(--ui-bg-surface) 80%, transparent) !important;
-}
-
-.steal-metric-pill-warning {
-  background: color-mix(in srgb, var(--ui-status-warning) 8%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1)) !important;
-}
-
-.steal-metric-pill-info {
-  background: color-mix(in srgb, var(--ui-status-info) 8%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-info) 78%, var(--ui-text-1)) !important;
+.steal-level-pill,
+.steal-metric-pill {
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  line-height: 1;
 }
 
 .steal-metric-text-info {

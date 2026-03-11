@@ -14,7 +14,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/deploy/offline}"
 APP_IMAGE_OVERRIDE="${APP_IMAGE_OVERRIDE:-}"
 RETRY_COUNT="${RETRY_COUNT:-20}"
 RETRY_DELAY_SECONDS="${RETRY_DELAY_SECONDS:-30}"
-VERSION_INPUT="${VERSION:-v4.5.18}"
+VERSION_INPUT="${VERSION:-v4.5.19}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -135,6 +135,12 @@ copy_deploy_bundle_files() {
     cp "${PROJECT_ROOT}/deploy/init-db/01-init.sql" "${target_dir}/init-db/01-init.sql"
     cp "${PROJECT_ROOT}/scripts/deploy/fresh-install.sh" "${target_dir}/fresh-install.sh"
     cp "${PROJECT_ROOT}/scripts/deploy/update-app.sh" "${target_dir}/update-app.sh"
+    cp "${PROJECT_ROOT}/scripts/deploy/install-or-update.sh" "${target_dir}/install-or-update.sh"
+    cp "${PROJECT_ROOT}/scripts/deploy/update-agent.sh" "${target_dir}/update-agent.sh"
+    cp "${PROJECT_ROOT}/scripts/deploy/install-update-agent-service.sh" "${target_dir}/install-update-agent-service.sh"
+    cp "${PROJECT_ROOT}/scripts/deploy/manual-config-wizard.sh" "${target_dir}/manual-config-wizard.sh"
+    cp "${PROJECT_ROOT}/scripts/deploy/stack-layout.sh" "${target_dir}/stack-layout.sh"
+    cp "${PROJECT_ROOT}/scripts/deploy/verify-stack.sh" "${target_dir}/verify-stack.sh"
     cp "${PROJECT_ROOT}/scripts/deploy/repair-mysql.sh" "${target_dir}/repair-mysql.sh"
     cp "${PROJECT_ROOT}/scripts/deploy/repair-deploy.sh" "${target_dir}/repair-deploy.sh"
     cp "${PROJECT_ROOT}/scripts/deploy/quick-deploy.sh" "${target_dir}/quick-deploy.sh"
@@ -196,8 +202,8 @@ set -a
 . "\${SCRIPT_DIR}/.env"
 set +a
 
-chmod +x "\${SCRIPT_DIR}/fresh-install.sh" "\${SCRIPT_DIR}/update-app.sh" "\${SCRIPT_DIR}/repair-mysql.sh" "\${SCRIPT_DIR}/repair-deploy.sh" "\${SCRIPT_DIR}/quick-deploy.sh"
-bash "\${SCRIPT_DIR}/fresh-install.sh" --non-interactive --image-archive "\${SCRIPT_DIR}/${archive_name}"
+chmod +x "\${SCRIPT_DIR}/fresh-install.sh" "\${SCRIPT_DIR}/update-app.sh" "\${SCRIPT_DIR}/install-or-update.sh" "\${SCRIPT_DIR}/update-agent.sh" "\${SCRIPT_DIR}/install-update-agent-service.sh" "\${SCRIPT_DIR}/manual-config-wizard.sh" "\${SCRIPT_DIR}/stack-layout.sh" "\${SCRIPT_DIR}/verify-stack.sh" "\${SCRIPT_DIR}/repair-mysql.sh" "\${SCRIPT_DIR}/repair-deploy.sh" "\${SCRIPT_DIR}/quick-deploy.sh"
+bash "\${SCRIPT_DIR}/install-or-update.sh" --non-interactive --image-archive "\${SCRIPT_DIR}/${archive_name}"
 INSTALL_EOF
 
     chmod +x "${target_dir}/install.sh"

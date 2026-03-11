@@ -116,7 +116,7 @@ test('settings save route keeps ownership middleware and writes coerced settings
     assert.deepEqual(res.body, { ok: true, data: { saved: true, accountId: 'acc-1' } });
 });
 
-test('settings save route blocks short polling values for non-admin users before provider write', async () => {
+test('settings save route still blocks too-short farm polling values for non-admin users before provider write', async () => {
     const { app, routes } = createFakeApp();
     let saveCalled = false;
     const deps = createDeps({
@@ -143,6 +143,78 @@ test('settings save route blocks short polling values for non-admin users before
     assert.equal(res.statusCode, 400);
     assert.equal(saveCalled, false);
     assert.match(res.body.error, /普通用户农田循环下限为 15秒/);
+});
+
+test('settings save route requires explicit confirmation before saving sub-60 friend intervals for non-admin users', async () => {
+    const { app, routes } = createFakeApp();
+    let saveCalled = false;
+    const deps = createDeps({
+        app,
+        getProvider: () => ({
+            saveSettings: async () => {
+                saveCalled = true;
+                return {};
+            },
+        }),
+    });
+
+    registerAccountSettingsRoutes(deps);
+    const { handler } = getRouteParts(routes, 'post', '/api/settings/save');
+    const res = createResponse();
+    await handler(
+        {
+            body: { intervals: { friendMin: 20, friendMax: 40 } },
+            currentUser: { username: 'alice', role: 'user' },
+        },
+        res,
+    );
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(saveCalled, false);
+    assert.equal(res.body.requiresRiskConfirmation, true);
+    assert.match(res.body.error, /低于 60 秒/);
+    assert.deepEqual(res.body.riskItems, [
+        { key: 'friendMin', label: '好友巡查最小', value: 20, threshold: 60 },
+        { key: 'friendMax', label: '好友巡查最大', value: 40, threshold: 60 },
+    ]);
+});
+
+test('settings save route accepts sub-60 friend intervals for non-admin users after risk confirmation', async () => {
+    const { app, routes } = createFakeApp();
+    const calls = [];
+    const deps = createDeps({
+        app,
+        getProvider: () => ({
+            saveSettings: async (...args) => {
+                calls.push(args);
+                return { saved: true };
+            },
+        }),
+        validateSettings: (input) => {
+            calls.push(['validate', input]);
+            return { valid: true, coerced: input };
+        },
+    });
+
+    registerAccountSettingsRoutes(deps);
+    const { handler } = getRouteParts(routes, 'post', '/api/settings/save');
+    const res = createResponse();
+    await handler(
+        {
+            body: {
+                acknowledgeShortIntervalRisk: true,
+                intervals: { friendMin: 20, friendMax: 40 },
+            },
+            currentUser: { username: 'alice', role: 'user' },
+        },
+        res,
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(calls, [
+        ['validate', { intervals: { friendMin: 20, friendMax: 40 } }],
+        ['acc-1', { intervals: { friendMin: 20, friendMax: 40 } }],
+    ]);
 });
 
 test('settings save route returns validation errors when strictValidation is enabled', async () => {

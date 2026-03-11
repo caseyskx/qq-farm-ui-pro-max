@@ -9,6 +9,10 @@ const { getCurrentPhase, setOperationLimitsCallback } = require('../farm');
 const { recordOperation } = require('../stats');
 const { sellAllFruits } = require('../warehouse');
 const { getPool } = require('../mysql-db');
+const { getCachedFriends, findReusableFriendsCache, mergeFriendsCache } = require('../database');
+const { isParamError } = require('../common');
+const { cacheFriendSeeds } = require('../friend-cache-seeds');
+const { getInteractRecords } = require('../interact');
 const PlatformFactory = require('../../platform/PlatformFactory');
 const state = require('./friend-state');
 const scanner = require('./friend-scanner');
@@ -17,17 +21,33 @@ const BANNED_ERROR_CODE = 1002003;
 const FRIEND_FETCH_MODE = {
     UNKNOWN: 'unknown',
     SYNC_ALL: 'sync_all',
+    GAME_FRIENDS: 'game_friends',
     GET_ALL: 'get_all',
 };
 const FRIEND_FETCH_RESULT_LOG_TTL_MS = 5 * 60 * 1000;
+const GET_ALL_PARAM_ERROR_COOLDOWN_MS = 30 * 60 * 1000;
+const GET_GAME_FRIENDS_BATCH_SIZE = 35;
+const SHARED_FRIEND_CACHE_REUSE_COOLDOWN_MS = 60 * 1000;
+const VISITOR_FRIEND_SEED_COOLDOWN_MS = 60 * 1000;
 const _friendFetchStateByAccount = new Map();
+
+
+function _resolveRuntimeAccountId(userState = null) {
+    const resolved = String(
+        (userState && userState.accountId)
+        || CONFIG.accountId
+        || process.env.FARM_ACCOUNT_ID
+        || '',
+    ).trim();
+    return resolved || null;
+}
 
 
 async function getAllFriends() {
     let reply;
     const platformInst = PlatformFactory.createPlatform(CONFIG.platform);
     const userState = getUserState();
-    const accountId = userState?.accountId || null;
+    const accountId = _resolveRuntimeAccountId(userState);
     let fetchState = _getFriendFetchState(_getFriendFetchKey(accountId));
     const forceGetAll = getForceGetAllConfig(accountId).enabled;
     const isWeChat = !platformInst.allowSyncAll();
@@ -40,22 +60,66 @@ async function getAllFriends() {
 
     if (forceGetAll) {
         _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.GET_ALL, `已启用强制兼容模式，固定使用 GetAll (${label})`, 'forced');
-        reply = await _getAllViaGetAll('强制强效兼容模式', { fetchState, retryOnEmpty: false });
+        reply = await _getAllViaGetAllOrCache('强制强效兼容模式', {
+            fetchState,
+            retryOnEmpty: false,
+            accountId,
+            label,
+            userState,
+        });
     } else if (fetchState.mode === FRIEND_FETCH_MODE.GET_ALL) {
-        reply = await _getAllViaGetAll(`${label}已锁定`, { fetchState, retryOnEmpty: false });
+        reply = await _getAllViaGetAllOrCache(`${label}已锁定`, {
+            fetchState,
+            retryOnEmpty: false,
+            accountId,
+            label,
+            userState,
+        });
         if (!_hasUsableFriendEntries(reply, userState)) {
             resetGetAllMode(accountId);
             logWarn('好友', `已锁定 GetAll 模式，但本次返回${_describeFriendReply(reply, userState)}(${label})；已清空模式缓存，下次重新探测`);
         }
+    } else if (fetchState.mode === FRIEND_FETCH_MODE.GAME_FRIENDS) {
+        reply = await _getAllViaGameFriendsOrCache(`${label}已锁定`, {
+            fetchState,
+            accountId,
+            label,
+            userState,
+        });
+        if (!_hasUsableFriendEntries(reply, userState) || reply?._fromCache) {
+            resetGetAllMode(accountId);
+            logWarn('好友', `已锁定 GetGameFriends 模式，但本次返回${_describeFriendReply(reply, userState)}(${label})；已清空模式缓存，下次重新探测`);
+        }
     } else if (fetchState.mode === FRIEND_FETCH_MODE.SYNC_ALL) {
         reply = await _getAllViaSyncAll(isWeChat, { fetchState });
         if (!_hasUsableFriendEntries(reply, userState)) {
-            log('好友', `已锁定 SyncAll 模式，但本次返回${_describeFriendReply(reply, userState)}(${label})，改用 GetAll 复核`);
-            reply = await _getAllViaGetAll(`${label}兼容复核`, { fetchState, retryOnEmpty: true });
-            if (_hasUsableFriendEntries(reply, userState)) {
-                _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.GET_ALL, `${label} 环境已确认使用 GetAll 更稳定`);
-            } else {
-                resetGetAllMode(accountId);
+            if (!isWeChat) {
+                log('好友', `已锁定 SyncAll 模式，但本次返回${_describeFriendReply(reply, userState)}(${label})，改用 GetGameFriends 复核`);
+                reply = await _getAllViaGameFriendsOrCache(`${label}缓存GID复核`, {
+                    fetchState,
+                    accountId,
+                    label,
+                    userState,
+                });
+                if (_hasUsableFriendEntries(reply, userState) && !reply?._fromCache) {
+                    _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.GAME_FRIENDS, `${label} 环境已确认需使用 GetGameFriends`);
+                }
+            }
+
+            if (!_hasUsableFriendEntries(reply, userState) || reply?._fromCache) {
+                log('好友', `已锁定 SyncAll 模式，但本次返回${_describeFriendReply(reply, userState)}(${label})，改用 GetAll 复核`);
+                reply = await _getAllViaGetAllOrCache(`${label}兼容复核`, {
+                    fetchState,
+                    retryOnEmpty: true,
+                    accountId,
+                    label,
+                    userState,
+                });
+                if (_hasUsableFriendEntries(reply, userState) && !reply?._fromCache) {
+                    _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.GET_ALL, `${label} 环境已确认使用 GetAll 更稳定`);
+                } else {
+                    resetGetAllMode(accountId);
+                }
             }
         }
     } else {
@@ -63,10 +127,31 @@ async function getAllFriends() {
         if (_hasUsableFriendEntries(reply, userState)) {
             _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.SYNC_ALL, `${label} 环境首轮探测通过，后续固定使用 SyncAll`);
         } else {
-            log('好友', `首次探测：SyncAll 返回${_describeFriendReply(reply, userState)}(${label})，改用 GetAll 复核`);
-            reply = await _getAllViaGetAll(`${label}兼容探测`, { fetchState, retryOnEmpty: true });
-            if (_hasUsableFriendEntries(reply, userState)) {
-                _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.GET_ALL, `${label} 环境首轮探测确认需使用 GetAll`);
+            if (!isWeChat) {
+                log('好友', `首次探测：SyncAll 返回${_describeFriendReply(reply, userState)}(${label})，改用 GetGameFriends 复核`);
+                reply = await _getAllViaGameFriendsOrCache(`${label}缓存GID探测`, {
+                    fetchState,
+                    accountId,
+                    label,
+                    userState,
+                });
+                if (_hasUsableFriendEntries(reply, userState) && !reply?._fromCache) {
+                    _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.GAME_FRIENDS, `${label} 环境首轮探测确认需使用 GetGameFriends`);
+                }
+            }
+
+            if (!_hasUsableFriendEntries(reply, userState) || reply?._fromCache) {
+                log('好友', `首次探测：SyncAll 返回${_describeFriendReply(reply, userState)}(${label})，改用 GetAll 复核`);
+                reply = await _getAllViaGetAllOrCache(`${label}兼容探测`, {
+                    fetchState,
+                    retryOnEmpty: true,
+                    accountId,
+                    label,
+                    userState,
+                });
+                if (_hasUsableFriendEntries(reply, userState) && !reply?._fromCache) {
+                    _setFriendFetchMode(fetchState, FRIEND_FETCH_MODE.GET_ALL, `${label} 环境首轮探测确认需使用 GetAll`);
+                }
             }
         }
     }
@@ -88,7 +173,7 @@ function resetGetAllMode(accountId = null) {
 
 function isGetAllMode() {
     const userState = getUserState();
-    const accountId = userState?.accountId || null;
+    const accountId = _resolveRuntimeAccountId(userState);
     const fetchState = _friendFetchStateByAccount.get(_getFriendFetchKey(accountId));
     return fetchState?.mode === FRIEND_FETCH_MODE.GET_ALL;
 }
@@ -107,6 +192,9 @@ function _getFriendFetchState(accountId) {
             lastResultAt: 0,
             modeReason: '',
             modeSource: 'probe',
+            getAllParamErrorUntil: 0,
+            sharedCacheReuseAt: 0,
+            visitorSeedAt: 0,
         });
     }
     return _friendFetchStateByAccount.get(accountId);
@@ -116,13 +204,150 @@ function _getFriendFetchKey(accountId) {
     return accountId || '__default__';
 }
 
+function _isFetchProbeCooling(fetchState, field, cooldownMs) {
+    if (!fetchState) return false;
+    const lastAt = Number(fetchState[field] || 0);
+    return lastAt > 0 && (Date.now() - lastAt) < cooldownMs;
+}
+
+function _markFetchProbe(fetchState, field) {
+    if (!fetchState) return;
+    fetchState[field] = Date.now();
+}
+
+async function _tryReuseSharedFriendsCache(accountId, options = {}) {
+    if (!accountId || typeof findReusableFriendsCache !== 'function') {
+        return [];
+    }
+
+    const fetchState = options.fetchState || null;
+    if (_isFetchProbeCooling(fetchState, 'sharedCacheReuseAt', SHARED_FRIEND_CACHE_REUSE_COOLDOWN_MS)) {
+        return [];
+    }
+    _markFetchProbe(fetchState, 'sharedCacheReuseAt');
+
+    try {
+        const userState = options.userState || null;
+        const selfName = String(
+            (userState && (userState.name || userState.nick || userState.username)) || ''
+        ).trim();
+        const reusableCache = await findReusableFriendsCache(accountId, {
+            selfGid: toNum(userState && userState.gid),
+            selfName,
+            selfUin: String(CONFIG.uin || '').trim(),
+            selfQq: String(CONFIG.uin || '').trim(),
+            platform: CONFIG.platform,
+        });
+        const friends = Array.isArray(reusableCache && reusableCache.friends)
+            ? reusableCache.friends
+            : [];
+        if (friends.length <= 0) {
+            return [];
+        }
+
+        if (typeof mergeFriendsCache === 'function') {
+            await mergeFriendsCache(accountId, friends);
+        }
+
+        const sourceAccountId = String(reusableCache && reusableCache.sourceAccountId || '').trim();
+        log('好友', sourceAccountId
+            ? `当前账号无好友缓存，已复用账号 ${sourceAccountId} 的好友快照 ${friends.length} 人`
+            : `当前账号无好友缓存，已复用共享好友快照 ${friends.length} 人`, {
+            module: 'friend',
+            event: 'friend_cache_reuse',
+            result: 'ok',
+            count: friends.length,
+            sourceAccountId: sourceAccountId || undefined,
+        });
+
+        const cached = await getCachedFriends(accountId);
+        return Array.isArray(cached) && cached.length > 0 ? cached : friends;
+    } catch (error) {
+        logWarn('好友', `复用共享好友缓存失败: ${error.message}`, {
+            module: 'friend',
+            event: 'friend_cache_reuse',
+            result: 'error',
+        });
+        return [];
+    }
+}
+
+async function _trySeedFriendsCacheFromVisitors(accountId, options = {}) {
+    if (!accountId || typeof getInteractRecords !== 'function') {
+        return [];
+    }
+
+    const fetchState = options.fetchState || null;
+    if (_isFetchProbeCooling(fetchState, 'visitorSeedAt', VISITOR_FRIEND_SEED_COOLDOWN_MS)) {
+        return [];
+    }
+    _markFetchProbe(fetchState, 'visitorSeedAt');
+
+    try {
+        const records = await getInteractRecords(100);
+        const visitorGids = [...new Set(
+            (Array.isArray(records) ? records : [])
+                .map(record => toNum(record && record.visitorGid))
+                .filter(gid => gid > 0)
+        )];
+        if (visitorGids.length <= 0) {
+            return [];
+        }
+
+        const cached = await getCachedFriends(accountId);
+        if (Array.isArray(cached) && cached.length > 0) {
+            log('好友', `当前账号无好友缓存，已从最近访客回填 ${visitorGids.length} 个 GID`, {
+                module: 'friend',
+                event: 'friend_cache_seed',
+                result: 'ok',
+                visitorCount: visitorGids.length,
+                cachedCount: cached.length,
+            });
+            return cached;
+        }
+    } catch (error) {
+        logWarn('好友', `最近访客回填好友缓存失败: ${error.message}`, {
+            module: 'friend',
+            event: 'friend_cache_seed',
+            result: 'error',
+        });
+    }
+
+    return [];
+}
+
+async function _getCachedFriendsWithBootstrap(accountId, options = {}) {
+    if (!accountId) return [];
+
+    const cached = await getCachedFriends(accountId);
+    if (Array.isArray(cached) && cached.length > 0) {
+        return cached;
+    }
+
+    const sharedFriends = await _tryReuseSharedFriendsCache(accountId, options);
+    if (sharedFriends.length > 0) {
+        return sharedFriends;
+    }
+
+    if (options.allowVisitorSeed) {
+        const visitorSeededFriends = await _trySeedFriendsCacheFromVisitors(accountId, options);
+        if (visitorSeededFriends.length > 0) {
+            return visitorSeededFriends;
+        }
+    }
+
+    return [];
+}
+
 function _setFriendFetchMode(fetchState, mode, reason, source = 'probe') {
     const changed = fetchState.mode !== mode || fetchState.modeReason !== reason || fetchState.modeSource !== source;
     fetchState.mode = mode;
     fetchState.modeReason = reason;
     fetchState.modeSource = source;
     if (!changed) return;
-    const modeLabel = mode === FRIEND_FETCH_MODE.GET_ALL ? 'GetAll' : 'SyncAll';
+    const modeLabel = mode === FRIEND_FETCH_MODE.GET_ALL
+        ? 'GetAll'
+        : (mode === FRIEND_FETCH_MODE.GAME_FRIENDS ? 'GetGameFriends' : 'SyncAll');
     log('好友', `好友拉取模式已锁定为 ${modeLabel}：${reason}`);
 }
 
@@ -209,6 +434,228 @@ async function _getAllViaGetAll(modeName, options = {}) {
     return reply;
 }
 
+function _decodeGetGameFriendsReply(replyBody) {
+    if (types.GetGameFriendsReply) {
+        return types.GetGameFriendsReply.decode(replyBody);
+    }
+    return types.GetAllFriendsReply.decode(replyBody);
+}
+
+async function _getAllViaGameFriendsDirect(modeName, options = {}) {
+    const fetchState = options.fetchState || null;
+    if (!types.GetGameFriendsRequest) {
+        logWarn('好友', 'GetGameFriends 协议未加载，跳过 QQ 直连拉取');
+        return { game_friends: [], invitations: [], application_count: 0 };
+    }
+
+    try {
+        const body = types.GetGameFriendsRequest.encode(types.GetGameFriendsRequest.create({
+            gids: [],
+        })).finish();
+        const { body: replyBody } = await sendMsgAsync('gamepb.friendpb.FriendService', 'GetGameFriends', body);
+        const reply = _decodeGetGameFriendsReply(replyBody);
+        _logFriendFetchResult('GetGameFriends', `${modeName}直连`, reply, fetchState);
+        return reply;
+    } catch (err) {
+        logWarn('好友', `GetGameFriends 直连失败(${modeName}): ${err.message || err}`);
+        return { game_friends: [], invitations: [], application_count: 0 };
+    }
+}
+
+function _dedupeFriendsByGid(friends) {
+    const seen = new Set();
+    return (Array.isArray(friends) ? friends : []).filter((friend) => {
+        const gid = toNum(friend && friend.gid);
+        if (gid <= 0 || seen.has(gid)) return false;
+        seen.add(gid);
+        return true;
+    });
+}
+
+async function _getKnownFriendGids(accountId, options = {}) {
+    if (!accountId) return [];
+    const cached = await _getCachedFriendsWithBootstrap(accountId, {
+        fetchState: options.fetchState || null,
+        userState: options.userState || null,
+        allowVisitorSeed: true,
+    });
+    if (!Array.isArray(cached) || cached.length <= 0) return [];
+    return [...new Set(
+        cached
+            .map(friend => toNum(friend && friend.gid))
+            .filter(gid => gid > 0)
+    )];
+}
+
+async function _getAllViaGameFriends(modeName, options = {}) {
+    const fetchState = options.fetchState || null;
+    const accountId = options.accountId || null;
+    const userState = options.userState || null;
+    const gids = await _getKnownFriendGids(accountId, { fetchState, userState });
+    if (!gids.length) {
+        log('好友', `GetGameFriends 跳过(${modeName}): 没有可用的历史好友 GID 缓存`);
+        return { game_friends: [], invitations: [], application_count: 0 };
+    }
+
+    if (!types.GetGameFriendsRequest) {
+        logWarn('好友', 'GetGameFriends 协议未加载，跳过 QQ 缓存 GID 拉取');
+        return { game_friends: [], invitations: [], application_count: 0 };
+    }
+
+    const allFriends = [];
+    let invitations = [];
+    let applicationCount = 0;
+
+    for (let i = 0; i < gids.length; i += GET_GAME_FRIENDS_BATCH_SIZE) {
+        const batch = gids.slice(i, i + GET_GAME_FRIENDS_BATCH_SIZE);
+        try {
+            const body = types.GetGameFriendsRequest.encode(types.GetGameFriendsRequest.create({
+                gids: batch.map(gid => toLong(gid)),
+            })).finish();
+            const { body: replyBody } = await sendMsgAsync('gamepb.friendpb.FriendService', 'GetGameFriends', body);
+            const reply = _decodeGetGameFriendsReply(replyBody);
+            if (Array.isArray(reply?.game_friends) && reply.game_friends.length > 0) {
+                allFriends.push(...reply.game_friends);
+            }
+            if (!invitations.length && Array.isArray(reply?.invitations)) {
+                invitations = reply.invitations;
+            }
+            applicationCount = Math.max(applicationCount, toNum(reply?.application_count));
+        } catch (err) {
+            logWarn('好友', `GetGameFriends 批次失败(${modeName}, ${i + 1}-${i + batch.length}): ${err.message || err}`);
+        }
+        if (i + GET_GAME_FRIENDS_BATCH_SIZE < gids.length) {
+            await sleep(100);
+        }
+    }
+
+    const reply = {
+        game_friends: _dedupeFriendsByGid(allFriends),
+        invitations,
+        application_count: applicationCount,
+    };
+    _logFriendFetchResult('GetGameFriends', modeName, reply, fetchState);
+    return reply;
+}
+
+async function _getAllViaGameFriendsOrCache(modeName, options = {}) {
+    const fetchState = options.fetchState || null;
+    const accountId = options.accountId || null;
+    const userState = options.userState || null;
+    const directReply = await _getAllViaGameFriendsDirect(modeName, { fetchState });
+    if (_hasUsableFriendEntries(directReply, userState)) {
+        return directReply;
+    }
+
+    const reply = await _getAllViaGameFriends(modeName, { fetchState, accountId, userState });
+    if (_hasUsableFriendEntries(reply, userState)) {
+        return reply;
+    }
+
+    const cachedReply = await _getCachedFriendsReply(accountId, fetchState, {
+        userState,
+        allowVisitorSeed: false,
+    });
+    return cachedReply || reply || directReply;
+}
+
+function _isGetAllParamErrorCoolingDown(fetchState) {
+    return !!(fetchState && Number(fetchState.getAllParamErrorUntil) > Date.now());
+}
+
+function _markGetAllParamError(fetchState, label) {
+    if (!fetchState) return;
+    const nextUntil = Date.now() + GET_ALL_PARAM_ERROR_COOLDOWN_MS;
+    const changed = nextUntil > Number(fetchState.getAllParamErrorUntil || 0);
+    fetchState.getAllParamErrorUntil = nextUntil;
+    if (!changed) return;
+    log('好友', `GetAll 返回 code=1000020(${label})，30 分钟内改用好友缓存兼容模式`);
+}
+
+function _clearGetAllParamError(fetchState) {
+    if (!fetchState || !fetchState.getAllParamErrorUntil) return;
+    fetchState.getAllParamErrorUntil = 0;
+}
+
+async function _getCachedFriendsReply(accountId, fetchState, options = {}) {
+    if (!accountId) return null;
+    const cached = await _getCachedFriendsWithBootstrap(accountId, {
+        fetchState,
+        userState: options.userState || null,
+        allowVisitorSeed: !!options.allowVisitorSeed,
+    });
+    if (!Array.isArray(cached) || cached.length <= 0) return null;
+
+    const reply = {
+        game_friends: cached
+            .map((friend) => {
+                const gid = toNum(friend && friend.gid);
+                if (gid <= 0) return null;
+                const name = String((friend && friend.name) || `GID:${gid}`);
+                return {
+                    gid,
+                    uin: String((friend && friend.uin) || ''),
+                    open_id: String((friend && friend.uin) || ''),
+                    name,
+                    remark: '',
+                    avatar_url: String((friend && friend.avatarUrl) || ''),
+                    level: 0,
+                    gold: 0,
+                    plant: null,
+                    authorized_status: 0,
+                };
+            })
+            .filter(Boolean),
+        invitations: [],
+        application_count: 0,
+        _fromCache: true,
+    };
+
+    if (reply.game_friends.length <= 0) return null;
+    _logFriendFetchResult('CacheFallback', '缓存', reply, fetchState);
+    return reply;
+}
+
+async function _getAllViaGetAllOrCache(modeName, options = {}) {
+    const fetchState = options.fetchState || null;
+    const accountId = options.accountId || null;
+    const label = options.label || '兼容模式';
+    const userState = options.userState || null;
+    const retryOnEmpty = options.retryOnEmpty !== false;
+
+    if (_isGetAllParamErrorCoolingDown(fetchState)) {
+        const cachedReply = await _getCachedFriendsReply(accountId, fetchState, {
+            userState,
+            allowVisitorSeed: true,
+        });
+        if (cachedReply) return cachedReply;
+    }
+
+    try {
+        const reply = await _getAllViaGetAll(modeName, { fetchState, retryOnEmpty });
+        if (_hasUsableFriendEntries(reply, userState)) {
+            _clearGetAllParamError(fetchState);
+            return reply;
+        }
+        const cachedReply = await _getCachedFriendsReply(accountId, fetchState, {
+            userState,
+            allowVisitorSeed: true,
+        });
+        return cachedReply || reply;
+    } catch (err) {
+        if (!isParamError(err)) {
+            throw err;
+        }
+        _markGetAllParamError(fetchState, label);
+        const cachedReply = await _getCachedFriendsReply(accountId, fetchState, {
+            userState,
+            allowVisitorSeed: true,
+        });
+        if (cachedReply) return cachedReply;
+        throw err;
+    }
+}
+
 
 async function getApplications() {
     const body = types.GetApplicationsRequest.encode(types.GetApplicationsRequest.create({})).finish();
@@ -221,6 +668,11 @@ async function getApplications() {
             log('好友', `  申请[${i}]: gid=${toNum(a.gid)}, name=${a.name || ''}, open_id=${a.open_id || ''}, level=${toNum(a.level)}`);
         });
     }
+    if (appCount > 0) {
+        await cacheFriendSeeds(reply.applications || [], {
+            accountId: _resolveRuntimeAccountId(getUserState()),
+        });
+    }
     return reply;
 }
 
@@ -230,7 +682,16 @@ async function acceptFriends(gids) {
         friend_gids: gids.map(g => toLong(g)),
     })).finish();
     const { body: replyBody } = await sendMsgAsync('gamepb.friendpb.FriendService', 'AcceptFriends', body);
-    return types.AcceptFriendsReply.decode(replyBody);
+    const reply = types.AcceptFriendsReply.decode(replyBody);
+    const acceptedSeeds = []
+        .concat(reply && Array.isArray(reply.friends) ? reply.friends : [])
+        .concat((Array.isArray(gids) ? gids : []).map(gid => ({ gid })));
+    if (acceptedSeeds.length > 0) {
+        await cacheFriendSeeds(acceptedSeeds, {
+            accountId: _resolveRuntimeAccountId(getUserState()),
+        });
+    }
+    return reply;
 }
 
 
@@ -241,7 +702,18 @@ async function enterFriendFarm(friendGid, isUrgent = false) {
     })).finish();
     const sendFn = isUrgent ? sendMsgAsyncUrgent : sendMsgAsync;
     const { body: replyBody } = await sendFn('gamepb.visitpb.VisitService', 'Enter', body);
-    return types.VisitEnterReply.decode(replyBody);
+    const reply = types.VisitEnterReply.decode(replyBody);
+    const seeds = [{ gid: toNum(friendGid) }];
+    if (reply && reply.basic) {
+        seeds.unshift({
+            ...reply.basic,
+            gid: toNum(reply.basic.gid) || toNum(friendGid),
+        });
+    }
+    await cacheFriendSeeds(seeds, {
+        accountId: _resolveRuntimeAccountId(getUserState()),
+    });
+    return reply;
 }
 
 

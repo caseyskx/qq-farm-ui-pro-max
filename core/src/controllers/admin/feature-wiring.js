@@ -77,6 +77,7 @@ function registerAdminFeatureRoutes({
     clearTimeoutRef,
     consoleRef,
     getIo,
+    getDispatcher,
     registerAuthRoutes,
     registerLegacyLogoutRoute,
     registerSystemPublicRoutes,
@@ -94,6 +95,7 @@ function registerAdminFeatureRoutes({
     registerAdminOperationLogRoutes,
     registerTrialCardRoutes,
     registerAnnouncementAdminRoutes,
+    registerSystemUpdateAdminRoutes,
     registerLogReadRoutes,
     registerNotificationsRoute,
     registerQrRoutes,
@@ -328,6 +330,16 @@ function registerAdminFeatureRoutes({
         parseUpdateLog,
         getIo,
         store,
+    });
+
+    registerSystemUpdateAdminRoutes({
+        app,
+        authRequired,
+        userRequired,
+        adminLogger,
+        version,
+        getDispatcherRef: getDispatcher,
+        getAccountsSnapshotRef: getAccountsSnapshot,
     });
 
     registerLogReadRoutes({

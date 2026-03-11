@@ -1,5 +1,7 @@
+const process = require('node:process');
 const { findAccountByRef, normalizeAccountRef, resolveAccountId: resolveAccountIdByList } = require('../services/account-resolver');
 const { getSchedulerRegistrySnapshot } = require('../services/scheduler');
+const { getDispatcher } = require('../cluster/master-dispatcher');
 
 function createDataProvider(options) {
     const {
@@ -19,7 +21,10 @@ function createDataProvider(options) {
         startWorker,
         stopWorker,
         restartWorker,
+        currentRole = process.env.ROLE || 'standalone',
+        getDispatcherRef = getDispatcher,
     } = options;
+    const isClusterMaster = String(currentRole || '').trim() === 'master';
 
     async function getStoredAccountsList() {
         const data = await getAccounts();
@@ -91,6 +96,33 @@ function createDataProvider(options) {
         }
 
         return { downgraded };
+    }
+
+    async function rebalanceClusterIfNeeded() {
+        if (!isClusterMaster || typeof getDispatcherRef !== 'function') {
+            return;
+        }
+        const dispatcher = getDispatcherRef();
+        if (dispatcher && typeof dispatcher.rebalance === 'function') {
+            await dispatcher.rebalance();
+        }
+    }
+
+    async function updateClusterAccountRunningState(account, running) {
+        if (!account || !account.id) {
+            return false;
+        }
+        if (!store || typeof store.addOrUpdateAccount !== 'function') {
+            return false;
+        }
+        store.addOrUpdateAccount({
+            id: account.id,
+            running: !!running,
+            connected: false,
+            wsError: null,
+        });
+        await rebalanceClusterIfNeeded();
+        return true;
     }
 
     return {
@@ -377,6 +409,9 @@ function createDataProvider(options) {
             const accountId = await resolveAccountRefId(accountRef);
             let acc = await findAccountByAnyRef(accountId || accountRef);
             if (!acc) return false;
+            if (isClusterMaster) {
+                return updateClusterAccountRunningState(acc, true);
+            }
             // 解决精简版数据遗漏 code 字段导致连接 websocket 时抛出 400 失败的问题
             if (store && typeof store.getAccountFull === 'function') {
                 const fullAcc = await store.getAccountFull(acc.id);
@@ -392,6 +427,9 @@ function createDataProvider(options) {
             const accountId = await resolveAccountRefId(accountRef);
             const acc = await findAccountByAnyRef(accountId || accountRef);
             if (!acc) return false;
+            if (isClusterMaster) {
+                return updateClusterAccountRunningState(acc, false);
+            }
             if (accountId) stopWorker(accountId);
             return true;
         },
@@ -400,6 +438,10 @@ function createDataProvider(options) {
             const accountId = await resolveAccountRefId(accountRef);
             let acc = await findAccountByAnyRef(accountId || accountRef);
             if (!acc) return false;
+            if (isClusterMaster) {
+                await updateClusterAccountRunningState(acc, false);
+                return updateClusterAccountRunningState(acc, true);
+            }
             // 补全 code 等 auth_data 字段，避免精简版数据缺失导致 WS 400
             if (store && typeof store.getAccountFull === 'function') {
                 const fullAcc = await store.getAccountFull(acc.id);
@@ -413,7 +455,17 @@ function createDataProvider(options) {
 
         isAccountRunning: async (accountRef) => {
             const accountId = await resolveAccountRefId(accountRef);
-            return !!(accountId && workers[accountId]);
+            if (!accountId) {
+                return false;
+            }
+            if (workers[accountId]) {
+                return true;
+            }
+            if (!isClusterMaster) {
+                return false;
+            }
+            const account = await findAccountByAnyRef(accountId);
+            return !!(account && account.running);
         },
 
         getSchedulerStatus: async (accountRef) => {

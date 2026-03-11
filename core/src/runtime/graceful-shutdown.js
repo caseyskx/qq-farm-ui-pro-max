@@ -1,3 +1,56 @@
+const { execFileSync } = require('node:child_process');
+
+function getShutdownSignalContext(processRef) {
+    const context = {};
+
+    if (processRef && typeof processRef.pid === 'number') {
+        context.pid = processRef.pid;
+        context.platform = process.platform;
+    }
+
+    if (processRef && typeof processRef.ppid === 'number') {
+        context.ppid = processRef.ppid;
+    }
+
+    try {
+        if (processRef && typeof processRef.cwd === 'function') {
+            context.cwd = processRef.cwd();
+        }
+    } catch {}
+
+    try {
+        if (processRef && typeof processRef.uptime === 'function') {
+            context.uptimeSec = Math.floor(processRef.uptime());
+        }
+    } catch {}
+
+    try {
+        if (Array.isArray(processRef?.argv) && processRef.argv.length > 0) {
+            context.argv = processRef.argv.slice(0, 4);
+        }
+    } catch {}
+
+    if (process.platform === 'win32' || !context.pid || !context.ppid) {
+        return context;
+    }
+
+    try {
+        const output = execFileSync(
+            'ps',
+            ['-o', 'pid=,ppid=,command=', '-p', String(context.pid), '-p', String(context.ppid)],
+            { encoding: 'utf8' },
+        ).trim();
+        if (output) {
+            context.processTree = output
+                .split('\n')
+                .map(line => line.trim())
+                .filter(Boolean);
+        }
+    } catch {}
+
+    return context;
+}
+
 function registerRuntimeShutdownHandlers({
     processRef,
     runtimeEngine,
@@ -16,16 +69,17 @@ function registerRuntimeShutdownHandlers({
         : async () => {};
 
     const handleSignal = async (signal) => {
+        const signalContext = getShutdownSignalContext(processRef);
         if (shuttingDown) {
             if (logger && typeof logger.warn === 'function') {
-                logger.warn('graceful shutdown already in progress', { signal });
+                logger.warn('graceful shutdown already in progress', { signal, ...signalContext });
             }
             return;
         }
 
         shuttingDown = true;
         if (logger && typeof logger.info === 'function') {
-            logger.info('received shutdown signal', { signal });
+            logger.info('received shutdown signal', { signal, ...signalContext });
         }
 
         if (forceExitAfterMs > 0) {

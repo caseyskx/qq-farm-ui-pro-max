@@ -1,6 +1,15 @@
+const { version } = require('../../package.json');
 const { createModuleLogger } = require('../services/logger');
+const defaultStore = require('../models/store');
+const {
+    getSystemUpdateRuntime,
+} = require('../services/system-update-config');
+const {
+    buildClusterNodeDrainMap,
+    saveClusterNodeRuntimeSnapshot,
+} = require('../services/system-update-runtime');
+
 const masterLogger = createModuleLogger('master-dispatcher');
-const store = require('../models/store');
 
 function removeEventListener(target, event, handler) {
     if (!target || typeof handler !== 'function') {
@@ -17,7 +26,7 @@ function removeEventListener(target, event, handler) {
 
 function syncAccountRuntimeSnapshot(accountId, status, extra = {}) {
     const id = String(accountId || '').trim();
-    if (!id || typeof store.addOrUpdateAccount !== 'function') return;
+    if (!id || typeof defaultStore.addOrUpdateAccount !== 'function') return;
 
     const panelStatus = (status && typeof status === 'object') ? status : {};
     const liveStatus = (panelStatus.status && typeof panelStatus.status === 'object') ? panelStatus.status : {};
@@ -25,7 +34,7 @@ function syncAccountRuntimeSnapshot(accountId, status, extra = {}) {
     const now = Date.now();
 
     try {
-        store.addOrUpdateAccount({
+        defaultStore.addOrUpdateAccount({
             id,
             running: extra.running !== undefined ? !!extra.running : true,
             connected,
@@ -45,24 +54,29 @@ function syncAccountRuntimeSnapshot(accountId, status, extra = {}) {
 }
 
 class MasterDispatcher {
-    constructor(io) {
+    constructor(io, deps = {}) {
         this.io = io;
-        this.workers = new Map(); // socketId -> { nodeId, socket, assigned: [] }
+        this.store = deps.store || defaultStore;
+        this.logger = deps.logger || masterLogger;
+        this.runtimeVersion = String(deps.version || version || '').trim();
+        this.getSystemUpdateRuntimeRef = deps.getSystemUpdateRuntimeRef || getSystemUpdateRuntime;
+        this.saveClusterNodeRuntimeSnapshotRef = deps.saveClusterNodeRuntimeSnapshotRef || saveClusterNodeRuntimeSnapshot;
+        this.workers = new Map(); // socketId -> { nodeId, socket, assigned: [], draining, version, lastSeenAt }
         this.accountToWorker = new Map(); // accountId -> socketId (Sticky Sessions)
         this.gcHandle = null;
         this.connectionHandler = null;
         this.socketBindings = new Map();
+        this.clusterRuntimeSyncPromise = null;
     }
 
     init() {
         if (!this.io) {
-            masterLogger.error("MasterDispatcher required initialized Socket.IO instance");
+            this.logger.error('MasterDispatcher required initialized Socket.IO instance');
             return;
         }
 
-        masterLogger.info('✅ MasterDispatcher(分布式控制面) 初始化成功, 等待 Worker 接入...');
+        this.logger.info('✅ MasterDispatcher(分布式控制面) 初始化成功, 等待 Worker 接入...');
 
-        // 引入定期 GC 机制：每 15 分钟执行一次泄漏检查
         this.gcHandle = setInterval(() => {
             if (this.accountToWorker) {
                 let removed = 0;
@@ -73,7 +87,7 @@ class MasterDispatcher {
                     }
                 }
                 if (removed > 0) {
-                    masterLogger.warn(`[Master GC] 成功清理了 ${removed} 个遗留的幽灵 Session 绑定, 当前路由表大小: ${this.accountToWorker.size}`);
+                    this.logger.warn(`[Master GC] 成功清理了 ${removed} 个遗留的幽灵 Session 绑定, 当前路由表大小: ${this.accountToWorker.size}`);
                 }
             }
         }, 15 * 60 * 1000);
@@ -81,26 +95,61 @@ class MasterDispatcher {
             this.gcHandle.unref();
         }
 
-        // 复用原有的 admin 隧道增加 worker: 开头的命令监听
         this.connectionHandler = (socket) => {
             const workerReadyHandler = async () => {
-                const nodeId = socket.handshake.auth?.nodeId || `unknown-${socket.id}`;
-                masterLogger.info(`[Master] 探测到新的 Worker 接入就绪: ${nodeId}`);
+                const nodeId = String(socket.handshake.auth?.nodeId || `unknown-${socket.id}`).trim();
+                this.logger.info(`[Master] 探测到新的 Worker 接入就绪: ${nodeId}`);
 
                 this.workers.set(socket.id, {
                     nodeId,
                     socket,
-                    assigned: []
+                    assigned: [],
+                    draining: false,
+                    version: this.runtimeVersion,
+                    lastSeenAt: Date.now(),
                 });
 
-                // 触发负载均衡重新分配
                 await this.rebalance();
+            };
+
+            const workerHeartbeatHandler = async (payload = {}) => {
+                const workerBox = this.workers.get(socket.id);
+                if (!workerBox) {
+                    return;
+                }
+
+                const previousNodeId = workerBox.nodeId;
+                const previousDraining = !!workerBox.draining;
+                workerBox.lastSeenAt = Date.now();
+                if (payload.version) {
+                    workerBox.version = String(payload.version || '').trim();
+                }
+                if (payload.nodeId) {
+                    workerBox.nodeId = String(payload.nodeId || '').trim() || workerBox.nodeId;
+                }
+                try {
+                    const drainNodeIds = await this.getDrainNodeIdSet();
+                    const candidateNodeIds = new Set([
+                        String(previousNodeId || '').trim(),
+                        String(workerBox.nodeId || '').trim(),
+                    ].filter(Boolean));
+                    const nextDraining = Array.from(candidateNodeIds).some(nodeId => drainNodeIds.has(nodeId));
+                    if (nextDraining !== previousDraining) {
+                        workerBox.draining = nextDraining;
+                        this.logger.info(`[Master] Worker(${workerBox.nodeId}) 排空状态变化 -> ${nextDraining ? 'draining' : 'active'}, 立即触发重新分配`);
+                        await this.rebalance();
+                        return;
+                    }
+                } catch (error) {
+                    this.logger.warn(`[Master] 处理 Worker 心跳排空状态失败: ${error.message}`);
+                }
+                this.queueClusterNodeRuntimeSync();
             };
 
             const disconnectHandler = async () => {
                 if (this.workers.has(socket.id)) {
                     const workerBox = this.workers.get(socket.id);
-                    masterLogger.warn(`[Master] Worker 节点掉线: ${workerBox.nodeId}`);
+                    this.logger.warn(`[Master] Worker 节点掉线: ${workerBox.nodeId}`);
                     for (const acc of (workerBox.assigned || [])) {
                         syncAccountRuntimeSnapshot(acc && acc.id, {
                             connection: { connected: false },
@@ -116,16 +165,26 @@ class MasterDispatcher {
                         }, { running: !!(acc && acc.running), wsError: { message: `Worker 节点 ${workerBox.nodeId} 已断开` } });
                     }
                     this.workers.delete(socket.id);
-                    // 重新分配孤儿任务
                     await this.rebalance();
+                    await this.saveClusterNodeRuntimeSnapshotRef([{
+                        nodeId: workerBox.nodeId,
+                        role: 'worker',
+                        status: 'offline',
+                        version: workerBox.version || this.runtimeVersion,
+                        connected: false,
+                        draining: !!workerBox.draining,
+                        assignedCount: 0,
+                        assignedAccountIds: [],
+                        updatedAt: Date.now(),
+                    }]).catch((error) => {
+                        this.logger.warn(`[Master] 写入离线节点状态失败: ${error.message}`);
+                    });
                 }
                 this.socketBindings.delete(socket.id);
+                this.queueClusterNodeRuntimeSync();
             };
 
-            // 监听 Worker 传回的状态快照与日志
             const workerStatusSyncHandler = (payload) => {
-                // 收到任意 Worker 传回来的业务执行状态，直接广播给所有挂载页面的 Admin
-                // 借用 admin.js 原始机制 (此时 admin.js 中应保留 status 的中转订阅路由)
                 const { accountId, status } = payload || {};
                 if (accountId) {
                     syncAccountRuntimeSnapshot(accountId, status);
@@ -147,6 +206,7 @@ class MasterDispatcher {
             };
 
             socket.on('worker:ready', workerReadyHandler);
+            socket.on('worker:heartbeat', workerHeartbeatHandler);
             socket.on('disconnect', disconnectHandler);
             socket.on('worker:status:sync', workerStatusSyncHandler);
             socket.on('worker:log:new', workerLogHandler);
@@ -156,6 +216,7 @@ class MasterDispatcher {
                 socket,
                 handlers: {
                     'worker:ready': workerReadyHandler,
+                    'worker:heartbeat': workerHeartbeatHandler,
                     disconnect: disconnectHandler,
                     'worker:status:sync': workerStatusSyncHandler,
                     'worker:log:new': workerLogHandler,
@@ -190,71 +251,143 @@ class MasterDispatcher {
         this.accountToWorker.clear();
     }
 
-    /**
-     * 将目前系统中开启了 running=true 的账号根据策略分发给存活的 worker
-     */
+    async getDrainNodeIdSet() {
+        try {
+            const runtime = await this.getSystemUpdateRuntimeRef();
+            return new Set(
+                Array.from(buildClusterNodeDrainMap(runtime).entries())
+                    .filter(([, draining]) => !!draining)
+                    .map(([nodeId]) => nodeId),
+            );
+        } catch (error) {
+            this.logger.warn(`[Master] 读取节点排空状态失败，已回退到非排空模式: ${error.message}`);
+            return new Set();
+        }
+    }
+
+    buildWorkerNodeSnapshot() {
+        return Array.from(this.workers.values()).map(worker => ({
+            nodeId: worker.nodeId,
+            role: 'worker',
+            status: worker.draining ? 'draining' : (worker.assigned.length > 0 ? 'active' : 'idle'),
+            version: worker.version || this.runtimeVersion,
+            connected: true,
+            draining: !!worker.draining,
+            assignedCount: Array.isArray(worker.assigned) ? worker.assigned.length : 0,
+            assignedAccountIds: Array.isArray(worker.assigned) ? worker.assigned.map(item => String(item && item.id || '').trim()).filter(Boolean) : [],
+            updatedAt: worker.lastSeenAt || Date.now(),
+        }));
+    }
+
+    async syncClusterNodeRuntime() {
+        await this.saveClusterNodeRuntimeSnapshotRef(this.buildWorkerNodeSnapshot());
+    }
+
+    queueClusterNodeRuntimeSync() {
+        if (this.clusterRuntimeSyncPromise) {
+            return this.clusterRuntimeSyncPromise;
+        }
+        this.clusterRuntimeSyncPromise = Promise.resolve()
+            .then(() => this.syncClusterNodeRuntime())
+            .catch((error) => {
+                this.logger.warn(`[Master] 写入集群节点状态失败: ${error.message}`);
+            })
+            .finally(() => {
+                this.clusterRuntimeSyncPromise = null;
+            });
+        return this.clusterRuntimeSyncPromise;
+    }
+
+    getWorkerNodes() {
+        return this.buildWorkerNodeSnapshot();
+    }
+
     async rebalance() {
         if (this.workers.size === 0) {
-            masterLogger.warn(`[Master] 警告: 当前没有可用的 Worker 节点, 全局任务停滞。`);
+            this.logger.warn('[Master] 警告: 当前没有可用的 Worker 节点, 全局任务停滞。');
+            await this.queueClusterNodeRuntimeSync();
             return;
         }
 
-        const data = typeof store.getAccountsFresh === 'function'
-            ? await store.getAccountsFresh()
-            : await store.getAccounts();
+        const data = typeof this.store.getAccountsFresh === 'function'
+            ? await this.store.getAccountsFresh()
+            : await this.store.getAccounts();
         const activeAccounts = (data?.accounts || []).filter(a => a.running);
 
-        const clusterConfig = store.getClusterConfig ? store.getClusterConfig() : { dispatcherStrategy: 'round_robin' };
+        const clusterConfig = this.store.getClusterConfig ? this.store.getClusterConfig() : { dispatcherStrategy: 'round_robin' };
         const isLeastLoad = clusterConfig.dispatcherStrategy === 'least_load';
+        const drainNodeIds = await this.getDrainNodeIdSet();
 
-        masterLogger.info(`[Master] 开始 Rebalance (策略: ${clusterConfig.dispatcherStrategy})! 总执行账号: ${activeAccounts.length}, 可用 Worker 数: ${this.workers.size}`);
+        this.logger.info(`[Master] 开始 Rebalance (策略: ${clusterConfig.dispatcherStrategy})! 总执行账号: ${activeAccounts.length}, 可用 Worker 数: ${this.workers.size}`);
 
         const wList = Array.from(this.workers.values());
+        wList.forEach((worker) => {
+            worker.draining = drainNodeIds.has(worker.nodeId);
+        });
 
-        // 如果是传统的 round_robin (洗牌模式)
+        let assignmentWorkers = wList.filter(worker => !worker.draining);
+        if (assignmentWorkers.length === 0) {
+            assignmentWorkers = wList;
+            if (drainNodeIds.size > 0) {
+                this.logger.warn('[Master] 所有在线 Worker 都处于排空状态，暂时忽略排空限制以避免任务停滞。');
+            }
+        }
+
         if (!isLeastLoad) {
-            // 清空所有 Worker 之前的账本
             wList.forEach(w => w.assigned = []);
             this.accountToWorker.clear();
 
-            // 简易 RR 均匀分配算法
             activeAccounts.forEach((acc, index) => {
-                const targetWorkerSocketId = Array.from(this.workers.keys())[index % this.workers.size];
-                const targetWorker = this.workers.get(targetWorkerSocketId);
+                const targetWorker = assignmentWorkers[index % assignmentWorkers.length];
+                if (!targetWorker) return;
                 targetWorker.assigned.push(acc);
-                this.accountToWorker.set(String(acc.id), targetWorkerSocketId);
+                const socketId = Array.from(this.workers.entries()).find(([, item]) => item === targetWorker)?.[0];
+                if (socketId) {
+                    this.accountToWorker.set(String(acc.id), socketId);
+                }
             });
         } else {
-            // == 智能 Least Load (最小负荷) 粘性路由 ==
-            // 阶段1：清理死去的映射 / 移除不再 running 的账号映射
             const activeIds = new Set(activeAccounts.map(a => String(a.id)));
             for (const [accId, socketId] of this.accountToWorker.entries()) {
-                if (!activeIds.has(accId) || !this.workers.has(socketId)) {
+                const workerBox = this.workers.get(socketId);
+                if (!activeIds.has(accId) || !workerBox || workerBox.draining) {
                     this.accountToWorker.delete(accId);
                 }
             }
 
-            // 阶段2：重置 Worker 上的分配账本，我们将使用最新的 this.accountToWorker 进行重新推演
             wList.forEach(w => w.assigned = []);
 
-            // 阶段3：按需推流
             for (const acc of activeAccounts) {
                 const sId = String(acc.id);
                 let targetSocketId = this.accountToWorker.get(sId);
 
-                // 如果账号暂无归属，则寻找当前分配人数最少的 Worker
                 if (!targetSocketId) {
-                    let leastWorker = null;
+                    let leastWorkerSocketId = '';
                     let minCount = Infinity;
 
-                    for (const [wSocketId, wBox] of this.workers.entries()) {
-                        if (wBox.assigned.length < minCount) {
-                            leastWorker = wSocketId;
-                            minCount = wBox.assigned.length;
+                    for (const [workerSocketId, workerBox] of this.workers.entries()) {
+                        if (workerBox.draining) {
+                            continue;
+                        }
+                        if (workerBox.assigned.length < minCount) {
+                            leastWorkerSocketId = workerSocketId;
+                            minCount = workerBox.assigned.length;
                         }
                     }
-                    targetSocketId = leastWorker;
-                    this.accountToWorker.set(sId, targetSocketId);
+
+                    if (!leastWorkerSocketId) {
+                        for (const [workerSocketId, workerBox] of this.workers.entries()) {
+                            if (workerBox.assigned.length < minCount) {
+                                leastWorkerSocketId = workerSocketId;
+                                minCount = workerBox.assigned.length;
+                            }
+                        }
+                    }
+
+                    targetSocketId = leastWorkerSocketId;
+                    if (targetSocketId) {
+                        this.accountToWorker.set(sId, targetSocketId);
+                    }
                 }
 
                 const wBox = this.workers.get(targetSocketId);
@@ -264,20 +397,21 @@ class MasterDispatcher {
             }
         }
 
-        // 批量向远端发射最新账本
         for (const worker of wList) {
-            masterLogger.info(`[Master] 向 Worker(${worker.nodeId}) 下发分配集: ${worker.assigned.length} 个账号.`);
+            this.logger.info(`[Master] 向 Worker(${worker.nodeId}) 下发分配集: ${worker.assigned.length} 个账号.`);
             worker.socket.emit('master:assign:accounts', {
-                accounts: worker.assigned
+                accounts: worker.assigned,
             });
         }
+
+        await this.queueClusterNodeRuntimeSync();
     }
 }
 
 let _instance = null;
-function initDispatcher(io) {
+function initDispatcher(io, deps = {}) {
     if (!_instance) {
-        _instance = new MasterDispatcher(io);
+        _instance = new MasterDispatcher(io, deps);
         _instance.init();
     }
     return _instance;
@@ -294,4 +428,4 @@ function disposeDispatcher() {
     _instance = null;
 }
 
-module.exports = { initDispatcher, getDispatcher, disposeDispatcher };
+module.exports = { MasterDispatcher, initDispatcher, getDispatcher, disposeDispatcher };

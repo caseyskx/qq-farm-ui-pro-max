@@ -8,6 +8,7 @@
 
 ### 快速索引（精简版）
 
+- `v4.5.19 (2026-03-11)` 部署统一入口与宿主机更新代理落地：统一安装/更新脚本、Release 资产补齐、旧服 current 链接迁移与自测闭环全部完成。
 - `v4.5.18 (2026-03-10)` 发布链路与验收闭环：版本号抬升、部署脚本/修库脚本继续收口，前后端测试、lint、构建与公告/文档检查通过。
 - `2026-03-09` 访客面板专用链路落地：新增独立接口、错误码分层、竞态保护与空账号状态清理；并完成一次链路复查与修复闭环。
 - `v4.5.11 (2026-03-09)` 外观与汇报链路补正：主题联动参数补齐、SMTP 汇报打通、背包土地道具兼容修复、构建与校验通过。
@@ -17,6 +18,24 @@
 - `v4.5.6 (2026-03-08)` 用户状态与登录链路修复：`users.status` 语义拆分、QQ/微信登录续航增强、发布链路稳健性提升。
 
 > 说明：以上为“快速浏览摘要”；完整变更、验证命令与问题复盘请以下方详细记录为准。
+
+### 开发补记 - v4.5.19 部署统一入口与宿主机更新代理 (2026-03-11)
+
+#### ✅ 本轮发布收口
+- ✅ **版本口径已抬升到 `v4.5.19`**: `core/package.json`、`web/package.json`、Docker 模板、离线包脚本、构建脚本和 GitHub Actions 默认版本已经同步更新。
+- ✅ **Release 资产已补齐统一部署链路**: 发布包现在会附带 `install-or-update.sh`、`update-agent.sh`、`install-update-agent-service.sh`、`manual-config-wizard.sh`、`stack-layout.sh` 与 `verify-stack.sh`，避免 Release 包继续缺新脚本。
+- ✅ **部署文档已切到新目录口径**: 部署说明默认使用 `/opt/qq-farm-current` 和 `/opt/YYYY_MM_DD/qq-farm`，同时保留旧服修复入口以兼容历史目录。
+
+#### 🧪 本轮验收
+- ✅ `bash scripts/deploy/self-test-install.sh --force-build-fallback`
+- ✅ `pnpm check:announcements`
+- ✅ `pnpm check:doc-links`
+- ✅ `bash -n scripts/deploy/*.sh deploy/scripts/*.sh scripts/docker/*.sh`
+- ✅ `node --test core/__tests__/system-update-manifest.test.js core/__tests__/system-update-jobs.test.js core/__tests__/system-update-runtime.test.js core/__tests__/admin-system-update-routes.test.js`
+
+#### 📌 本轮发布说明
+- 📌 **根 README 仍只修改部署章节**: 本轮没有改动根 README 的非部署内容；镜像与服务器操作说明全部收口在部署章节和部署专用文档。
+- 📌 **旧服升级顺序继续固定**: 先 `repair-deploy.sh` 修部署骨架，再 `install-or-update.sh --action update --preserve-current` 更新主程序，避免旧链接、旧脚本和旧编排文件拖累升级。
 
 ### 开发补记 - v4.5.18 发布链路与验收闭环 (2026-03-10)
 

@@ -3,6 +3,7 @@ import { watch } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import api from '@/api'
 import { adminToken, clearLocalAuthState } from '@/utils/auth'
+import { attemptRouteRecovery, clearRouteRecoveryState, isRecoverableRouteError } from '@/utils/route-recovery'
 import { menuRoutes } from './menu'
 import 'nprogress/nprogress.css'
 
@@ -174,13 +175,17 @@ router.beforeEach(async (to, _from) => {
 
 router.afterEach(() => {
   NProgress.done()
+  clearRouteRecoveryState()
 })
 
 router.onError((error, to) => {
-  if (error.message.includes('Failed to fetch dynamically imported module') || error.message.includes('Importing a module script failed')) {
+  if (isRecoverableRouteError(error)) {
     console.warn('捕获到动态模块加载异常，准备重新加载目标路由:', to.fullPath)
-    window.location.href = to.fullPath
+    if (attemptRouteRecovery(to.fullPath))
+      return
   }
+
+  NProgress.done()
 })
 
 export default router

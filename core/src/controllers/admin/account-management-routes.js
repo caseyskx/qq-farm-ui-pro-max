@@ -17,6 +17,18 @@ function allocateNextAccountId(snapshot) {
     return String(Math.max(nextId, 1));
 }
 
+function getDuplicateIdentityRef(body) {
+    return String((body && (body.uin || body.qq)) || '').trim();
+}
+
+function hasFreshLoginCredential(body) {
+    const loginType = String((body && body.loginType) || '').trim().toLowerCase();
+    if (loginType !== 'qr' && loginType !== 'manual') {
+        return false;
+    }
+    return !!String((body && body.code) || '').trim() || !!String((body && body.authTicket) || '').trim();
+}
+
 function registerAccountManagementRoutes({
     app,
     accountOwnershipRequired,
@@ -65,19 +77,21 @@ function registerAccountManagementRoutes({
             const body = (req.body && typeof req.body === 'object') ? req.body : {};
             const isCreateRequest = !body.id;
             let createSnapshot = null;
+            const shouldStartAfterSave = hasFreshLoginCredential(body);
 
             if (isCreateRequest) {
                 createSnapshot = await getAccountsSnapshot({ force: true });
             }
 
-            if (isCreateRequest && body.uin && body.platform) {
+            const duplicateIdentityRef = getDuplicateIdentityRef(body);
+            if (isCreateRequest && duplicateIdentityRef && body.platform) {
                 const duplicateEntry = getAccountEntries(createSnapshot).find(
-                    a => String(a.uin) === String(body.uin) && a.platform === body.platform
+                    a => String((a && (a.uin || a.qq)) || '') === duplicateIdentityRef && a.platform === body.platform
                 );
                 if (duplicateEntry) {
-                    consoleRef.log(`[API /api/accounts] 拦截重复创建: UIN ${body.uin} 已存在，转为更新 (ID: ${duplicateEntry.id})`);
+                    consoleRef.log(`[API /api/accounts] 拦截重复创建: 标识 ${duplicateIdentityRef} 已存在，转为更新 (ID: ${duplicateEntry.id})`);
                     body.id = duplicateEntry.id;
-                    if (!body.name || body.name === '扫码账号' || body.name === body.uin) {
+                    if (!body.name || body.name === '扫码账号' || body.name === duplicateIdentityRef) {
                         body.name = duplicateEntry.name;
                     }
                 }
@@ -164,7 +178,9 @@ function registerAccountManagementRoutes({
                 const newAcc = savedAccount || data.accounts[data.accounts.length - 1];
                 if (newAcc) await provider.startAccount(newAcc.id);
             } else if (wasRunning) {
-                await provider.restartAccount(payload.id);
+                await provider.restartAccount(savedAccountId || payload.id);
+            } else if (shouldStartAfterSave && savedAccountId) {
+                await provider.startAccount(savedAccountId);
             }
 
             res.json({ ok: true, data });

@@ -140,8 +140,10 @@ watch(adminToken, async (newToken, oldToken) => {
 /* Global styles */
 body {
   margin: 0;
-  font-family:
-    'Avenir Next', 'Segoe UI Variable Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', sans-serif;
+  font-family: var(--ui-font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .ui-app-root {

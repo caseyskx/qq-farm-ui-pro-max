@@ -3,6 +3,7 @@
  * 提取各服务模块中重复的代码，统一管理
  */
 
+const { getFruitName, getItemById, getPlantByFruitId, getPlantBySeedId } = require('../config/gameConfig');
 const { toNum } = require('../utils/utils');
 
 // ============ 日期相关 ============
@@ -51,6 +52,44 @@ const ITEM_NAMES = {
     1002: '点券',
 };
 
+function getRewardItemName(itemId) {
+    const id = toNum(itemId);
+    if (id <= 0) return '';
+
+    if (ITEM_NAMES[id]) {
+        return ITEM_NAMES[id];
+    }
+
+    const item = getItemById(id);
+    if (item && item.name) {
+        return String(item.name);
+    }
+
+    const fruitPlant = getPlantByFruitId(id);
+    if (fruitPlant) {
+        return `${getFruitName(id)}果实`;
+    }
+
+    const seedPlant = getPlantBySeedId(id);
+    if (seedPlant && seedPlant.name) {
+        return `${seedPlant.name}种子`;
+    }
+
+    return `物品#${id}`;
+}
+
+function formatRewardEntry(itemId, count) {
+    const id = toNum(itemId);
+    const normalizedCount = toNum(count);
+    if (normalizedCount <= 0) return '';
+    const name = getRewardItemName(id);
+    if (!name) return '';
+    if (ITEM_NAMES[id]) {
+        return `${name}${normalizedCount}`;
+    }
+    return `${name}x${normalizedCount}`;
+}
+
 /**
  * 获取奖励摘要字符串
  * @param {Array} items - 物品列表
@@ -63,8 +102,8 @@ function getRewardSummary(items) {
         const id = toNum(it.id);
         const count = toNum(it.count);
         if (count <= 0) continue;
-        const itemName = ITEM_NAMES[id] || `物品${id}`;
-        summary.push(`${itemName}${count}`);
+        const entry = formatRewardEntry(id, count);
+        if (entry) summary.push(entry);
     }
     return summary.join('/');
 }
@@ -84,7 +123,7 @@ function getDetailedRewardSummary(items) {
         if (id === 1 || id === 1001) result.gold += count;
         else if (id === 2 || id === 1101) result.exp += count;
         else if (id === 1002) result.coupon += count;
-        else result.items.push({ id, count });
+        else result.items.push({ id, count, name: getRewardItemName(id) });
     }
     return result;
 }

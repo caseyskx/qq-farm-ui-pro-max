@@ -1,12 +1,14 @@
 /* eslint-disable no-alert, unused-imports/no-unused-vars */
 
 <script setup lang="ts">
+import type { MetaBadgeTone } from '@/utils/ui-badge'
 import type { DashboardViewState } from '@/utils/view-preferences'
 import { useIntervalFn, useStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import api from '@/api'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
@@ -374,12 +376,12 @@ function formatDuration(seconds: number) {
 
 function getLogTagClass(tag: string) {
   if (tag === '错误')
-    return 'dashboard-log-tag dashboard-log-tag--danger'
+    return 'dashboard-log-tag ui-meta-chip--danger'
   if (tag === '系统')
-    return 'dashboard-log-tag dashboard-log-tag--info'
+    return 'dashboard-log-tag ui-meta-chip--info'
   if (tag === '警告')
-    return 'dashboard-log-tag dashboard-log-tag--warning'
-  return 'dashboard-log-tag dashboard-log-tag--brand'
+    return 'dashboard-log-tag ui-meta-chip--warning'
+  return 'dashboard-log-tag ui-meta-chip--brand'
 }
 
 function getLogMsgClass(tag: string) {
@@ -586,7 +588,7 @@ function getTaskGroup(name: string): string {
 }
 
 // 获取任务队列显示用的所有任务（合并 runtime + worker 双层数据）
-const schedulerTasks = computed(() => {
+const mergedSchedulerTasks = computed(() => {
   const data = schedulerPreview.value
   if (!data)
     return []
@@ -603,9 +605,6 @@ const schedulerTasks = computed(() => {
   for (const s of allSchedulers) {
     for (const t of (s.tasks || [])) {
       const taskName = t.name || ''
-      // 默认隐藏基础设施任务，除非用户打开"显示全部"
-      if (!showAllTasks.value && INFRA_TASKS.has(taskName))
-        continue
       tasks.push({
         ...t,
         namespace: s.namespace,
@@ -614,8 +613,15 @@ const schedulerTasks = computed(() => {
     }
   }
 
+  return tasks
+})
+
+const schedulerTasks = computed(() => {
+  const tasks = mergedSchedulerTasks.value
+    .filter(task => showAllTasks.value || !INFRA_TASKS.has(task.name || ''))
+
   // 智能排序：运行中排最前 → 即将执行 → 按 nextRunAt 升序
-  return tasks.sort((a, b) => {
+  return [...tasks].sort((a, b) => {
     if (a.running && !b.running)
       return -1
     if (!a.running && b.running)
@@ -623,6 +629,11 @@ const schedulerTasks = computed(() => {
     return (a.nextRunAt || Infinity) - (b.nextRunAt || Infinity)
   })
 })
+
+const allSchedulerTaskCount = computed(() => mergedSchedulerTasks.value.length)
+const hiddenInfrastructureTaskCount = computed(() =>
+  mergedSchedulerTasks.value.filter(task => INFRA_TASKS.has(task.name || '')).length,
+)
 const runningSchedulerTaskCount = computed(() => schedulerTasks.value.filter((task: any) => task.running).length)
 const dashboardLogFilterSummary = computed(() => [
   `模块 ${modules.find(option => option.value === filter.value.module)?.label || '所有模块'}`,
@@ -912,6 +923,13 @@ function getTaskDisplayName(name: string) {
   return localizeRuntimeText(name)
 }
 
+function getTaskCardTitle(task: any) {
+  return getTaskDisplayName(task?.name || '')
+    || task?.namespace
+    || task?.group
+    || '未命名任务'
+}
+
 function getTaskSteps(name: string): string[] {
   if (name.startsWith('restart_broadcast_retry_')) {
     return [
@@ -960,6 +978,18 @@ function getTaskSteps(name: string): string[] {
   return []
 }
 
+function getTaskStepPreview(name: string, limit = 2) {
+  return getTaskSteps(name).slice(0, limit).join(' -> ')
+}
+
+function getTaskInlineSummary(task: any, limit = 3) {
+  const parts = [
+    task.namespace,
+    getTaskStepPreview(task.name, limit),
+  ].filter(Boolean)
+  return parts.join(' · ')
+}
+
 function getTaskKindLabel(kind: string) {
   if (kind === 'interval')
     return '循环'
@@ -968,16 +998,14 @@ function getTaskKindLabel(kind: string) {
   return kind
 }
 
-function getTaskKindClass(kind: string) {
+function getTaskKindTone(kind: string): MetaBadgeTone {
   if (kind === 'interval')
-    return 'dashboard-task-kind dashboard-task-kind--interval'
-  return 'dashboard-task-kind dashboard-task-kind--neutral'
+    return 'info'
+  return 'neutral'
 }
 
-function getTaskStateClass(running: boolean) {
-  return running
-    ? 'dashboard-task-state dashboard-task-state--running'
-    : 'dashboard-task-state dashboard-task-state--waiting'
+function getTaskStateTone(running: boolean): MetaBadgeTone {
+  return running ? 'success' : 'neutral'
 }
 
 function getShowAllTasksButtonClass() {
@@ -1298,7 +1326,7 @@ async function handleDashboardTrialRenew() {
             <div class="i-fas-user-circle" />
             账号
           </div>
-          <div class="dashboard-level-badge rounded px-2 py-0.5 text-xs">
+          <div class="dashboard-level-badge ui-meta-chip--info rounded px-2 py-0.5 text-xs">
             Lv.{{ status?.status?.level || 0 }}
           </div>
         </div>
@@ -1547,7 +1575,7 @@ async function handleDashboardTrialRenew() {
               <div>
                 <span class="mr-1.5 select-none opacity-60">[{{ formatLogTime(log.time) }}]</span>
                 <span class="mr-1.5 rounded px-1 py-0.5 text-xs font-bold" :class="getLogTagClass(log.tag)">{{ log.tag }}</span>
-                <span v-if="log.meta?.event" class="dashboard-log-event mr-1.5 rounded px-1 py-0.5 text-xs">{{ getEventLabel(log.meta.event) }}</span>
+                <span v-if="log.meta?.event" class="dashboard-log-event ui-meta-chip--info mr-1.5 rounded px-1 py-0.5 text-xs">{{ getEventLabel(log.meta.event) }}</span>
                 <span :class="getLogMsgClass(log.tag)" class="glass-text-main opacity-90">{{ log.msg }}</span>
               </div>
               <div v-if="getPlantingLogDetailChips(log).length" class="mt-1.5 flex flex-wrap gap-1.5 pl-14">
@@ -1569,26 +1597,32 @@ async function handleDashboardTrialRenew() {
       <!-- 右侧面板（60%）：纵向分割 —— 任务队列预览 + 今日统计 -->
       <div class="flex flex-col gap-4 md:min-w-0 md:w-[60%] md:overflow-hidden">
         <!-- 任务队列预览 -->
-        <div class="glass-panel flex flex-1 flex-col rounded-lg p-4 shadow md:overflow-hidden">
-          <div class="mb-3 flex shrink-0 flex-col gap-3">
-            <h3 class="glass-text-main flex items-center gap-2 text-base font-medium">
-              <div class="i-carbon-task text-indigo-500" />
-              <span>任务队列预览</span>
-            </h3>
-            <div v-if="schedulerTasks.length" class="dashboard-task-meta ui-bulk-actions text-xs font-normal">
-              <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">共 {{ schedulerTasks.length }} 个任务</span>
-              <span class="rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-300">运行中 {{ runningSchedulerTaskCount }}</span>
+        <div class="glass-panel dashboard-task-panel flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg px-4 py-3 shadow">
+          <div class="dashboard-task-panel__header mb-1.5 shrink-0">
+            <div class="dashboard-task-panel__heading min-w-0">
+              <h3 class="dashboard-task-panel__title glass-text-main flex items-center gap-2 text-base font-medium">
+                <div class="i-carbon-task text-indigo-500" />
+                <span>任务队列预览</span>
+              </h3>
+              <p class="dashboard-task-panel__desc hidden md:block">
+                紧凑展示当前账号的调度队列，优先把运行中和即将触发的任务排在前面。
+              </p>
+            </div>
+            <div v-if="allSchedulerTaskCount" class="dashboard-task-meta ui-bulk-actions text-xs font-normal">
+              <span class="dashboard-task-pill dashboard-task-pill--count">总任务 {{ allSchedulerTaskCount }}</span>
+              <span class="dashboard-task-pill dashboard-task-pill--running">运行中 {{ runningSchedulerTaskCount }}</span>
               <button
-                class="dashboard-toggle-btn rounded px-1.5 py-0.5 text-[10px] transition-colors"
+                v-if="hiddenInfrastructureTaskCount"
+                class="dashboard-toggle-btn rounded-full px-2 py-0.5 text-[10px] transition-colors"
                 :class="getShowAllTasksButtonClass()"
                 @click="showAllTasks = !showAllTasks"
               >
-                {{ showAllTasks ? '隐藏内部' : '显示全部' }}
+                {{ showAllTasks ? `收起内部 ${hiddenInfrastructureTaskCount}` : `已收起 ${hiddenInfrastructureTaskCount}` }}
               </button>
             </div>
           </div>
 
-          <div v-if="!schedulerPreview || !schedulerTasks.length" class="glass-text-muted flex flex-1 items-center justify-center py-6 text-center text-sm">
+          <div v-if="!schedulerPreview" class="glass-text-muted flex flex-1 items-center justify-center py-6 text-center text-sm">
             <div v-if="!status?.connection?.connected">
               账号未连接，无法获取任务队列
             </div>
@@ -1596,146 +1630,79 @@ async function handleDashboardTrialRenew() {
               正在加载任务队列...
             </div>
           </div>
+          <div v-else-if="!allSchedulerTaskCount" class="glass-text-muted flex flex-1 items-center justify-center py-6 text-center text-sm">
+            当前暂无待展示任务
+          </div>
+          <div v-else-if="!schedulerTasks.length" class="glass-text-muted flex flex-1 items-center justify-center py-6 text-center text-sm">
+            当前仅隐藏了内部基础任务，可点击“显示全部”查看完整队列
+          </div>
 
           <template v-else>
-            <div class="ui-mobile-record-list md:hidden">
+            <div class="dashboard-task-list custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
               <article
                 v-for="task in schedulerTasks"
                 :key="`${task.namespace}-${task.name}`"
-                class="ui-mobile-record-card"
+                class="dashboard-task-card"
+                :class="{ 'dashboard-task-card--running': task.running }"
               >
-                <div class="ui-mobile-record-head">
-                  <div class="ui-mobile-record-body">
-                    <div class="ui-mobile-record-badges">
-                      <span class="dashboard-group-badge rounded px-2 py-0.5 text-[11px]">
-                        {{ task.group }}
-                      </span>
-                      <span class="rounded px-2 py-0.5 text-[11px] font-medium" :class="getTaskKindClass(task.kind)">
-                        {{ getTaskKindLabel(task.kind) }}
-                      </span>
-                      <span class="rounded px-2 py-0.5 text-[11px] font-medium" :class="getTaskStateClass(task.running)">
-                        {{ task.running ? '执行中' : '等待中' }}
-                      </span>
-                    </div>
-                    <h3 class="ui-mobile-record-title">
-                      {{ getTaskDisplayName(task.name) }}
-                    </h3>
-                    <p class="ui-mobile-record-subtitle">
-                      {{ task.namespace || '默认命名空间' }}
+                <div class="dashboard-task-card__main">
+                  <div class="dashboard-task-card__badges">
+                    <BaseBadge surface="meta" tone="neutral" class="dashboard-group-badge rounded px-2 py-0.5 text-[11px]">
+                      {{ task.group }}
+                    </BaseBadge>
+                    <BaseBadge surface="meta" :tone="getTaskKindTone(task.kind)" class="dashboard-task-kind rounded px-2 py-0.5 text-[11px] font-medium">
+                      {{ getTaskKindLabel(task.kind) }}
+                    </BaseBadge>
+                    <BaseBadge surface="meta" :tone="getTaskStateTone(task.running)" class="dashboard-task-state rounded px-2 py-0.5 text-[11px] font-medium">
+                      {{ task.running ? '执行中' : '等待中' }}
+                    </BaseBadge>
+                  </div>
+
+                  <div class="dashboard-task-card__title-row">
+                    <h4 class="dashboard-task-card__title" :title="getTaskCardTitle(task)">
+                      {{ getTaskCardTitle(task) }}
+                    </h4>
+                    <p
+                      v-if="getTaskInlineSummary(task)"
+                      class="dashboard-task-card__summary"
+                      :title="getTaskInlineSummary(task, 5)"
+                    >
+                      {{ getTaskInlineSummary(task, 3) }}
                     </p>
                   </div>
                 </div>
 
-                <div class="ui-mobile-record-grid">
-                  <div class="ui-mobile-record-field">
-                    <div class="ui-mobile-record-label">
-                      倒计时
-                    </div>
-                    <div class="ui-mobile-record-value font-mono">
+                <div class="dashboard-task-card__side">
+                  <div class="dashboard-task-metric">
+                    <span class="dashboard-task-metric__label">倒计时</span>
+                    <span class="dashboard-task-metric__value font-mono">
                       {{ getTaskCountdown(task) }}
-                    </div>
+                    </span>
                   </div>
-                  <div class="ui-mobile-record-field">
-                    <div class="ui-mobile-record-label">
-                      已执行
-                    </div>
-                    <div class="ui-mobile-record-value">
+                  <div class="dashboard-task-metric">
+                    <span class="dashboard-task-metric__label">已执行</span>
+                    <span class="dashboard-task-metric__value">
                       {{ task.runCount || 0 }} 次
-                    </div>
+                    </span>
                   </div>
-                  <div v-if="getTaskSteps(task.name).length" class="ui-mobile-record-field ui-mobile-record-field--full">
-                    <div class="ui-mobile-record-label">
-                      步骤预览
-                    </div>
-                    <div class="ui-mobile-record-value ui-mobile-record-value--muted">
-                      {{ getTaskSteps(task.name).slice(0, 2).join(' -> ') }}
-                    </div>
+                  <div class="dashboard-task-card__action">
+                    <button
+                      v-if="getTaskSteps(task.name).length"
+                      class="dashboard-task-view rounded px-2 py-0.5 text-[11px] font-medium transition-colors"
+                      @click="openTaskDetail(task)"
+                    >
+                      查看详情
+                    </button>
+                    <span v-else class="glass-text-muted">-</span>
                   </div>
-                </div>
-
-                <div class="ui-mobile-record-actions ui-bulk-actions">
-                  <BaseButton
-                    v-if="getTaskSteps(task.name).length"
-                    variant="outline"
-                    size="sm"
-                    @click="openTaskDetail(task)"
-                  >
-                    查看详情
-                  </BaseButton>
                 </div>
               </article>
-            </div>
-
-            <div class="custom-scrollbar hidden min-h-0 flex-1 overflow-y-auto pr-1 md:block">
-              <table class="w-full text-xs">
-                <thead class="sticky top-0 z-10 bg-transparent backdrop-blur-xl">
-                  <tr class="dashboard-table-head glass-text-muted border-b">
-                    <th class="px-2 py-2 text-left font-semibold tracking-wider">
-                      分组
-                    </th>
-                    <th class="px-2 py-2 text-left font-semibold tracking-wider">
-                      任务名
-                    </th>
-                    <th class="px-2 py-2 text-center font-semibold tracking-wider">
-                      状态
-                    </th>
-                    <th class="px-2 py-2 text-right font-semibold tracking-wider">
-                      倒计时
-                    </th>
-                    <th class="px-2 py-2 text-right font-semibold tracking-wider">
-                      已执行
-                    </th>
-                    <th class="px-2 py-2 text-center font-semibold tracking-wider">
-                      详情
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="task in schedulerTasks"
-                    :key="`${task.namespace}-${task.name}`"
-                    class="dashboard-task-row group border-b transition-colors"
-                  >
-                    <td class="whitespace-nowrap px-2 py-2 text-[10px]">
-                      <span class="dashboard-group-badge dashboard-group-badge--compact rounded px-1.5 py-0.5">
-                        {{ task.group }}
-                      </span>
-                    </td>
-                    <td class="max-w-[180px] truncate px-2 py-1.5 font-medium" :title="getTaskDisplayName(task.name)">
-                      {{ getTaskDisplayName(task.name) }}
-                    </td>
-                    <td class="px-2 py-1.5 text-center">
-                      <span v-if="task.running" class="dashboard-task-state dashboard-task-state--running inline-flex items-center gap-1">
-                        <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
-                        执行中
-                      </span>
-                      <span v-else class="glass-text-muted">等待中</span>
-                    </td>
-                    <td class="px-2 py-1.5 text-right font-mono">
-                      {{ getTaskCountdown(task) }}
-                    </td>
-                    <td class="px-2 py-1.5 text-right">
-                      {{ task.runCount || 0 }} 次
-                    </td>
-                    <td class="px-2 py-1.5 text-center">
-                      <button
-                        v-if="getTaskSteps(task.name).length"
-                        class="dashboard-task-view rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors"
-                        @click="openTaskDetail(task)"
-                      >
-                        查看
-                      </button>
-                      <span v-else class="glass-text-muted">-</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
           </template>
         </div>
 
         <!-- 今日统计（保持 2 列，压缩间距） -->
-        <div class="glass-panel flex shrink-0 flex-col rounded-lg p-4 shadow">
+        <div class="glass-panel flex min-h-0 flex-1 flex-col rounded-lg p-4 shadow">
           <h3 class="glass-text-main mb-3 flex shrink-0 items-center gap-2 text-base font-medium">
             <div class="i-carbon-chart-column" />
             <span>今日统计</span>
@@ -1773,19 +1740,19 @@ async function handleDashboardTrialRenew() {
       <div v-if="selectedTask" class="space-y-4">
         <!-- 任务基本信息 -->
         <div class="flex flex-wrap items-center gap-2 text-sm">
-          <span class="rounded px-2 py-0.5 text-xs font-medium" :class="getTaskKindClass(selectedTask.kind)">
+          <BaseBadge surface="meta" :tone="getTaskKindTone(selectedTask.kind)" class="dashboard-task-kind rounded px-2 py-0.5 text-xs font-medium">
             {{ getTaskKindLabel(selectedTask.kind) }}
-          </span>
-          <span v-if="selectedTask.running" class="dashboard-task-state dashboard-task-state--running inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium">
+          </BaseBadge>
+          <BaseBadge v-if="selectedTask.running" surface="meta" tone="success" class="dashboard-task-state inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium">
             <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" />
             执行中
-          </span>
-          <span v-else class="dashboard-task-state dashboard-task-state--waiting rounded px-2 py-0.5 text-xs">
+          </BaseBadge>
+          <BaseBadge v-else surface="meta" tone="neutral" class="dashboard-task-state rounded px-2 py-0.5 text-xs">
             等待中
-          </span>
-          <span class="dashboard-task-run-count rounded px-2 py-0.5 text-xs font-medium">
+          </BaseBadge>
+          <BaseBadge surface="meta" tone="info" class="dashboard-task-run-count rounded px-2 py-0.5 text-xs font-medium">
             已执行 {{ selectedTask.runCount || 0 }} 次
-          </span>
+          </BaseBadge>
         </div>
 
         <!-- 倒计时 -->
@@ -1878,9 +1845,66 @@ async function handleDashboardTrialRenew() {
   gap: 0.75rem;
 }
 
+.dashboard-task-panel {
+  border: 1px solid var(--ui-border-subtle);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent);
+}
+
+.dashboard-task-panel__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+}
+
+.dashboard-task-panel__heading {
+  min-width: 0;
+}
+
+.dashboard-task-panel__title {
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.dashboard-task-panel__desc {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.28;
+  color: var(--ui-text-2);
+}
+
+.dashboard-task-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.42rem;
+  padding: 0.14rem 0.56rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.69rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.dashboard-task-pill--count {
+  background: color-mix(in srgb, var(--ui-brand-500) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-brand-500) 74%, var(--ui-text-1) 26%);
+}
+
+.dashboard-task-pill--running {
+  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-success) 72%, var(--ui-text-1) 28%);
+}
+
 .dashboard-log-chip-row,
 .dashboard-task-meta {
   min-width: 0;
+}
+
+.dashboard-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  align-items: center;
 }
 
 .dashboard-log-chip {
@@ -1914,9 +1938,16 @@ async function handleDashboardTrialRenew() {
 
 .dashboard-level-badge,
 .dashboard-log-event,
-.dashboard-log-tag--info,
-.dashboard-task-kind--interval,
-.dashboard-task-run-count,
+.dashboard-log-tag {
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .dashboard-step-index {
   background: color-mix(in srgb, var(--ui-status-info) 12%, transparent);
   color: color-mix(in srgb, var(--ui-status-info) 72%, var(--ui-text-1) 28%);
@@ -1941,23 +1972,8 @@ async function handleDashboardTrialRenew() {
   color: color-mix(in srgb, var(--ui-status-info) 68%, var(--ui-text-1) 32%);
 }
 
-.dashboard-log-tag--danger,
 .dashboard-log-message--danger {
   color: var(--ui-status-danger);
-}
-
-.dashboard-log-tag--danger {
-  background: color-mix(in srgb, var(--ui-status-danger) 12%, transparent);
-}
-
-.dashboard-log-tag--warning {
-  background: color-mix(in srgb, var(--ui-status-warning) 12%, transparent);
-  color: color-mix(in srgb, var(--ui-status-warning) 72%, var(--ui-text-1) 28%);
-}
-
-.dashboard-log-tag--brand {
-  background: color-mix(in srgb, var(--ui-brand-500) 12%, transparent);
-  color: color-mix(in srgb, var(--ui-brand-600) 72%, var(--ui-text-1) 28%);
 }
 
 .dashboard-log-message {
@@ -1970,16 +1986,126 @@ async function handleDashboardTrialRenew() {
 }
 
 .dashboard-toggle-btn--idle,
-.dashboard-group-badge,
-.dashboard-task-kind--neutral,
-.dashboard-task-state--waiting {
+.dashboard-group-badge {
   background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent);
   color: var(--ui-text-2);
 }
 
-.dashboard-task-state--running {
-  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent);
-  color: color-mix(in srgb, var(--ui-status-success) 72%, var(--ui-text-1) 28%);
+.dashboard-task-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.dashboard-task-card {
+  display: grid;
+  min-width: 0;
+  gap: 0.58rem;
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle) 68%, transparent);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-bg-surface) 68%, transparent);
+  padding: 0.68rem 0.88rem;
+  transition: background-color var(--ui-motion-base), border-color var(--ui-motion-base), transform var(--ui-motion-base);
+}
+
+.dashboard-task-card:hover {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+}
+
+.dashboard-task-card--running {
+  border-color: color-mix(in srgb, var(--ui-status-success) 22%, transparent);
+  background: color-mix(in srgb, var(--ui-status-success) 7%, var(--ui-bg-surface) 93%);
+}
+
+.dashboard-task-card--running:hover {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, var(--ui-bg-surface-raised) 90%);
+}
+
+.dashboard-task-card__main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.dashboard-task-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.dashboard-task-card__title-row {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.18rem;
+}
+
+.dashboard-task-card__title {
+  min-width: 0;
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ui-text-1);
+}
+
+.dashboard-task-card__summary {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.74rem;
+  line-height: 1.3;
+  color: var(--ui-text-3);
+}
+
+.dashboard-task-card__side {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem 0.65rem;
+  min-width: 0;
+  align-items: end;
+}
+
+.dashboard-task-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.dashboard-task-metric__label {
+  font-size: 0.68rem;
+  color: var(--ui-text-2);
+}
+
+.dashboard-task-metric__value {
+  min-width: 0;
+  font-size: 0.94rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ui-text-1);
+}
+
+.dashboard-task-card__action {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.dashboard-task-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .dashboard-table-head,
@@ -1987,9 +2113,62 @@ async function handleDashboardTrialRenew() {
   border-color: var(--ui-border-subtle);
 }
 
+.dashboard-task-row td {
+  vertical-align: middle;
+}
+
 .dashboard-task-row:hover,
 .dashboard-stat-card:hover {
   background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+}
+
+.dashboard-task-row--running {
+  background: color-mix(in srgb, var(--ui-status-success) 6%, transparent);
+}
+
+.dashboard-task-row--running:hover {
+  background: color-mix(in srgb, var(--ui-status-success) 10%, var(--ui-bg-surface-raised) 84%);
+}
+
+.dashboard-task-name-cell {
+  min-width: 0;
+}
+
+.dashboard-task-name-wrap {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.dashboard-task-name-top,
+.dashboard-task-name-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dashboard-task-name-title,
+.dashboard-task-name-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-task-name-meta {
+  font-size: 0.72rem;
+  color: var(--ui-text-2);
+}
+
+.dashboard-task-name-namespace {
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+
+.dashboard-task-name-preview {
+  color: var(--ui-text-3);
 }
 
 .dashboard-task-view {
@@ -2038,5 +2217,66 @@ async function handleDashboardTrialRenew() {
 
 .dashboard-op-tone--neutral {
   color: var(--ui-text-3);
+}
+
+@media (min-width: 768px) {
+  .dashboard-task-panel {
+    height: clamp(15.5rem, 30vh, 19rem);
+  }
+
+  .dashboard-task-panel__header {
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-direction: row;
+  }
+
+  .dashboard-task-panel__heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: start;
+    gap: 0.5rem;
+  }
+
+  .dashboard-task-panel__desc {
+    min-width: 0;
+    display: -webkit-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .dashboard-task-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .dashboard-task-card__title-row {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.55rem;
+  }
+
+  .dashboard-task-card__summary {
+    flex: 1 1 auto;
+  }
+
+  .dashboard-task-card__side {
+    grid-template-columns: repeat(3, minmax(4.5rem, auto));
+    align-items: center;
+  }
+
+  .dashboard-task-metric {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.38rem;
+  }
+
+  .dashboard-task-card__action {
+    grid-column: auto;
+    justify-content: flex-end;
+  }
 }
 </style>

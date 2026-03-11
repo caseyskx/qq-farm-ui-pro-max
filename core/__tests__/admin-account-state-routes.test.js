@@ -109,6 +109,33 @@ test('friends cache route falls back to realtime list and updates cache asynchro
     assert.deepEqual(res.body, { ok: true, data: [{ gid: 1001 }] });
 });
 
+test('friends route falls back to cached friends when worker is offline', async () => {
+    const { app, routes } = createFakeApp();
+    const deps = createDeps({
+        app,
+        getProvider: () => ({
+            getFriends: async () => {
+                throw new Error('账号未运行');
+            },
+        }),
+        loadFriendsCacheApi: () => ({
+            getCachedFriends: async () => [{ gid: 1005, name: 'cached-friend' }],
+            updateFriendsCache: async () => {},
+        }),
+    });
+
+    registerAccountStateRoutes(deps);
+    const { handler } = getRouteParts(routes, '/api/friends');
+    const res = createResponse();
+    await handler({}, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, {
+        ok: true,
+        data: [{ gid: 1005, name: 'cached-friend' }],
+    });
+});
+
 test('lands route delegates runtime failures to handleApiError', async () => {
     const { app, routes } = createFakeApp();
     const handled = [];

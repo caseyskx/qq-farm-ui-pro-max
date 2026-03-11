@@ -2,6 +2,7 @@ import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useToastStore } from '@/stores/toast'
+import { attemptRouteRecovery, getCurrentRouteLocation, isRecoverableRouteError } from '@/utils/route-recovery'
 import { localizeRuntimeText } from '@/utils/runtime-text'
 import App from './App.vue'
 import router from './router'
@@ -20,6 +21,11 @@ const toast = useToastStore()
 
 app.config.errorHandler = (err: any, _instance, info) => {
   console.error('全局 Vue 错误:', err, info)
+  if (isRecoverableRouteError(err)) {
+    toast.error('检测到页面资源已更新，正在尝试恢复当前页面...')
+    if (attemptRouteRecovery(getCurrentRouteLocation()))
+      return
+  }
   const message = localizeRuntimeText(err.message || String(err))
   if (message.includes('ResizeObserver loop'))
     return
@@ -32,12 +38,14 @@ window.addEventListener('unhandledrejection', (event) => {
     return
 
   console.error('未处理的异步异常:', reason)
+  if (isRecoverableRouteError(reason)) {
+    toast.error('检测到应用版本更新或网络异常，正在尝试刷新页面...')
+    if (attemptRouteRecovery(getCurrentRouteLocation()))
+      return
+  }
   const message = localizeRuntimeText(reason?.message || String(reason))
   if (message.includes('动态模块加载失败') || message.includes('模块脚本加载失败')) {
-    toast.error('检测到应用版本更新或网络异常，正在尝试刷新页面...')
-    setTimeout(() => {
-      window.location.reload()
-    }, 1500)
+    toast.error('页面资源已失效，请手动刷新后重试。')
     return
   }
   toast.error(`异步错误: ${message}`)
@@ -47,8 +55,20 @@ window.onerror = (message, _source, _lineno, _colno, error) => {
   console.error('全局脚本错误:', message, error)
   if (String(message).includes('Script error'))
     return
+  if (isRecoverableRouteError(error || message)) {
+    toast.error('检测到页面资源已更新，正在尝试恢复当前页面...')
+    if (attemptRouteRecovery(getCurrentRouteLocation()))
+      return
+  }
   toast.error(`系统错误: ${localizeRuntimeText(message)}`)
 }
+
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault()
+  console.error('捕获到 Vite 预加载异常:', event)
+  toast.error('页面资源预加载失败，正在尝试恢复当前页面...')
+  attemptRouteRecovery(getCurrentRouteLocation())
+})
 
 // Apply config from server if possible
 const appStore = useAppStore()

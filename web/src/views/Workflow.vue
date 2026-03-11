@@ -1,13 +1,16 @@
 <script setup lang="ts">
+import type { MetaBadgeTone } from '@/utils/ui-badge'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/api'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSwitch from '@/components/ui/BaseSwitch.vue'
 import { useAccountStore } from '@/stores/account'
 import { useToastStore } from '@/stores/toast'
 import { localizeRuntimeText } from '@/utils/runtime-text'
+import { metaBadgeClass, metaBadgeToneClass } from '@/utils/ui-badge'
 
 const accountStore = useAccountStore()
 const { currentAccountId } = storeToRefs(accountStore)
@@ -37,8 +40,7 @@ interface NodeTemplate {
   type: string
   label: string
   icon: string
-  color: string
-  chipClass: string
+  chipTone: MetaBadgeTone
   category: 'farm' | 'friend' | 'common'
   hasParams: boolean
   defaultParams?: Record<string, any>
@@ -48,24 +50,24 @@ interface NodeTemplate {
 
 const NODE_TEMPLATES: NodeTemplate[] = [
   // Farm Specific
-  { type: 'stage_fertilize', label: '阶段施肥', icon: '🧪', color: 'var(--ui-brand-500)', chipClass: 'ui-meta-chip--brand', category: 'farm', hasParams: true, defaultParams: { mode: 'normal', phases: ['seed', 'sprout', 'leaf'] } },
-  { type: 'wait_mature', label: '等待成熟', icon: '⏳', color: 'var(--ui-status-danger)', chipClass: 'ui-meta-chip--danger', category: 'farm', hasParams: true, defaultParams: { stopIfNotMature: true } },
-  { type: 'harvest', label: '收获', icon: '🌾', color: 'var(--ui-status-warning)', chipClass: 'ui-meta-chip--warning', category: 'farm', hasParams: false },
-  { type: 'remove_dead', label: '铲除', icon: '💀', color: 'var(--ui-text-2)', chipClass: 'ui-meta-chip--neutral', category: 'farm', hasParams: false },
-  { type: 'select_seed', label: '选种', icon: '🌱', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'farm', hasParams: true, defaultParams: { strategy: 'preferred' } },
-  { type: 'plant', label: '种植', icon: '🌱', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'farm', hasParams: false },
-  { type: 'fertilize', label: '施肥', icon: '🧪', color: 'var(--ui-brand-600)', chipClass: 'ui-meta-chip--brand', category: 'farm', hasParams: true, defaultParams: { mode: 'normal' } },
+  { type: 'stage_fertilize', label: '阶段施肥', icon: '🧪', chipTone: 'brand', category: 'farm', hasParams: true, defaultParams: { mode: 'normal', phases: ['seed', 'sprout', 'leaf'] } },
+  { type: 'wait_mature', label: '等待成熟', icon: '⏳', chipTone: 'danger', category: 'farm', hasParams: true, defaultParams: { stopIfNotMature: true } },
+  { type: 'harvest', label: '收获', icon: '🌾', chipTone: 'warning', category: 'farm', hasParams: false },
+  { type: 'remove_dead', label: '铲除', icon: '💀', chipTone: 'neutral', category: 'farm', hasParams: false },
+  { type: 'select_seed', label: '选种', icon: '🌱', chipTone: 'success', category: 'farm', hasParams: true, defaultParams: { strategy: 'preferred' } },
+  { type: 'plant', label: '种植', icon: '🌱', chipTone: 'success', category: 'farm', hasParams: false },
+  { type: 'fertilize', label: '施肥', icon: '🧪', chipTone: 'brand', category: 'farm', hasParams: true, defaultParams: { mode: 'normal' } },
 
   // Friend Specific
-  { type: 'steal', label: '偷菜', icon: '🤏', color: 'var(--ui-status-warning)', chipClass: 'ui-meta-chip--warning', category: 'friend', hasParams: false },
-  { type: 'put_bug', label: '放虫', icon: '😈', color: 'var(--ui-status-danger)', chipClass: 'ui-meta-chip--danger', category: 'friend', hasParams: false },
-  { type: 'put_weed', label: '放草', icon: '🌿', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'friend', hasParams: false },
+  { type: 'steal', label: '偷菜', icon: '🤏', chipTone: 'warning', category: 'friend', hasParams: false },
+  { type: 'put_bug', label: '放虫', icon: '😈', chipTone: 'danger', category: 'friend', hasParams: false },
+  { type: 'put_weed', label: '放草', icon: '🌿', chipTone: 'success', category: 'friend', hasParams: false },
 
   // Common
-  { type: 'weed', label: '除草', icon: '✂️', color: 'var(--ui-status-success)', chipClass: 'ui-meta-chip--success', category: 'common', hasParams: false },
-  { type: 'bug', label: '除虫', icon: '🐛', color: 'var(--ui-status-danger)', chipClass: 'ui-meta-chip--danger', category: 'common', hasParams: false },
-  { type: 'water', label: '浇水', icon: '💧', color: 'var(--ui-status-info)', chipClass: 'ui-meta-chip--info', category: 'common', hasParams: false },
-  { type: 'delay', label: '延迟', icon: '⏱️', color: 'var(--ui-text-2)', chipClass: 'ui-meta-chip--neutral', category: 'common', hasParams: true, defaultParams: { sec: 5 } },
+  { type: 'weed', label: '除草', icon: '✂️', chipTone: 'success', category: 'common', hasParams: false },
+  { type: 'bug', label: '除虫', icon: '🐛', chipTone: 'danger', category: 'common', hasParams: false },
+  { type: 'water', label: '浇水', icon: '💧', chipTone: 'info', category: 'common', hasParams: false },
+  { type: 'delay', label: '延迟', icon: '⏱️', chipTone: 'neutral', category: 'common', hasParams: true, defaultParams: { sec: 5 } },
 ]
 
 function getTemplate(type: string): NodeTemplate | undefined {
@@ -200,10 +202,7 @@ function initDrag(e: PointerEvent, template: NodeTemplate, _scope: 'farm' | 'fri
     ghostEl.value.remove()
 
   const el = document.createElement('div')
-  el.className = `fixed z-[9999] pointer-events-none px-5 py-2.5 border-2 rounded-full font-bold shadow-xl flex items-center gap-2.5 whitespace-nowrap backdrop-blur-md text-base`
-  el.style.background = 'color-mix(in srgb, var(--ui-bg-surface-raised) 94%, transparent)'
-  el.style.color = 'var(--ui-text-1)'
-  el.style.borderColor = template.color
+  el.className = `fixed z-[9999] pointer-events-none px-5 py-2.5 rounded-full font-bold flex items-center gap-2.5 whitespace-nowrap text-base ${metaBadgeClass(template.chipTone, 'ui-drag-ghost-chip')}`
   el.innerHTML = `<span>${template.icon}</span><span>${template.label}</span>`
 
   document.body.appendChild(el)
@@ -292,6 +291,10 @@ function handlePointerDownPool(e: PointerEvent, scope: 'farm' | 'friend', templa
     document.removeEventListener('pointerup', cancelEarly)
     activateDrag()
   }, 200)
+}
+
+function getWorkflowStatusTone(hasChanges: boolean): MetaBadgeTone {
+  return hasChanges ? 'warning' : 'success'
 }
 
 function handlePointerDownQueue(e: PointerEvent, scope: 'farm' | 'friend', index: number) {
@@ -646,12 +649,13 @@ watch(() => currentAccountId.value, () => {
             <h2 class="glass-text-main flex items-center gap-2 text-base font-bold">
               <span>🚜</span> 农场流程编排
             </h2>
-            <span
-              class="rounded px-2 py-0.5 text-xs font-bold transition-colors"
-              :class="config.farm.enabled ? 'workflow-enabled-badge ui-meta-chip--brand' : 'workflow-enabled-badge ui-meta-chip--neutral'"
+            <BaseBadge
+              surface="meta"
+              :tone="config.farm.enabled ? 'brand' : 'neutral'"
+              class="workflow-enabled-badge rounded px-2 py-0.5 text-xs font-bold transition-colors"
             >
               {{ config.farm.enabled ? '已启用' : '未启用' }}
-            </span>
+            </BaseBadge>
           </div>
           <BaseSwitch v-model="config.farm.enabled" label="启用流程模式" />
         </div>
@@ -683,7 +687,7 @@ watch(() => currentAccountId.value, () => {
           <!-- Status Bar -->
           <div
             class="workflow-status-banner flex flex-col items-start gap-2 rounded px-3 py-2 text-xs transition-colors sm:flex-row sm:items-center sm:justify-between"
-            :class="hasFarmChanges ? 'ui-meta-chip--warning' : 'ui-meta-chip--success'"
+            :class="metaBadgeToneClass(getWorkflowStatusTone(hasFarmChanges))"
           >
             <div class="font-bold font-mono">
               {{ hasFarmChanges ? '农场流程有未保存改动' : '农场流程已就绪 (未保存改动)' }}
@@ -702,7 +706,7 @@ watch(() => currentAccountId.value, () => {
                 <button
                   v-for="tpl in farmTemplates" :key="tpl.type"
                   class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
-                  :class="tpl.chipClass"
+                  :class="metaBadgeToneClass(tpl.chipTone)"
                   @pointerdown="(e) => handlePointerDownPool(e, 'farm', tpl)"
                 >
                   <span class="text-base">{{ tpl.icon }}</span>
@@ -750,7 +754,7 @@ watch(() => currentAccountId.value, () => {
                     <div
                       class="workflow-node-chip flex items-center gap-2 rounded-full px-4 py-2 text-base font-bold shadow-sm transition-colors"
                       :class="[
-                        getTemplate(node.type)?.chipClass,
+                        getTemplate(node.type)?.chipTone ? metaBadgeToneClass(getTemplate(node.type)!.chipTone) : '',
                         editingNodeId === node.id ? 'ring-2 ring-primary-500 shadow-md' : 'hover:shadow',
                       ]"
                     >
@@ -863,7 +867,7 @@ watch(() => currentAccountId.value, () => {
               <button
                 v-for="tpl in farmTemplates" :key="tpl.type"
                 class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
-                :class="tpl.chipClass"
+                :class="metaBadgeToneClass(tpl.chipTone)"
                 @pointerdown="(e) => handlePointerDownPool(e, 'farm', tpl)"
               >
                 <span class="text-base">{{ tpl.icon }}</span>
@@ -890,12 +894,13 @@ watch(() => currentAccountId.value, () => {
             <h2 class="glass-text-main flex items-center gap-2 text-base font-bold">
               <span>🤝</span> 好友巡查流程编排
             </h2>
-            <span
-              class="rounded px-2 py-0.5 text-xs font-bold transition-colors"
-              :class="config.friend.enabled ? 'workflow-enabled-badge ui-meta-chip--brand' : 'workflow-enabled-badge ui-meta-chip--neutral'"
+            <BaseBadge
+              surface="meta"
+              :tone="config.friend.enabled ? 'brand' : 'neutral'"
+              class="workflow-enabled-badge rounded px-2 py-0.5 text-xs font-bold transition-colors"
             >
               {{ config.friend.enabled ? '已启用' : '未启用' }}
-            </span>
+            </BaseBadge>
           </div>
           <BaseSwitch v-model="config.friend.enabled" label="启用流程模式" />
         </div>
@@ -925,7 +930,7 @@ watch(() => currentAccountId.value, () => {
           <!-- Status Bar -->
           <div
             class="workflow-status-banner flex flex-col items-start gap-2 rounded px-3 py-2 text-xs transition-colors sm:flex-row sm:items-center sm:justify-between"
-            :class="hasFriendChanges ? 'ui-meta-chip--warning' : 'ui-meta-chip--success'"
+            :class="metaBadgeToneClass(getWorkflowStatusTone(hasFriendChanges))"
           >
             <div class="font-bold font-mono">
               {{ hasFriendChanges ? '好友流程有未保存改动' : '好友流程已就绪 (未手保存改动)' }}
@@ -944,7 +949,7 @@ watch(() => currentAccountId.value, () => {
                 <button
                   v-for="tpl in friendTemplates" :key="tpl.type"
                   class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
-                  :class="tpl.chipClass"
+                  :class="metaBadgeToneClass(tpl.chipTone)"
                   @pointerdown="(e) => handlePointerDownPool(e, 'friend', tpl)"
                 >
                   <span class="text-base">{{ tpl.icon }}</span>
@@ -990,7 +995,7 @@ watch(() => currentAccountId.value, () => {
                     <div
                       class="workflow-node-chip flex items-center gap-2 rounded-full px-4 py-2 text-base font-bold shadow-sm transition-colors"
                       :class="[
-                        getTemplate(node.type)?.chipClass,
+                        getTemplate(node.type)?.chipTone ? metaBadgeToneClass(getTemplate(node.type)!.chipTone) : '',
                         editingNodeId === node.id ? 'ring-2 ring-primary-500 shadow-md' : 'hover:shadow',
                       ]"
                     >
@@ -1050,7 +1055,7 @@ watch(() => currentAccountId.value, () => {
               <button
                 v-for="tpl in friendTemplates" :key="tpl.type"
                 class="workflow-pool-chip flex cursor-grab items-center gap-2 rounded-lg px-4 py-1.5 text-sm font-bold shadow-sm transition-colors active:cursor-grabbing"
-                :class="tpl.chipClass"
+                :class="metaBadgeToneClass(tpl.chipTone)"
                 @pointerdown="(e) => handlePointerDownPool(e, 'friend', tpl)"
               >
                 <span class="text-base">{{ tpl.icon }}</span>

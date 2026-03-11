@@ -44,6 +44,36 @@ function registerAccountControlRoutes({
     loadGenerateSafeModeBlacklist,
     loadGetPlantRankings,
 }) {
+    async function resolveAnalyticsAccountContext(req, requestedTimingMode) {
+        const rawAccountId = String(req.headers?.['x-account-id'] || '').trim();
+        if (!rawAccountId) {
+            return { accountId: '', timingMode: 'theoretical' };
+        }
+
+        const resolvedId = await resolveAccId(rawAccountId) || rawAccountId;
+        if (req.currentUser?.role === 'admin') {
+            return { accountId: resolvedId, timingMode: requestedTimingMode };
+        }
+
+        const accounts = await getAccountList();
+        const account = accounts.find(item => String(item && item.id || '') === String(resolvedId));
+        if (!account) {
+            if (requestedTimingMode === 'actual') {
+                return { errorStatus: 404, error: '账号不存在' };
+            }
+            return { accountId: '', timingMode: 'theoretical' };
+        }
+
+        if (account.username && account.username === req.currentUser?.username) {
+            return { accountId: resolvedId, timingMode: requestedTimingMode };
+        }
+
+        if (requestedTimingMode === 'actual') {
+            return { errorStatus: 403, error: '无权操作此账号' };
+        }
+        return { accountId: '', timingMode: 'theoretical' };
+    }
+
     app.post('/api/accounts/:id/start', accountOwnershipRequired, async (req, res) => {
         try {
             const ok = await getProvider().startAccount(req.params.id);
@@ -163,9 +193,7 @@ function registerAccountControlRoutes({
         }
     });
 
-    app.get('/api/analytics', accountOwnershipRequired, async (req, res) => {
-        const id = await getAccId(req);
-        if (!id) return res.status(400).json({ ok: false, error: '缺少账号标识 (x-account-id)' });
+    app.get('/api/analytics', async (req, res) => {
         try {
             const ANALYTICS_SORT_WHITELIST = new Set(['exp', 'fert', 'gold', 'profit', 'fert_profit', 'level']);
             const ANALYTICS_TIMING_MODE_WHITELIST = new Set(['theoretical', 'actual']);
@@ -176,7 +204,17 @@ function registerAccountControlRoutes({
             const levelRaw = req.query.level;
             const levelMax = (levelRaw !== undefined && levelRaw !== '' && Number.isFinite(Number(levelRaw)))
                 ? Number(levelRaw) : null;
-            const data = loadGetPlantRankings()(sortBy, levelMax, { accountId: id, timingMode });
+            const analyticsContext = await resolveAnalyticsAccountContext(req, timingMode);
+            if (analyticsContext.error) {
+                return res.status(analyticsContext.errorStatus).json({ ok: false, error: analyticsContext.error });
+            }
+            const rankingOptions = {
+                timingMode: analyticsContext.accountId ? analyticsContext.timingMode : 'theoretical',
+            };
+            if (analyticsContext.accountId) {
+                rankingOptions.accountId = analyticsContext.accountId;
+            }
+            const data = loadGetPlantRankings()(sortBy, levelMax, rankingOptions);
             res.json({ ok: true, data });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });

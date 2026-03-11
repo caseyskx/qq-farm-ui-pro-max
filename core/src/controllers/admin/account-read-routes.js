@@ -1,3 +1,20 @@
+function getAccountRecentActivityAt(account) {
+    const lastLoginAt = Number(account && account.lastLoginAt || 0);
+    const updatedAt = Number(account && account.updatedAt || 0);
+    const createdAt = Number(account && account.createdAt || 0);
+    return Math.max(
+        Number.isFinite(lastLoginAt) ? lastLoginAt : 0,
+        Number.isFinite(updatedAt) ? updatedAt : 0,
+        Number.isFinite(createdAt) ? createdAt : 0,
+    );
+}
+
+function compareAccountDisplayName(a, b) {
+    const aName = String((a && (a.name || a.nick || a.uin || a.id)) || '');
+    const bName = String((b && (b.name || b.nick || b.uin || b.id)) || '');
+    return aName.localeCompare(bName, 'zh-CN');
+}
+
 function registerAccountReadRoutes({
     app,
     getProvider,
@@ -14,10 +31,14 @@ function registerAccountReadRoutes({
             }
 
             accountList.sort((a, b) => {
+                const activityDiff = getAccountRecentActivityAt(b) - getAccountRecentActivityAt(a);
+                if (activityDiff !== 0) return activityDiff;
                 const aState = a.connected ? 2 : (a.running ? 1 : 0);
                 const bState = b.connected ? 2 : (b.running ? 1 : 0);
                 if (aState !== bState) return bState - aState;
-                return (b.level || 0) - (a.level || 0);
+                const levelDiff = (Number(b.level) || 0) - (Number(a.level) || 0);
+                if (levelDiff !== 0) return levelDiff;
+                return compareAccountDisplayName(a, b);
             });
 
             res.json({ ok: true, data: { ...data, accounts: accountList } });

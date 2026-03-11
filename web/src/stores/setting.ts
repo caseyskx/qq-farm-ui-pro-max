@@ -228,6 +228,177 @@ export interface ClusterConfig {
   dispatcherStrategy: string
 }
 
+export interface SystemUpdateReleaseAsset {
+  name: string
+  url: string
+  size: number
+}
+
+export interface SystemUpdateRelease {
+  version: string
+  versionTag: string
+  title: string
+  publishedAt: number
+  prerelease: boolean
+  notes: string
+  url: string
+  source: string
+  assets: SystemUpdateReleaseAsset[]
+}
+
+export interface SystemUpdateConfig {
+  provider: string
+  manifestUrl: string
+  releaseApiUrl: string
+  githubOwner: string
+  githubRepo: string
+  channel: string
+  allowPreRelease: boolean
+  preferredStrategy: string
+  preferredScope: string
+  requireDrain: boolean
+  agentMode: string
+  agentPollIntervalSec: number
+  defaultDrainNodeIds: string[]
+}
+
+export interface SystemUpdateRuntimeAgent {
+  nodeId: string
+  role: string
+  status: string
+  version: string
+  managedNodeIds: string[]
+  jobId?: number
+  jobStatus?: string
+  targetVersion?: string
+  updatedAt: number
+}
+
+export interface SystemUpdateClusterNode {
+  nodeId: string
+  role: string
+  status: string
+  version: string
+  connected: boolean
+  draining: boolean
+  assignedCount: number
+  assignedAccountIds: string[]
+  updatedAt: number
+}
+
+export interface SystemUpdateRuntime {
+  lastCheckAt: number
+  lastCheckOk: boolean
+  lastError: string
+  activeJobId: number
+  activeJobStatus: string
+  activeJobKey: string
+  activeTargetVersion: string
+  agentSummary: SystemUpdateRuntimeAgent[]
+  clusterNodes: SystemUpdateClusterNode[]
+}
+
+export interface SystemUpdateJob {
+  id: number
+  jobKey: string
+  kind: string
+  scope: string
+  strategy: string
+  status: string
+  sourceVersion: string
+  targetVersion: string
+  batchKey: string
+  preserveCurrent: boolean
+  requireDrain: boolean
+  drainNodeIds: string[]
+  note: string
+  createdBy: string
+  targetAgentId: string
+  claimAgentId: string
+  progressPercent: number
+  summaryMessage: string
+  payload: Record<string, any> | null
+  result: Record<string, any> | null
+  errorMessage: string
+  claimedAt: number
+  startedAt: number
+  finishedAt: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SystemUpdateBatchSummary {
+  batchKey: string
+  scope: string
+  strategy: string
+  targetVersion: string
+  sourceVersion: string
+  total: number
+  pendingCount: number
+  claimedCount: number
+  runningCount: number
+  succeededCount: number
+  failedCount: number
+  cancelledCount: number
+  activeCount: number
+  progressPercent: number
+  status: string
+  targetAgentIds: string[]
+  claimAgentIds: string[]
+  drainNodeIds: string[]
+  jobs: SystemUpdateJob[]
+  latestJobId: number
+  latestJobKey: string
+  latestSummaryMessage: string
+  latestErrorMessage: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SystemUpdateDrainCutoverBlocker {
+  accountId: string
+  accountName: string
+  platform: string
+  nodeId: string
+  credentialKind: string
+  reasonCode: string
+  message: string
+  needsReloginAfterStop: boolean
+}
+
+export interface SystemUpdateDrainCutoverReadiness {
+  checkedAt: number
+  canDrainCutover: boolean
+  targetNodeIds: string[]
+  runningAccountCount: number
+  targetedRunningAccountCount: number
+  blockerCount: number
+  reloginRequiredCount: number
+  blockers: SystemUpdateDrainCutoverBlocker[]
+}
+
+export interface SystemUpdateReleaseCache {
+  checkedAt: number
+  source: string
+  etag: string
+  lastError: string
+  latestRelease: SystemUpdateRelease | null
+  releases: SystemUpdateRelease[]
+}
+
+export interface SystemUpdateOverview {
+  currentVersion: string
+  latestRelease: SystemUpdateRelease | null
+  hasUpdate: boolean
+  comparison: number
+  config: SystemUpdateConfig
+  releaseCache: SystemUpdateReleaseCache
+  runtime: SystemUpdateRuntime
+  activeJob: SystemUpdateJob | null
+  activeBatch: SystemUpdateBatchSummary | null
+  drainCutoverReadiness: SystemUpdateDrainCutoverReadiness | null
+}
+
 export interface SettingsState {
   accountMode: AccountMode
   harvestDelay: HarvestDelayConfig
@@ -371,6 +542,8 @@ export const useSettingStore = defineStore('setting', () => {
   const loading = ref(false)
   const timingLoading = ref(false)
   const reportLogs = ref<ReportLogEntry[]>([])
+  const systemUpdateOverview = ref<SystemUpdateOverview | null>(null)
+  const systemUpdateJobs = ref<SystemUpdateJob[]>([])
   const reportLogPagination = ref<ReportLogPagination>({
     page: 1,
     pageSize: 10,
@@ -472,6 +645,8 @@ export const useSettingStore = defineStore('setting', () => {
         tradeConfig: normalizeTradeConfig(newSettings.tradeConfig),
         automation: newSettings.automation,
       }
+      if (newSettings.acknowledgeShortIntervalRisk === true)
+        settingsPayload.acknowledgeShortIntervalRisk = true
       // 蹲守配置透传
       // 工作流配置透传
       if (newSettings.workflowConfig) {
@@ -831,5 +1006,194 @@ export const useSettingStore = defineStore('setting', () => {
     }
   }
 
-  return { settings, loading, timingLoading, reportLogs, reportLogPagination, reportLogStats, fetchSettings, fetchReportLogs, fetchReportLogStats, clearReportLogs, deleteReportLogsByIds, exportReportLogs, saveSettings, saveOfflineConfig, sendReportTest, sendReport, changePassword, fetchTrialCardConfig, fetchThirdPartyApiConfig, saveThirdPartyApiConfig, fetchTimingConfig, saveTimingConfig, fetchClusterConfig, saveClusterConfig }
+  async function fetchSystemUpdateOverview() {
+    try {
+      const u = JSON.parse(localStorage.getItem('current_user') || 'null')
+      if (u?.role !== 'admin')
+        return null
+
+      const { data } = await api.get('/api/admin/system-update/overview')
+      if (data && data.ok && data.data) {
+        systemUpdateOverview.value = data.data
+      }
+      return data?.data || null
+    }
+    catch (e) {
+      console.error('获取系统更新概览失败:', e)
+      return null
+    }
+  }
+
+  async function checkSystemUpdate() {
+    try {
+      const { data } = await api.post('/api/admin/system-update/check')
+      if (data && data.ok && data.data) {
+        systemUpdateOverview.value = data.data
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '检查更新失败') }
+    }
+    catch (e: any) {
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '检查更新失败') }
+    }
+  }
+
+  async function saveSystemUpdateConfig(config: SystemUpdateConfig) {
+    try {
+      const { data } = await api.post('/api/admin/system-update/config', config)
+      if (data && data.ok && data.data) {
+        if (systemUpdateOverview.value) {
+          systemUpdateOverview.value = {
+            ...systemUpdateOverview.value,
+            config: data.data,
+          }
+        }
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '保存失败') }
+    }
+    catch (e: any) {
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '保存失败') }
+    }
+  }
+
+  async function fetchSystemUpdateJobs(limit = 10) {
+    try {
+      const { data } = await api.get('/api/admin/system-update/jobs', {
+        params: { limit },
+      })
+      if (data && data.ok && Array.isArray(data.data)) {
+        systemUpdateJobs.value = data.data
+      }
+      return Array.isArray(data?.data) ? data.data : []
+    }
+    catch (e) {
+      console.error('获取系统更新任务失败:', e)
+      systemUpdateJobs.value = []
+      return []
+    }
+  }
+
+  function mergeSystemUpdateMutation(data: any) {
+    if (!data)
+      return
+
+    const incomingJobs = Array.isArray(data.jobs)
+      ? data.jobs
+      : (data.job ? [data.job] : [])
+    if (incomingJobs.length > 0) {
+      const incomingIds = new Set(incomingJobs.map((item: SystemUpdateJob) => item.id))
+      systemUpdateJobs.value = [...incomingJobs, ...systemUpdateJobs.value.filter(item => !incomingIds.has(item.id))]
+    }
+
+    if (systemUpdateOverview.value && data.runtime) {
+      systemUpdateOverview.value = {
+        ...systemUpdateOverview.value,
+        activeJob: data.activeJob !== undefined
+          ? data.activeJob
+          : (data.job !== undefined ? data.job : systemUpdateOverview.value.activeJob),
+        activeBatch: data.activeBatch !== undefined
+          ? data.activeBatch
+          : (data.batch !== undefined ? data.batch : systemUpdateOverview.value.activeBatch),
+        runtime: data.runtime,
+      }
+    }
+  }
+
+  async function createSystemUpdateJob(payload: Record<string, any>) {
+    try {
+      const { data } = await api.post('/api/admin/system-update/jobs', payload)
+      if (data && data.ok && data.data) {
+        mergeSystemUpdateMutation(data.data)
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '创建更新任务失败'), data: data?.data || null }
+    }
+    catch (e: any) {
+      return {
+        ok: false,
+        error: resolveLocalizedError(e.response?.data?.error, e.message, '创建更新任务失败'),
+        data: e.response?.data?.data || null,
+      }
+    }
+  }
+
+  async function retrySystemUpdateJob(jobId: number | string, payload: Record<string, any> = {}) {
+    try {
+      const { data } = await api.post(`/api/admin/system-update/jobs/${encodeURIComponent(String(jobId))}/retry`, payload)
+      if (data && data.ok && data.data) {
+        mergeSystemUpdateMutation(data.data)
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '重试更新任务失败') }
+    }
+    catch (e: any) {
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '重试更新任务失败') }
+    }
+  }
+
+  async function retrySystemUpdateBatch(batchKey: string, payload: Record<string, any> = {}) {
+    try {
+      const { data } = await api.post(`/api/admin/system-update/batches/${encodeURIComponent(batchKey)}/retry-failed`, payload)
+      if (data && data.ok && data.data) {
+        mergeSystemUpdateMutation(data.data)
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '重试更新批次失败') }
+    }
+    catch (e: any) {
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '重试更新批次失败') }
+    }
+  }
+
+  async function cancelSystemUpdateJob(jobId: number | string, payload: Record<string, any> = {}) {
+    try {
+      const { data } = await api.post(`/api/admin/system-update/jobs/${encodeURIComponent(String(jobId))}/cancel`, payload)
+      if (data && data.ok && data.data) {
+        mergeSystemUpdateMutation(data.data)
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '取消更新任务失败') }
+    }
+    catch (e: any) {
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '取消更新任务失败') }
+    }
+  }
+
+  async function cancelSystemUpdateBatch(batchKey: string, payload: Record<string, any> = {}) {
+    try {
+      const { data } = await api.post(`/api/admin/system-update/batches/${encodeURIComponent(batchKey)}/cancel-pending`, payload)
+      if (data && data.ok && data.data) {
+        mergeSystemUpdateMutation(data.data)
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '取消更新批次失败') }
+    }
+    catch (e: any) {
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '取消更新批次失败') }
+    }
+  }
+
+  async function setSystemUpdateNodeDrain(nodeId: string, draining: boolean) {
+    try {
+      const { data } = await api.post(`/api/admin/system-update/nodes/${encodeURIComponent(nodeId)}/drain`, {
+        draining,
+      })
+      if (data && data.ok && data.data) {
+        if (systemUpdateOverview.value && data.data.runtime) {
+          systemUpdateOverview.value = {
+            ...systemUpdateOverview.value,
+            runtime: data.data.runtime,
+          }
+        }
+        return { ok: true, data: data.data }
+      }
+      return { ok: false, error: resolveLocalizedError(data?.error, '更新节点排空状态失败') }
+    }
+    catch (e: any) {
+      return { ok: false, error: resolveLocalizedError(e.response?.data?.error, e.message, '更新节点排空状态失败') }
+    }
+  }
+
+  return { settings, loading, timingLoading, reportLogs, reportLogPagination, reportLogStats, systemUpdateOverview, systemUpdateJobs, fetchSettings, fetchReportLogs, fetchReportLogStats, clearReportLogs, deleteReportLogsByIds, exportReportLogs, saveSettings, saveOfflineConfig, sendReportTest, sendReport, changePassword, fetchTrialCardConfig, fetchThirdPartyApiConfig, saveThirdPartyApiConfig, fetchTimingConfig, saveTimingConfig, fetchClusterConfig, saveClusterConfig, fetchSystemUpdateOverview, checkSystemUpdate, saveSystemUpdateConfig, fetchSystemUpdateJobs, createSystemUpdateJob, retrySystemUpdateJob, retrySystemUpdateBatch, cancelSystemUpdateJob, cancelSystemUpdateBatch, setSystemUpdateNodeDrain }
 })

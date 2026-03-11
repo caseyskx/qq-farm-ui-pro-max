@@ -1,6 +1,7 @@
 /* eslint-disable no-alert, unused-imports/no-unused-vars */
 
 <script setup lang="ts">
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseSwitch from '@/components/ui/BaseSwitch.vue'
 import { getThemeAppearanceConfig, THEME_OPTIONS } from '@/constants/ui-appearance'
 import { useAppStore } from '@/stores/app'
@@ -145,9 +146,9 @@ function getThemeCardClass(themeKey: string) {
                     {{ t.name }}
                   </div>
                   <!-- 选中标识 -->
-                  <div v-if="appStore.colorTheme === t.key" class="theme-drawer-selected-badge flex items-center justify-center rounded px-1.5 py-0.5 text-xs shadow-sm" :style="`background-color: ${t.color}`">
+                  <BaseBadge v-if="appStore.colorTheme === t.key" as="div" surface="glass" class="theme-drawer-selected-badge flex items-center justify-center rounded px-1.5 py-0.5 text-xs shadow-sm" :style="`background-color: ${t.color}`">
                     <div class="i-carbon-checkmark" />
-                  </div>
+                  </BaseBadge>
                 </div>
                 <!-- 描述 -->
                 <div class="glass-text-muted mb-4 pr-2 text-xs leading-relaxed">
@@ -251,6 +252,7 @@ function getThemeCardClass(themeKey: string) {
 }
 
 .theme-drawer-selected-badge {
+  border-color: color-mix(in srgb, var(--ui-text-on-brand) 18%, transparent) !important;
   color: var(--ui-text-on-brand) !important;
 }
 

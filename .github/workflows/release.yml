@@ -9,7 +9,7 @@ on:
       version:
         description: 'Version'
         required: false
-        default: 'v4.5.18'
+        default: 'v4.5.19'
       latest:
         description: 'Latest'
         required: false
@@ -88,6 +88,12 @@ jobs:
           cp deploy/README.md release-assets/qq-farm-deploy/
           cp -r deploy/init-db release-assets/qq-farm-deploy/
           cp scripts/deploy/fresh-install.sh release-assets/qq-farm-deploy/
+          cp scripts/deploy/install-or-update.sh release-assets/qq-farm-deploy/
+          cp scripts/deploy/update-agent.sh release-assets/qq-farm-deploy/
+          cp scripts/deploy/install-update-agent-service.sh release-assets/qq-farm-deploy/
+          cp scripts/deploy/manual-config-wizard.sh release-assets/qq-farm-deploy/
+          cp scripts/deploy/stack-layout.sh release-assets/qq-farm-deploy/
+          cp scripts/deploy/verify-stack.sh release-assets/qq-farm-deploy/
           cp scripts/deploy/repair-mysql.sh release-assets/qq-farm-deploy/
           cp scripts/deploy/repair-deploy.sh release-assets/qq-farm-deploy/
           cp scripts/deploy/update-app.sh release-assets/qq-farm-deploy/

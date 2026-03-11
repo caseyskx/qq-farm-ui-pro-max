@@ -74,6 +74,7 @@ function createDeps(overrides = {}) {
         getSchedulerRegistrySnapshot: () => ({ schedulerCount: 1 }),
         handleApiError: (res, err) => res.status(500).json({ ok: false, error: err.message }),
         parseUpdateLog: () => [],
+        readLatestQqFriendDiagnostics: () => null,
         ...overrides,
     };
 }
@@ -305,6 +306,48 @@ test('scheduler route falls back to runtime snapshot when worker status is unava
             runtime: { schedulerCount: 2 },
             worker: null,
             workerError: '当前运行环境不支持调度器状态查询',
+        },
+    });
+});
+
+test('qq friend diagnostics route blocks non-admin users', async () => {
+    const { app, routes } = createFakeApp();
+    const deps = createDeps({ app });
+
+    registerSystemPublicRoutes(deps);
+    const handler = getHandler(routes, '/api/qq-friend-diagnostics');
+    const res = createResponse();
+
+    await handler({ currentUser: { role: 'user' }, query: {} }, res);
+
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.body, { ok: false, error: '仅管理员可查看 QQ 好友诊断结果' });
+});
+
+test('qq friend diagnostics route returns latest parsed snapshot for admins', async () => {
+    const { app, routes } = createFakeApp();
+    const deps = createDeps({
+        app,
+        readLatestQqFriendDiagnostics: (appid) => ({
+            appid: appid || '1112386029',
+            qqVersion: '9.2.70',
+            summary: { protocolLikely: 'qq-host-bridge' },
+        }),
+    });
+
+    registerSystemPublicRoutes(deps);
+    const handler = getHandler(routes, '/api/qq-friend-diagnostics');
+    const res = createResponse();
+
+    await handler({ currentUser: { role: 'admin' }, query: { appid: '1112386029' } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, {
+        ok: true,
+        data: {
+            appid: '1112386029',
+            qqVersion: '9.2.70',
+            summary: { protocolLikely: 'qq-host-bridge' },
         },
     });
 });

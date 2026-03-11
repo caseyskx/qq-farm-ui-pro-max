@@ -167,7 +167,9 @@ useIntervalFn(() => {
   accountStore.fetchAccounts()
 }, 10000)
 
-watch(() => currentAccount.value?.id || currentAccount.value?.uin || '', () => {
+watch(() => currentAccount.value?.id || currentAccount.value?.uin || '', (newVal, oldVal) => {
+  // 值级幂等：ID 未实际变化时不触发重连，防止 fetchAccounts 刷新数组后误触发
+  if (newVal === oldVal) return
   const accountRef = currentAccount.value?.id || currentAccount.value?.uin
   statusStore.connectRealtime(String(accountRef || ''))
   refreshStatusFallback()

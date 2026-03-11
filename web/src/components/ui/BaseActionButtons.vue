@@ -42,6 +42,8 @@ function getLoadingLabel(action: ActionButtonDefinition) {
     :loading="action.loading"
     :loading-label="getLoadingLabel(action)"
     :icon-class="getIconClass(action)"
+    :block="action.block"
+    :stop-propagation="action.stopPropagation"
     :title="action.title"
     :class="action.class"
     @click="action.onClick?.($event)"

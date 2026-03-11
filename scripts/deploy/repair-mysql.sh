@@ -4,12 +4,19 @@ set -Eeuo pipefail
 
 DEPLOY_DIR="${DEPLOY_DIR:-$(pwd)}"
 DEPLOY_BASE_DIR="${DEPLOY_BASE_DIR:-/opt}"
-CURRENT_LINK="${CURRENT_LINK:-${DEPLOY_BASE_DIR}/qq-farm-bot-current}"
+STACK_NAME="${STACK_NAME:-qq-farm}"
+CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
+CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
+REPO_SLUG="${REPO_SLUG:-smdk000/qq-farm-ui-pro-max}"
+REPO_REF="${REPO_REF:-main}"
+RAW_BASE_URL="${RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}}"
 MYSQL_SERVICE="${MYSQL_SERVICE:-mysql}"
-MYSQL_CONTAINER_NAME="${MYSQL_CONTAINER_NAME:-qq-farm-mysql}"
+MYSQL_CONTAINER_NAME="${MYSQL_CONTAINER_NAME:-${STACK_NAME}-mysql}"
 BACKUP_BEFORE_REPAIR="${BACKUP_BEFORE_REPAIR:-0}"
 DOCKER=(docker)
 SUDO=""
+CURRENT_LINK_EXPLICIT=0
+STACK_DIR_NAME=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,6 +29,36 @@ print_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STACK_LAYOUT_PATH="${SCRIPT_DIR}/stack-layout.sh"
+if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+    BOOTSTRAP_DIR="${TMPDIR:-/tmp}/qq-farm-deploy-bootstrap/${REPO_SLUG//\//_}/${REPO_REF}"
+    mkdir -p "${BOOTSTRAP_DIR}"
+    STACK_LAYOUT_PATH="${BOOTSTRAP_DIR}/stack-layout.sh"
+    if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+        command -v curl >/dev/null 2>&1 || {
+            echo "[ERROR] 缺少 stack-layout.sh 且系统未安装 curl，无法继续执行。" >&2
+            exit 1
+        }
+        curl -fsSL "${RAW_BASE_URL}/scripts/deploy/stack-layout.sh" -o "${STACK_LAYOUT_PATH}"
+    fi
+fi
+# shellcheck source=stack-layout.sh
+. "${STACK_LAYOUT_PATH}"
+
+if [ -n "${CURRENT_LINK_INPUT}" ]; then
+    CURRENT_LINK_EXPLICIT=1
+fi
+
+refresh_stack_layout() {
+    STACK_NAME="$(normalize_stack_name "${STACK_NAME:-qq-farm}")"
+    STACK_DIR_NAME="$(stack_dir_name "${STACK_NAME}")"
+    MYSQL_CONTAINER_NAME="$(stack_container_name "${STACK_NAME}" "mysql")"
+    if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
+        CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
+    fi
+}
+
 trap 'print_error "MySQL 修复脚本执行失败，请检查上方日志。"' ERR
 
 parse_args() {
@@ -29,6 +66,10 @@ parse_args() {
         case "$1" in
             --deploy-dir)
                 DEPLOY_DIR="${2:-}"
+                shift 2
+                ;;
+            --stack-name)
+                STACK_NAME="${2:-}"
                 shift 2
                 ;;
             --backup)
@@ -45,9 +86,11 @@ parse_args() {
                 ;;
         esac
     done
+
+    refresh_stack_layout
 }
 
-if [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+if [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
     SUDO="sudo"
 fi
 
@@ -74,6 +117,7 @@ ensure_docker() {
 
 resolve_deploy_dir() {
     if [ -f "${DEPLOY_DIR}/docker-compose.yml" ]; then
+        load_deploy_env "${DEPLOY_DIR}/.env"
         return 0
     fi
 
@@ -85,9 +129,10 @@ resolve_deploy_dir() {
     fi
 
     local latest=""
-    latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name qq-farm-bot 2>/dev/null | sort | tail -n 1)"
+    latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name "${STACK_DIR_NAME:-$(stack_dir_name "${STACK_NAME}")}" 2>/dev/null | sort | tail -n 1)"
     if [ -n "${latest}" ] && [ -f "${latest}/docker-compose.yml" ]; then
         DEPLOY_DIR="${latest}"
+        load_deploy_env "${DEPLOY_DIR}/.env"
         return 0
     fi
 
@@ -102,6 +147,7 @@ load_deploy_env() {
         # shellcheck disable=SC1090
         . "${file}"
         set +a
+        refresh_stack_layout
     fi
 }
 
@@ -157,6 +203,7 @@ wait_for_mysql() {
     local timeout="${1:-240}"
     local started_at
     started_at="$(date +%s)"
+    local success_count=0
 
     while true; do
         local status="missing"
@@ -169,10 +216,19 @@ wait_for_mysql() {
 
         if [ "${status}" = "running" ] && { [ "${health}" = "healthy" ] || [ "${health}" = "none" ]; }; then
             exec_mode="$(detect_mysql_exec_mode)"
-            if mysql_cli_exec "${exec_mode}" mysqladmin --protocol=TCP -h 127.0.0.1 -u root -p"${MYSQL_ROOT_PASSWORD}" ping >/dev/null 2>&1; then
-                print_success "${MYSQL_CONTAINER_NAME} 已就绪 (${health})"
-                return 0
+            if mysql_cli_exec "${exec_mode}" \
+                mysql --protocol=TCP -h 127.0.0.1 --default-character-set=utf8mb4 \
+                -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" -Nse "SELECT 1" >/dev/null 2>&1; then
+                success_count=$((success_count + 1))
+                if [ "${success_count}" -ge 2 ]; then
+                    print_success "${MYSQL_CONTAINER_NAME} 已就绪 (${health})"
+                    return 0
+                fi
+            else
+                success_count=0
             fi
+        else
+            success_count=0
         fi
 
         if [ $(( $(date +%s) - started_at )) -ge "${timeout}" ]; then

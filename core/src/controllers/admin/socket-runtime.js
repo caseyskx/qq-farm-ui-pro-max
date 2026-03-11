@@ -1,3 +1,5 @@
+const process = require('node:process');
+
 function parseCookieHeader(cookieHeader = '') {
     const cookies = {};
     for (const part of String(cookieHeader || '').split(';')) {
@@ -18,6 +20,8 @@ function parseCookieHeader(cookieHeader = '') {
 function createSocketAuthMiddleware({
     jwtService,
     userStore,
+    currentRole = process.env.ROLE || 'standalone',
+    workerToken = process.env.WORKER_TOKEN || 'default_cluster_token',
 }) {
     return async (socket, next) => {
         try {
@@ -26,6 +30,21 @@ function createSocketAuthMiddleware({
                 || socket.handshake.auth?.token
                 || socket.handshake.headers?.['x-admin-token']
                 || '';
+            const nodeId = String(socket.handshake.auth?.nodeId || '').trim();
+
+            if (String(currentRole || '').trim() === 'master' && nodeId) {
+                if (accessToken && accessToken === String(workerToken || '')) {
+                    socket.data.currentUser = {
+                        username: `worker:${nodeId}`,
+                        role: 'worker',
+                    };
+                    socket.data.authKind = 'worker';
+                    socket.data.workerNodeId = nodeId;
+                    return next();
+                }
+                return next(new Error('Unauthorized'));
+            }
+
             if (!accessToken) {
                 return next(new Error('Unauthorized'));
             }
@@ -41,6 +60,7 @@ function createSocketAuthMiddleware({
             }
 
             socket.data.currentUser = userInfo;
+            socket.data.authKind = 'user';
             return next();
         } catch {
             return next(new Error('Unauthorized'));

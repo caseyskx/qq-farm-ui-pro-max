@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import LandCard from '@/components/LandCard.vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import { useAccountStore } from '@/stores/account'
 import { useFriendStore } from '@/stores/friend'
 import { useStatusStore } from '@/stores/status'
@@ -64,12 +65,12 @@ async function loadFriends() {
       await statusStore.fetchStatus(currentAccountId.value)
     }
 
-    if (acc.running && status.value?.connection?.connected) {
-      avatarErrorKeys.value.clear()
-      const result = await friendStore.fetchFriends(currentAccountId.value)
-      if (result?.fromCache) {
-        toast.warning('好友列表加载失败，已显示缓存数据，可能非最新')
-      }
+    avatarErrorKeys.value.clear()
+    const result = await friendStore.fetchFriends(currentAccountId.value)
+    if (result?.fromCache) {
+      toast.warning('好友列表实时拉取失败，已显示缓存数据，可能非最新')
+    }
+    if (acc.running || friends.value.length > 0) {
       await friendStore.fetchBlacklist(currentAccountId.value)
     }
   }
@@ -444,8 +445,12 @@ function getFriendStatusClass(friend: any) {
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2 truncate font-bold">
                   <span class="truncate">{{ friend.name }}</span>
-                  <span v-if="friend.farmLevel != null && friend.farmLevel > 0" class="friends-level-pill glass-text-muted whitespace-nowrap rounded px-1.5 py-0.5 text-[10px]">Lv.{{ friend.farmLevel }}</span>
-                  <span v-if="blacklist.includes(Number(friend.gid))" class="friends-blacklist-pill glass-text-muted whitespace-nowrap rounded px-1.5 py-0.5 text-[10px]">已屏蔽</span>
+                  <BaseBadge v-if="friend.farmLevel != null && friend.farmLevel > 0" surface="meta" tone="warning" class="friends-level-pill whitespace-nowrap rounded px-1.5 py-0.5 text-[10px]">
+                    Lv.{{ friend.farmLevel }}
+                  </BaseBadge>
+                  <BaseBadge v-if="blacklist.includes(Number(friend.gid))" surface="meta" tone="neutral" class="friends-blacklist-pill whitespace-nowrap rounded px-1.5 py-0.5 text-[10px]">
+                    已屏蔽
+                  </BaseBadge>
                 </div>
                 <div class="mt-0.5 truncate text-sm" :class="getFriendStatusClass(friend)">
                   {{ getFriendStatusText(friend) }}
@@ -581,13 +586,13 @@ function getFriendStatusClass(friend: any) {
   background: color-mix(in srgb, var(--ui-bg-surface) 78%, transparent) !important;
 }
 
-.friends-level-pill {
-  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1)) !important;
-}
-
+.friends-level-pill,
 .friends-blacklist-pill {
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 82%, transparent) !important;
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  line-height: 1;
 }
 
 .friends-status-text-active {

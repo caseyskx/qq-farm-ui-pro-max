@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { HistoryMetaItemDefinition } from '@/utils/management-schema'
 import { computed, useAttrs } from 'vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 
 defineOptions({
   inheritAttrs: false,
@@ -24,21 +25,38 @@ const visibleItems = computed(() => props.items.filter(item => item.show !== fal
 
 <template>
   <div v-if="visibleItems.length" v-bind="listAttrs">
-    <span
-      v-for="item in visibleItems"
-      :key="item.key"
-      class="ui-history-meta-list__item"
-      :class="item.class"
-    >
+    <template v-for="item in visibleItems" :key="item.key">
+      <BaseBadge
+        v-if="item.surface || item.tone"
+        :surface="item.surface || 'badge'"
+        :tone="item.tone || ''"
+        class="ui-history-meta-list__item"
+        :class="item.class"
+      >
+        <span
+          v-if="item.iconClass"
+          class="ui-history-meta-list__icon"
+          :class="item.iconClass"
+        />
+        <span class="min-w-0">
+          {{ item.text }}
+        </span>
+      </BaseBadge>
       <span
-        v-if="item.iconClass"
-        class="ui-history-meta-list__icon"
-        :class="item.iconClass"
-      />
-      <span class="min-w-0">
-        {{ item.text }}
+        v-else
+        class="ui-history-meta-list__item"
+        :class="item.class"
+      >
+        <span
+          v-if="item.iconClass"
+          class="ui-history-meta-list__icon"
+          :class="item.iconClass"
+        />
+        <span class="min-w-0">
+          {{ item.text }}
+        </span>
       </span>
-    </span>
+    </template>
   </div>
 </template>
 

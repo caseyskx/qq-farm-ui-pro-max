@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import { developmentProgress, helpArticles, helpCategories } from '@/data/help-articles'
 import { useAppStore } from '@/stores/app'
 
@@ -213,9 +214,9 @@ onMounted(() => {
                   <h3 class="glass-text-main text-base font-extrabold tracking-wide">
                     官方核心创作者
                   </h3>
-                  <span class="help-verified-badge flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase">
+                  <BaseBadge surface="meta" tone="brand" class="help-verified-badge flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase">
                     <div class="i-carbon-checkmark-filled text-[10px]" /> VERIFIED
-                  </span>
+                  </BaseBadge>
                 </div>
                 <p class="help-author-subtitle text-xs font-medium">
                   系统架构与底座开发：<span class="glass-text-main font-bold">smdk000</span>
@@ -397,16 +398,22 @@ onMounted(() => {
 .help-result-icon,
 .help-result-tag,
 .help-feedback-btn,
-.help-author-core,
-.help-verified-badge {
+.help-author-core {
   border: 1px solid var(--ui-border-subtle) !important;
 }
 
 .help-nav-category-active,
-.help-article-link-active,
-.help-verified-badge {
+.help-article-link-active {
   background: var(--ui-brand-soft-12) !important;
   color: color-mix(in srgb, var(--ui-brand-700) 76%, var(--ui-text-1)) !important;
+}
+
+.help-verified-badge {
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  line-height: 1;
 }
 
 .help-nav-category-idle,

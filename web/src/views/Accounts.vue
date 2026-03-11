@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '@/api'
 import AccountModal from '@/components/AccountModal.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import BaseAccountRecordCard from '@/components/ui/BaseAccountRecordCard.vue'
 import BaseAccountViewSwitcherLayout from '@/components/ui/BaseAccountViewSwitcherLayout.vue'
 import BaseActionButtons from '@/components/ui/BaseActionButtons.vue'
 import BaseBadge from '@/components/ui/BaseBadge.vue'
@@ -20,10 +21,11 @@ import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
 import BaseHeaderNotice from '@/components/ui/BaseHeaderNotice.vue'
 import BaseHeaderSummary from '@/components/ui/BaseHeaderSummary.vue'
 import BaseHistorySectionLayout from '@/components/ui/BaseHistorySectionLayout.vue'
-import BaseIconAction from '@/components/ui/BaseIconAction.vue'
+import BaseIconActions from '@/components/ui/BaseIconActions.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseManagementBar from '@/components/ui/BaseManagementBar.vue'
 import BasePageHeaderText from '@/components/ui/BasePageHeaderText.vue'
+import BaseRecordMetricCard from '@/components/ui/BaseRecordMetricCard.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import BaseSelectionSummary from '@/components/ui/BaseSelectionSummary.vue'
 import BaseSortableHeaderCell from '@/components/ui/BaseSortableHeaderCell.vue'
@@ -36,7 +38,7 @@ import { useAccountStore } from '@/stores/account'
 import { useToastStore } from '@/stores/toast'
 import { adminToken } from '@/utils/auth'
 import { useAvatar } from '@/utils/avatar'
-import { createActionButton, createActionButtons, createChip, createChips, createHeaderNotice, createHeaderSummary, createHistoryHighlight, createHistoryMetaItem, createHistoryMetaItems, createHistoryMetric, createHistoryMetrics, createHistoryPanel, createHistoryRecentItem, createHistoryRecentItems, createPageHeaderText, createToggleOption, createToggleOptions } from '@/utils/management-schema'
+import { createActionButton, createActionButtons, createChip, createChips, createHeaderNotice, createHeaderSummary, createHistoryHighlight, createHistoryMetaItem, createHistoryMetaItems, createHistoryMetric, createHistoryMetrics, createHistoryPanel, createHistoryRecentItem, createHistoryRecentItems, createIconAction, createIconActions, createPageHeaderText, createRecordDisplayBadge, createRecordDisplayBadges, createRecordDisplayField, createRecordDisplayFields, createRecordHero, createRecordMetricField, createRecordMetricFields, createRecordState, createToggleOption, createToggleOptions } from '@/utils/management-schema'
 import { DEFAULT_ACCOUNTS_VIEW_STATE, fetchViewPreferences, normalizeAccountsActionHistory, normalizeAccountsViewState } from '@/utils/view-preferences'
 
 interface CurrentUser {
@@ -55,6 +57,7 @@ type PlatformFilter = 'all' | 'qq' | 'wechat'
 type StateFilter = 'all' | 'online' | 'starting' | 'offline'
 type SortMode = 'smart' | 'recent' | 'name' | 'platform'
 type ViewMode = 'standard' | 'compact' | 'table'
+type AccountMode = 'main' | 'alt' | 'safe'
 type TableSortKey = 'account' | 'owner' | 'platform' | 'activity' | 'mode' | 'state'
 type SortDirection = 'asc' | 'desc'
 type TableColumnKey = 'owner' | 'platform' | 'activity' | 'mode' | 'state' | 'actions'
@@ -141,6 +144,12 @@ const viewOptions = [
   { label: '标准卡片', shortLabel: '标准', value: 'standard' as ViewMode, icon: 'i-carbon-apps' },
   { label: '紧凑卡片', shortLabel: '紧凑', value: 'compact' as ViewMode, icon: 'i-carbon-grid' },
   { label: '表格视图', shortLabel: '表格', value: 'table' as ViewMode, icon: 'i-carbon-data-table' },
+]
+
+const accountModeOptions: { mode: AccountMode, label: string, title: string }[] = [
+  { mode: 'main', label: '主号', title: '设为主号' },
+  { mode: 'alt', label: '小号', title: '设为小号' },
+  { mode: 'safe', label: '避险', title: '设为风险规避' },
 ]
 
 const tableColumnOptions: { key: TableColumnKey, label: string }[] = [
@@ -855,11 +864,331 @@ function resolveModeExecutionMeta(acc: any) {
   return null
 }
 
-function getModeButtonClasses(acc: any, mode: 'main' | 'alt' | 'safe') {
+function getModeButtonClasses(acc: any, mode: AccountMode) {
   const current = resolveAccountMode(acc)
   if (current !== mode)
     return 'accounts-mode-toggle accounts-mode-toggle-idle'
   return `accounts-mode-toggle accounts-mode-toggle-active accounts-mode-toggle-${mode}`
+}
+
+function getModeToggleOptions(acc: any) {
+  return createToggleOptions(accountModeOptions.map(({ mode, label, title }) => createToggleOption({
+    key: mode,
+    label,
+    shortLabel: label,
+    active: resolveAccountMode(acc) === mode,
+    class: getModeButtonClasses(acc, mode),
+    title,
+    onClick: (event) => {
+      event.stopPropagation()
+      void handleModeChange(acc, mode)
+    },
+  })))
+}
+
+function getAccountOperationSets(acc: any) {
+  const isSafeMode = resolveAccountMode(acc) === 'safe'
+
+  return {
+    hero: createActionButtons([
+      createActionButton({
+        key: 'runtime',
+        label: acc.running ? '停止' : '启动',
+        iconClass: acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled',
+        variant: 'secondary',
+        size: 'sm',
+        block: true,
+        stopPropagation: true,
+        class: `accounts-runtime-button col-span-2 rounded-xl transition-all duration-500 ease-in-out active:scale-95 ${getRuntimeActionButtonClasses(acc)}`,
+        onClick: () => toggleAccount(acc),
+      }),
+      createActionButton({
+        key: 'settings',
+        label: '设置',
+        variant: 'outline',
+        size: 'sm',
+        block: true,
+        stopPropagation: true,
+        class: 'rounded-xl',
+        onClick: () => openSettings(acc),
+      }),
+      createActionButton({
+        key: 'edit',
+        label: '编辑',
+        variant: 'outline',
+        size: 'sm',
+        block: true,
+        stopPropagation: true,
+        class: 'rounded-xl',
+        onClick: () => openEditModal(acc),
+      }),
+      createActionButton({
+        key: 'delete',
+        label: '删除',
+        variant: 'danger',
+        size: 'sm',
+        block: true,
+        stopPropagation: true,
+        class: `rounded-xl ${isSafeMode ? '' : 'col-span-2'}`.trim(),
+        onClick: () => handleDelete(acc),
+      }),
+      createActionButton({
+        key: 'safe-check',
+        label: '防封扫描',
+        iconClass: 'i-carbon-security',
+        variant: 'ghost',
+        size: 'sm',
+        block: true,
+        stopPropagation: true,
+        loading: safeCheckingId.value === acc.id,
+        title: '一键分析封禁日志并加入黑名单',
+        class: 'accounts-safe-check rounded-xl !px-3 !py-1.5 !text-xs',
+        show: isSafeMode,
+        onClick: () => handleSafeCheck(acc),
+      }),
+    ]),
+    mobile: createActionButtons([
+      createActionButton({
+        key: 'runtime',
+        label: acc.running ? '停止' : '启动',
+        iconClass: acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled',
+        variant: 'secondary',
+        size: 'sm',
+        stopPropagation: true,
+        class: `accounts-runtime-button rounded-full transition-all duration-500 ease-in-out active:scale-95 ${getRuntimeActionButtonClasses(acc)}`,
+        onClick: () => toggleAccount(acc),
+      }),
+      createActionButton({
+        key: 'settings',
+        label: '设置',
+        variant: 'outline',
+        size: 'sm',
+        stopPropagation: true,
+        onClick: () => openSettings(acc),
+      }),
+      createActionButton({
+        key: 'edit',
+        label: '编辑',
+        variant: 'outline',
+        size: 'sm',
+        stopPropagation: true,
+        onClick: () => openEditModal(acc),
+      }),
+      createActionButton({
+        key: 'delete',
+        label: '删除',
+        variant: 'danger',
+        size: 'sm',
+        stopPropagation: true,
+        onClick: () => handleDelete(acc),
+      }),
+    ]),
+    tablePrimary: createActionButtons([
+      createActionButton({
+        key: 'runtime',
+        label: acc.running ? '停止' : '启动',
+        iconClass: acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled',
+        variant: 'secondary',
+        size: 'sm',
+        stopPropagation: true,
+        class: `accounts-runtime-button min-w-[84px] rounded-full transition-all duration-500 ease-in-out active:scale-95 ${getRuntimeActionButtonClasses(acc)}`,
+        onClick: () => toggleAccount(acc),
+      }),
+      createActionButton({
+        key: 'safe-check',
+        label: '防封扫描',
+        iconClass: 'i-carbon-security',
+        variant: 'ghost',
+        size: 'sm',
+        stopPropagation: true,
+        loading: safeCheckingId.value === acc.id,
+        title: '一键分析封禁日志并加入黑名单',
+        class: 'accounts-safe-check rounded-full !px-3 !py-1.5 !text-xs',
+        show: isSafeMode,
+        onClick: () => handleSafeCheck(acc),
+      }),
+    ]),
+    tableIcon: createIconActions([
+      createIconAction({
+        key: 'settings',
+        iconClass: 'i-carbon-settings text-lg',
+        title: '设置',
+        class: '!p-2.5',
+        onClick: (event) => {
+          event.stopPropagation()
+          openSettings(acc)
+        },
+      }),
+      createIconAction({
+        key: 'edit',
+        iconClass: 'i-carbon-edit text-lg',
+        title: '编辑',
+        class: '!p-2.5',
+        onClick: (event) => {
+          event.stopPropagation()
+          openEditModal(acc)
+        },
+      }),
+      createIconAction({
+        key: 'delete',
+        iconClass: 'i-carbon-trash-can text-lg',
+        title: '删除',
+        danger: true,
+        class: 'accounts-icon-danger !p-2.5',
+        onClick: (event) => {
+          event.stopPropagation()
+          handleDelete(acc)
+        },
+      }),
+    ]),
+  }
+}
+
+function getAccountRecordHero(acc: any) {
+  const ownerMeta = resolveOwnerMeta(acc)
+  const runtimeMeta = resolveRuntimeState(acc)
+
+  return createRecordHero({
+    key: String(acc.id || ''),
+    title: getAccountDisplayName(acc),
+    subline: getAccountSubline(acc),
+    nickname: acc.nick || '暂无昵称',
+    platformLabel: resolvePlatformLabel(acc.platform),
+    zoneLabel: resolveZoneLabel(acc),
+    avatarUrl: getAvatarUrl(acc) || '',
+    hint: isCurrentAccount(acc) ? '当前账号已选中，可直接进入设置继续调整。' : '点击卡片任意空白处可切换为当前账号。',
+    badges: createRecordDisplayBadges([
+      createRecordDisplayBadge({
+        text: ownerMeta.shortLabel,
+        class: ownerMeta.badge,
+      }),
+      createRecordDisplayBadge({
+        text: runtimeMeta.label,
+        class: runtimeMeta.badge,
+      }),
+    ]),
+    actions: getAccountOperationSets(acc).hero,
+  })
+}
+
+function getAccountDisplayFields(acc: any) {
+  const ownerMeta = resolveOwnerMeta(acc)
+  const runtimeMeta = resolveRuntimeState(acc)
+  const configuredMode = resolveModeMeta(resolveAccountMode(acc))
+  const executionMeta = resolveModeExecutionMeta(acc)
+
+  return {
+    owner: createRecordDisplayField({
+      key: 'owner',
+      label: '归属',
+      value: ownerMeta.ownerText,
+      badges: createRecordDisplayBadges([
+        createRecordDisplayBadge({
+          text: ownerMeta.shortLabel,
+          class: ownerMeta.badge,
+        }),
+      ]),
+    }),
+    platform: createRecordDisplayField({
+      key: 'platform',
+      label: '平台 / 区服',
+      value: resolvePlatformLabel(acc.platform),
+      secondaryValue: resolveZoneLabel(acc),
+    }),
+    activity: createRecordDisplayField({
+      key: 'activity',
+      label: '最近登录',
+      value: getLastLoginLabel(acc),
+      secondaryValue: `首次录入 ${formatDateTime(acc.createdAt)}`,
+    }),
+    state: createRecordDisplayField({
+      key: 'state',
+      label: '当前状态',
+      value: runtimeMeta.label,
+      secondaryValue: getAccountStatusDetail(acc),
+      noteClass: acc.wsError?.message ? 'accounts-error-banner px-3 py-2' : 'glass-text-muted',
+      dotClass: runtimeMeta.dot,
+      badges: createRecordDisplayBadges([
+        createRecordDisplayBadge({
+          text: runtimeMeta.label,
+          class: runtimeMeta.badge,
+        }),
+      ]),
+    }),
+    mode: createRecordDisplayField({
+      key: 'mode',
+      label: '模式',
+      value: configuredMode.label,
+      note: executionMeta?.note || '',
+      noteClass: executionMeta?.noteClass || '',
+      badges: createRecordDisplayBadges([
+        createRecordDisplayBadge({
+          text: configuredMode.label,
+          class: configuredMode.badge,
+        }),
+        createRecordDisplayBadge({
+          text: executionMeta?.label || '',
+          class: executionMeta?.badge || '',
+          show: Boolean(executionMeta?.label),
+        }),
+      ]),
+      toggleItems: getModeToggleOptions(acc),
+    }),
+  }
+}
+
+function getAccountMobileFields(acc: any) {
+  const fields = getAccountDisplayFields(acc)
+  return createRecordDisplayFields([
+    fields.owner,
+    fields.platform,
+    fields.activity,
+    fields.state,
+  ])
+}
+
+function getAccountRecordFields(acc: any) {
+  const fields = getAccountDisplayFields(acc)
+
+  return createRecordMetricFields([
+    createRecordMetricField({
+      key: 'owner',
+      label: '归属',
+      iconClass: 'i-carbon-user-multiple text-sm',
+      class: isCompactView.value ? 'accounts-record-field-owner' : 'accounts-record-field-owner xl:col-span-2',
+      props: {
+        field: fields.owner,
+      },
+    }),
+    createRecordMetricField({
+      key: 'activity',
+      label: '最近登录',
+      iconClass: 'i-carbon-time text-sm',
+      class: isCompactView.value ? '' : 'xl:col-span-4',
+      props: {
+        field: fields.activity,
+      },
+    }),
+    createRecordMetricField({
+      key: 'runtime',
+      label: '当前状态',
+      iconClass: 'i-carbon-pulse text-sm',
+      class: isCompactView.value ? '' : 'xl:col-span-3',
+      props: {
+        field: fields.state,
+      },
+    }),
+    createRecordMetricField({
+      key: 'mode',
+      label: '模式设置',
+      iconClass: 'i-carbon-model-alt text-sm',
+      class: isCompactView.value ? 'sm:col-span-2' : 'xl:col-span-3',
+      onClick: event => event.stopPropagation(),
+      props: {
+        field: fields.mode,
+      },
+    }),
+  ])
 }
 
 function getOwnershipTabClasses(section: OwnershipSection, active: boolean) {
@@ -954,8 +1283,24 @@ function getAccountSubline(acc: any) {
   return `${zone}: ${accountRef}`
 }
 
+function getAccountRecordState(acc: any) {
+  const selected = isSelected(acc?.id)
+  const current = String(acc?.id || '') === String(accountStore.currentAccountId || '')
+
+  return createRecordState({
+    key: String(acc?.id || ''),
+    selected,
+    current,
+    glowClass: resolveOwnerMeta(acc).cardGlow,
+    selectionClass: getSelectionBoxClasses(selected),
+    selectionIconClass: 'accounts-selection-icon',
+    mobileCardClass: selected ? 'ui-mobile-record-card--selected' : '',
+    tableRowClass: current ? 'accounts-table-row-current' : '',
+  })
+}
+
 function isCurrentAccount(acc: any) {
-  return String(acc?.id || '') === String(accountStore.currentAccountId || '')
+  return getAccountRecordState(acc).current === true
 }
 
 function getAccountStatusDetail(acc: any) {
@@ -2133,7 +2478,7 @@ async function handleSaved() {
   await initializePage()
 }
 
-async function handleModeChange(acc: any, mode: string) {
+async function handleModeChange(acc: any, mode: AccountMode) {
   try {
     await accountStore.updateAccountMode(acc.id, mode)
   }
@@ -2220,7 +2565,7 @@ useIntervalFn(() => {
       </BaseAccountViewSwitcherLayout>
     </div>
 
-    <div class="glass-panel ui-filter-panel">
+    <div class="glass-panel ui-filter-panel accounts-filter-panel">
       <div class="ui-filter-grid lg:grid-cols-[minmax(0,1.8fr)_repeat(3,minmax(0,0.9fr))]">
         <BaseInput
           v-model="searchKeyword"
@@ -2257,7 +2602,7 @@ useIntervalFn(() => {
       </BaseTableToolbar>
     </div>
 
-    <BaseManagementBar v-if="accounts.length > 0" class="glass-panel mb-4">
+    <BaseManagementBar v-if="accounts.length > 0" class="glass-panel accounts-management-bar mb-4">
       <template #primary>
         <BaseBulkActions>
           <BaseActionButtons :actions="selectionPrimaryActions" />
@@ -2425,137 +2770,78 @@ useIntervalFn(() => {
             v-for="acc in tableAccounts"
             :key="`mobile-${acc.id}`"
             class="ui-mobile-record-card"
-            :class="{ 'ui-mobile-record-card--selected': isSelected(acc.id) }"
+            :class="getAccountRecordState(acc).mobileCardClass"
             @click="accountStore.selectAccount(String(acc.id || ''))"
           >
             <div class="ui-mobile-record-head">
               <div class="ui-mobile-record-main">
                 <div
                   class="h-5 w-5 flex cursor-pointer items-center justify-center rounded transition-colors"
-                  :class="getSelectionBoxClasses(isSelected(acc.id))"
+                  :class="getAccountRecordState(acc).selectionClass"
                   @click.stop="toggleSelection(acc.id)"
                 >
-                  <div v-if="isSelected(acc.id)" class="accounts-selection-icon i-carbon-checkmark" />
+                  <div
+                    v-if="getAccountRecordState(acc).selected"
+                    class="i-carbon-checkmark"
+                    :class="getAccountRecordState(acc).selectionIconClass"
+                  />
                 </div>
                 <div class="ui-mobile-record-body">
                   <div class="ui-mobile-record-badges">
-                    <BaseBadge :class="resolveOwnerMeta(acc).badge">
-                      {{ resolveOwnerMeta(acc).shortLabel }}
+                    <BaseBadge :class="getAccountRecordHero(acc).badges?.[0]?.class">
+                      {{ getAccountRecordHero(acc).badges?.[0]?.text }}
                     </BaseBadge>
-                    <BaseBadge :class="resolveRuntimeState(acc).badge">
-                      {{ resolveRuntimeState(acc).label }}
+                    <BaseBadge :class="getAccountRecordHero(acc).badges?.[1]?.class">
+                      {{ getAccountRecordHero(acc).badges?.[1]?.text }}
                     </BaseBadge>
-                    <BaseBadge :class="resolveModeMeta(resolveAccountMode(acc)).badge">
-                      {{ resolveModeMeta(resolveAccountMode(acc)).label }}
+                    <BaseBadge :class="getAccountDisplayFields(acc).mode.badges?.[0]?.class">
+                      {{ getAccountDisplayFields(acc).mode.badges?.[0]?.text }}
                     </BaseBadge>
                   </div>
                   <h3 class="ui-mobile-record-title">
-                    {{ getAccountDisplayName(acc) }}
+                    {{ getAccountRecordHero(acc).title }}
                   </h3>
                   <p class="ui-mobile-record-subtitle">
-                    {{ getAccountSubline(acc) }}
+                    {{ getAccountRecordHero(acc).subline }}
                   </p>
                 </div>
               </div>
             </div>
 
             <div class="ui-mobile-record-grid">
-              <div class="ui-mobile-record-field">
+              <div
+                v-for="mobileField in getAccountMobileFields(acc)"
+                :key="mobileField.key"
+                class="ui-mobile-record-field"
+              >
                 <div class="ui-mobile-record-label">
-                  归属
+                  {{ mobileField.label }}
                 </div>
                 <div class="ui-mobile-record-value">
-                  {{ resolveOwnerMeta(acc).ownerText }}
+                  {{ mobileField.value }}
                 </div>
-              </div>
-              <div class="ui-mobile-record-field">
-                <div class="ui-mobile-record-label">
-                  平台 / 区服
-                </div>
-                <div class="ui-mobile-record-value">
-                  {{ resolvePlatformLabel(acc.platform) }}
-                </div>
-                <div class="ui-mobile-record-value ui-mobile-record-value--muted">
-                  {{ resolveZoneLabel(acc) }}
-                </div>
-              </div>
-              <div class="ui-mobile-record-field">
-                <div class="ui-mobile-record-label">
-                  最近登录
-                </div>
-                <div class="ui-mobile-record-value">
-                  {{ getLastLoginLabel(acc) }}
-                </div>
-                <div class="ui-mobile-record-value ui-mobile-record-value--muted">
-                  首次录入 {{ formatDateTime(acc.createdAt) }}
-                </div>
-              </div>
-              <div class="ui-mobile-record-field">
-                <div class="ui-mobile-record-label">
-                  当前状态
-                </div>
-                <div class="ui-mobile-record-value">
-                  {{ resolveRuntimeState(acc).label }}
-                </div>
-                <div class="ui-mobile-record-value ui-mobile-record-value--muted">
-                  {{ acc.wsError?.message || '暂无异常记录' }}
+                <div v-if="mobileField.secondaryValue" class="ui-mobile-record-value ui-mobile-record-value--muted">
+                  {{ mobileField.secondaryValue }}
                 </div>
               </div>
             </div>
 
             <div class="ui-mobile-record-actions" @click.stop>
-              <BaseButton
-                variant="secondary"
-                size="sm"
-                class="accounts-runtime-button rounded-full transition-all duration-500 ease-in-out active:scale-95"
-                :class="getRuntimeActionButtonClasses(acc)"
-                @click.stop="toggleAccount(acc)"
-              >
-                <div :class="acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled'" class="mr-1" />
-                {{ acc.running ? '停止' : '启动' }}
-              </BaseButton>
-              <BaseButton variant="outline" size="sm" @click.stop="openSettings(acc)">
-                设置
-              </BaseButton>
-              <BaseButton variant="outline" size="sm" @click.stop="openEditModal(acc)">
-                编辑
-              </BaseButton>
-              <BaseButton variant="danger" size="sm" @click.stop="handleDelete(acc)">
-                删除
-              </BaseButton>
+              <BaseActionButtons :actions="getAccountOperationSets(acc).mobile" />
             </div>
 
-            <div class="ui-bulk-actions" @click.stop>
-              <BaseButton
-                variant="ghost"
-                size="sm"
-                :class="getModeButtonClasses(acc, 'main')"
-                @click.stop="handleModeChange(acc, 'main')"
-              >
-                主号
-              </BaseButton>
-              <BaseButton
-                variant="ghost"
-                size="sm"
-                :class="getModeButtonClasses(acc, 'alt')"
-                @click.stop="handleModeChange(acc, 'alt')"
-              >
-                小号
-              </BaseButton>
-              <BaseButton
-                variant="ghost"
-                size="sm"
-                :class="getModeButtonClasses(acc, 'safe')"
-                @click.stop="handleModeChange(acc, 'safe')"
-              >
-                避险
-              </BaseButton>
+            <div class="accounts-mode-toggle-wrap accounts-mode-toggle-wrap-mobile" @click.stop>
+              <BaseToggleOptionGroup
+                class="ui-bulk-actions accounts-mode-toggle-group accounts-mode-toggle-group-mobile"
+                item-class="accounts-mode-toggle-button accounts-mode-toggle-button-mobile"
+                :items="getModeToggleOptions(acc)"
+              />
             </div>
           </article>
         </div>
       </template>
 
-      <BaseDataTable class="hidden max-h-[68vh] overflow-auto md:block" table-class="min-w-[1260px] w-full text-sm">
+      <BaseDataTable class="hidden overflow-x-auto overflow-y-visible md:block" table-class="min-w-[1260px] w-full text-sm">
         <BaseDataTableHead class="accounts-table-head accounts-meta-label sticky top-0 z-10 text-left backdrop-blur-md">
           <tr>
             <th class="px-4 py-3 font-medium">
@@ -2612,159 +2898,111 @@ useIntervalFn(() => {
             v-for="acc in tableAccounts"
             :key="acc.id"
             class="accounts-table-row cursor-pointer border-t align-top transition-colors"
-            :class="String(acc.id || '') === String(accountStore.currentAccountId || '') ? 'accounts-table-row-current' : ''"
+            :class="getAccountRecordState(acc).tableRowClass"
             @click="accountStore.selectAccount(String(acc.id || ''))"
           >
             <td class="px-4 py-4 align-top">
               <div
                 class="h-5 w-5 flex cursor-pointer items-center justify-center rounded transition-colors"
-                :class="getSelectionBoxClasses(isSelected(acc.id))"
+                :class="getAccountRecordState(acc).selectionClass"
                 @click.stop="toggleSelection(acc.id)"
               >
-                <div v-if="isSelected(acc.id)" class="accounts-selection-icon i-carbon-checkmark" />
+                <div
+                  v-if="getAccountRecordState(acc).selected"
+                  class="i-carbon-checkmark"
+                  :class="getAccountRecordState(acc).selectionIconClass"
+                />
               </div>
             </td>
             <td class="px-4 py-4 align-top">
               <div class="min-w-[220px] flex items-start gap-3">
                 <div class="accounts-avatar-shell h-11 w-11 flex shrink-0 items-center justify-center overflow-hidden rounded-xl">
-                  <img v-if="getAvatarUrl(acc)" :src="getAvatarUrl(acc)" class="h-full w-full object-cover" @error="(e) => markFailed((e.target as HTMLImageElement).src)" />
+                  <img v-if="getAccountRecordHero(acc).avatarUrl" :src="getAccountRecordHero(acc).avatarUrl" class="h-full w-full object-cover" @error="(e) => markFailed((e.target as HTMLImageElement).src)" />
                   <div v-else class="i-carbon-user glass-text-muted text-2xl" />
                 </div>
                 <div class="min-w-0">
                   <div class="line-clamp-1 text-base font-semibold">
-                    {{ getAccountDisplayName(acc) }}
+                    {{ getAccountRecordHero(acc).title }}
                   </div>
                   <div class="glass-text-muted line-clamp-1 mt-1 text-xs">
-                    {{ getAccountSubline(acc) }}
+                    {{ getAccountRecordHero(acc).subline }}
                   </div>
                   <div class="glass-text-muted line-clamp-1 mt-1 text-xs">
-                    昵称：{{ acc.nick || '暂无昵称' }}
+                    昵称：{{ getAccountRecordHero(acc).nickname }}
                   </div>
                 </div>
               </div>
             </td>
             <td v-if="visibleTableColumns.owner" class="px-4 py-4 align-top">
               <div class="min-w-[180px]">
-                <BaseBadge :class="resolveOwnerMeta(acc).badge">
-                  {{ resolveOwnerMeta(acc).shortLabel }}
+                <BaseBadge :class="getAccountDisplayFields(acc).owner.badges?.[0]?.class">
+                  {{ getAccountDisplayFields(acc).owner.badges?.[0]?.text }}
                 </BaseBadge>
                 <div class="line-clamp-2 mt-2 text-sm font-semibold leading-6">
-                  {{ resolveOwnerMeta(acc).ownerText }}
+                  {{ getAccountDisplayFields(acc).owner.value }}
                 </div>
               </div>
             </td>
             <td v-if="visibleTableColumns.platform" class="px-4 py-4 align-top">
               <div class="min-w-[140px]">
                 <div class="text-sm font-semibold">
-                  {{ resolvePlatformLabel(acc.platform) }}
+                  {{ getAccountDisplayFields(acc).platform.value }}
                 </div>
                 <div class="glass-text-muted mt-2 text-xs">
-                  {{ resolveZoneLabel(acc) }}
+                  {{ getAccountDisplayFields(acc).platform.secondaryValue }}
                 </div>
               </div>
             </td>
             <td v-if="visibleTableColumns.activity" class="px-4 py-4 align-top">
               <div class="min-w-[168px]">
                 <div class="text-sm font-semibold leading-6">
-                  {{ getLastLoginLabel(acc) }}
+                  {{ getAccountDisplayFields(acc).activity.value }}
                 </div>
                 <div class="glass-text-muted mt-2 text-xs leading-5">
-                  首次录入 {{ formatDateTime(acc.createdAt) }}
+                  {{ getAccountDisplayFields(acc).activity.secondaryValue }}
                 </div>
               </div>
             </td>
             <td v-if="visibleTableColumns.mode" class="px-4 py-4 align-top">
               <div class="min-w-[188px]">
-                <BaseBadge :class="resolveModeMeta(resolveAccountMode(acc)).badge">
-                  {{ resolveModeMeta(resolveAccountMode(acc)).label }}
+                <BaseBadge :class="getAccountDisplayFields(acc).mode.badges?.[0]?.class">
+                  {{ getAccountDisplayFields(acc).mode.badges?.[0]?.text }}
                 </BaseBadge>
-                <div v-if="resolveModeExecutionMeta(acc)" class="mt-2 flex flex-wrap items-center gap-2">
-                  <BaseBadge :class="resolveModeExecutionMeta(acc)?.badge">
-                    {{ resolveModeExecutionMeta(acc)?.label }}
+                <div v-if="getAccountDisplayFields(acc).mode.badges?.[1]?.text" class="mt-2 flex flex-wrap items-center gap-2">
+                  <BaseBadge :class="getAccountDisplayFields(acc).mode.badges?.[1]?.class">
+                    {{ getAccountDisplayFields(acc).mode.badges?.[1]?.text }}
                   </BaseBadge>
                 </div>
-                <div v-if="resolveModeExecutionMeta(acc)?.note" class="mt-2 text-xs leading-5" :class="resolveModeExecutionMeta(acc)?.noteClass">
-                  {{ resolveModeExecutionMeta(acc)?.note }}
+                <div v-if="getAccountDisplayFields(acc).mode.note" class="mt-2 text-xs leading-5" :class="getAccountDisplayFields(acc).mode.noteClass">
+                  {{ getAccountDisplayFields(acc).mode.note }}
                 </div>
-                <div class="accounts-mode-toggle-group mt-3 flex items-center gap-0.5 p-1 shadow-inner" @click.stop>
-                  <button
-                    class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
-                    :class="getModeButtonClasses(acc, 'main')"
-                    title="设为主号"
-                    @click="handleModeChange(acc, 'main')"
-                  >
-                    主号
-                  </button>
-                  <button
-                    class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
-                    :class="getModeButtonClasses(acc, 'alt')"
-                    title="设为小号"
-                    @click="handleModeChange(acc, 'alt')"
-                  >
-                    小号
-                  </button>
-                  <button
-                    class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
-                    :class="getModeButtonClasses(acc, 'safe')"
-                    title="设为风险规避"
-                    @click="handleModeChange(acc, 'safe')"
-                  >
-                    避险
-                  </button>
+                <div class="accounts-mode-toggle-wrap accounts-mode-toggle-wrap-table" @click.stop>
+                  <BaseToggleOptionGroup
+                    class="accounts-mode-toggle-group accounts-mode-toggle-group-table"
+                    item-class="accounts-mode-toggle-button"
+                    :items="getAccountDisplayFields(acc).mode.toggleItems || []"
+                  />
                 </div>
               </div>
             </td>
             <td v-if="visibleTableColumns.state" class="px-4 py-4 align-top">
               <div class="min-w-[170px]">
-                <BaseBadge :class="resolveRuntimeState(acc).badge">
-                  {{ resolveRuntimeState(acc).label }}
+                <BaseBadge :class="getAccountDisplayFields(acc).state.badges?.[0]?.class">
+                  {{ getAccountDisplayFields(acc).state.badges?.[0]?.text }}
                 </BaseBadge>
-                <div v-if="acc.wsError?.message" class="accounts-error-banner line-clamp-2 mt-2 px-3 py-2 text-xs leading-5">
-                  最近错误：{{ acc.wsError.message }}
-                </div>
-                <div v-else class="glass-text-muted mt-2 text-xs leading-5">
-                  {{ String(acc.id || '') === String(accountStore.currentAccountId || '') ? '当前选中账号，可继续进入设置调整。' : '暂无异常记录。' }}
+                <div class="mt-2 text-xs leading-5" :class="getAccountDisplayFields(acc).state.noteClass">
+                  {{ getAccountDisplayFields(acc).state.secondaryValue }}
                 </div>
               </div>
             </td>
             <td v-if="visibleTableColumns.actions" class="px-4 py-4 align-top">
               <div class="min-w-[218px] space-y-3" @click.stop>
                 <div class="flex flex-wrap items-center gap-2">
-                  <BaseButton
-                    variant="secondary"
-                    size="sm"
-                    class="accounts-runtime-button min-w-[84px] rounded-full transition-all duration-500 ease-in-out active:scale-95"
-                    :class="getRuntimeActionButtonClasses(acc)"
-                    @click.stop="toggleAccount(acc)"
-                  >
-                    <div :class="acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled'" class="mr-1" />
-                    {{ acc.running ? '停止' : '启动' }}
-                  </BaseButton>
-
-                  <BaseButton
-                    v-if="resolveAccountMode(acc) === 'safe'"
-                    variant="ghost"
-                    size="sm"
-                    class="accounts-safe-check rounded-full !px-3 !py-1.5 !text-xs"
-                    title="一键分析封禁日志并加入黑名单"
-                    :loading="safeCheckingId === acc.id"
-                    @click.stop="handleSafeCheck(acc)"
-                  >
-                    <div class="i-carbon-security mr-1" />
-                    防封扫描
-                  </BaseButton>
+                  <BaseActionButtons :actions="getAccountOperationSets(acc).tablePrimary" />
                 </div>
 
                 <div class="flex items-center gap-2">
-                  <BaseIconAction class="!p-2.5" title="设置" @click.stop="openSettings(acc)">
-                    <div class="i-carbon-settings text-lg" />
-                  </BaseIconAction>
-                  <BaseIconAction class="!p-2.5" title="编辑" @click.stop="openEditModal(acc)">
-                    <div class="i-carbon-edit text-lg" />
-                  </BaseIconAction>
-                  <BaseIconAction danger class="accounts-icon-danger !p-2.5" title="删除" @click.stop="handleDelete(acc)">
-                    <div class="i-carbon-trash-can text-lg" />
-                  </BaseIconAction>
+                  <BaseIconActions :actions="getAccountOperationSets(acc).tableIcon" />
                 </div>
               </div>
             </td>
@@ -2774,226 +3012,116 @@ useIntervalFn(() => {
     </BaseTableSectionCard>
 
     <div v-else :class="cardGridClass">
-      <div
+      <BaseAccountRecordCard
         v-for="acc in filteredAccounts"
         :key="acc.id"
-        class="accounts-card-shell glass-panel group relative h-full flex flex-col cursor-pointer overflow-hidden border transition-all duration-300"
-        :class="[
-          isCompactView ? 'min-h-[352px] rounded-[22px] p-4' : 'min-h-[372px] rounded-[26px] p-5',
-          isCurrentAccount(acc) ? 'accounts-card-current' : 'accounts-card-idle',
-          resolveOwnerMeta(acc).cardGlow,
-        ]"
-        @click="accountStore.selectAccount(String(acc.id || ''))"
+        :compact="isCompactView"
+        :current="getAccountRecordState(acc).current"
+        :glow-class="getAccountRecordState(acc).glowClass"
+        :title="getAccountRecordHero(acc).title"
+        :subline="getAccountRecordHero(acc).subline"
+        :nickname="getAccountRecordHero(acc).nickname"
+        :platform-label="getAccountRecordHero(acc).platformLabel"
+        :zone-label="getAccountRecordHero(acc).zoneLabel"
+        :avatar-url="getAccountRecordHero(acc).avatarUrl"
+        :hint="getAccountRecordHero(acc).hint"
+        @select="accountStore.selectAccount(String(acc.id || ''))"
+        @avatar-error="(e) => markFailed((e.target as HTMLImageElement).src)"
       >
-        <div class="accounts-record-toolbar flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-2">
+        <template #selection>
+          <div
+            class="h-5 w-5 flex cursor-pointer items-center justify-center rounded transition-colors"
+            :class="getAccountRecordState(acc).selectionClass"
+            @click.stop="toggleSelection(acc.id)"
+          >
             <div
-              class="h-5 w-5 flex cursor-pointer items-center justify-center rounded transition-colors"
-              :class="getSelectionBoxClasses(isSelected(acc.id))"
-              @click.stop="toggleSelection(acc.id)"
-            >
-              <div v-if="isSelected(acc.id)" class="accounts-selection-icon i-carbon-checkmark" />
-            </div>
-            <BaseBadge :class="resolveOwnerMeta(acc).badge">
-              {{ resolveOwnerMeta(acc).shortLabel }}
-            </BaseBadge>
-            <BaseBadge :class="resolveRuntimeState(acc).badge">
-              {{ resolveRuntimeState(acc).label }}
-            </BaseBadge>
-            <BaseBadge v-if="isCurrentAccount(acc)" class="accounts-badge-current">
-              当前选中
-            </BaseBadge>
+              v-if="getAccountRecordState(acc).selected"
+              class="i-carbon-checkmark"
+              :class="getAccountRecordState(acc).selectionIconClass"
+            />
           </div>
-          <div class="glass-text-muted text-xs leading-5">
-            {{ getAccountSubline(acc) }}
-          </div>
-        </div>
+        </template>
 
-        <div class="accounts-record-grid grid mt-4 gap-3" :class="isCompactView ? 'grid-cols-1 sm:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-6'">
-          <div class="accounts-meta-card accounts-record-hero" :class="isCompactView ? 'sm:col-span-2' : 'md:col-span-2 xl:col-span-6'">
-            <div class="accounts-record-hero-grid grid gap-4">
-              <div class="min-w-0">
-                <div class="accounts-meta-label flex items-center gap-2">
-                  <div class="i-carbon-user-avatar text-sm" />
-                  账号信息
+        <template #badges>
+          <BaseBadge :class="getAccountRecordHero(acc).badges?.[0]?.class">
+            {{ getAccountRecordHero(acc).badges?.[0]?.text }}
+          </BaseBadge>
+          <BaseBadge :class="getAccountRecordHero(acc).badges?.[1]?.class">
+            {{ getAccountRecordHero(acc).badges?.[1]?.text }}
+          </BaseBadge>
+        </template>
+
+        <template #hero-actions>
+          <BaseActionButtons :actions="getAccountRecordHero(acc).actions" />
+        </template>
+
+        <template #fields>
+          <BaseRecordMetricCard
+            v-for="field in getAccountRecordFields(acc)"
+            :key="field.key"
+            :label="field.label"
+            :icon-class="field.iconClass"
+            class="accounts-record-field"
+            :class="field.class"
+            :label-class="field.labelClass"
+            :body-class="field.bodyClass"
+            @click="field.onClick?.($event)"
+          >
+            <template v-if="field.key === 'owner'">
+              <div class="accounts-owner-field">
+                <div class="accounts-owner-field__badge">
+                  <BaseBadge :class="field.props?.field?.badges?.[0]?.class">
+                    {{ field.props?.field?.badges?.[0]?.text }}
+                  </BaseBadge>
                 </div>
-                <div class="mt-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div class="min-w-0 flex flex-1 items-start gap-3">
-                    <div class="accounts-avatar-shell h-12 w-12 flex shrink-0 items-center justify-center overflow-hidden rounded-xl shadow-inner">
-                      <img v-if="getAvatarUrl(acc)" :src="getAvatarUrl(acc)" class="h-full w-full object-cover" @error="(e) => markFailed((e.target as HTMLImageElement).src)" />
-                      <div v-else class="i-carbon-user glass-text-muted text-2xl" />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <h3 class="line-clamp-1 text-lg font-semibold leading-tight" :title="getAccountDisplayName(acc)">
-                        {{ getAccountDisplayName(acc) }}
-                      </h3>
-                      <p class="glass-text-muted mt-1.5 text-sm leading-5">
-                        {{ getAccountSubline(acc) }}
-                      </p>
-                      <p class="glass-text-muted mt-1 text-sm leading-5">
-                        昵称：{{ acc.nick || '暂无昵称' }}
-                      </p>
-                    </div>
-                  </div>
-                  <div class="accounts-record-inline-meta min-w-0 lg:w-[150px] lg:shrink-0">
-                    <div class="accounts-meta-label flex items-center gap-2">
-                      <div class="i-carbon-mobile text-sm" />
-                      平台 / 区服
-                    </div>
-                    <div class="mt-2 text-sm font-semibold leading-6">
-                      {{ resolvePlatformLabel(acc.platform) }}
-                    </div>
-                    <div class="glass-text-muted mt-1 text-xs leading-5">
-                      {{ resolveZoneLabel(acc) }}
-                    </div>
-                  </div>
+                <div class="accounts-owner-field__value">
+                  {{ field.props?.field?.value }}
                 </div>
               </div>
+            </template>
 
-              <div class="accounts-record-hero-actions min-w-0" @click.stop>
-                <div class="accounts-meta-label flex items-center gap-2">
-                  <div class="i-carbon-flash text-sm" />
-                  快捷操作
-                </div>
-                <div class="accounts-record-action-grid grid grid-cols-2 mt-3 gap-2">
-                  <BaseButton
-                    variant="secondary"
-                    size="sm"
-                    block
-                    class="accounts-runtime-button col-span-2 rounded-xl transition-all duration-500 ease-in-out active:scale-95"
-                    :class="getRuntimeActionButtonClasses(acc)"
-                    @click.stop="toggleAccount(acc)"
-                  >
-                    <div :class="acc.running ? 'i-carbon-stop-filled' : 'i-carbon-play-filled'" class="mr-1" />
-                    {{ acc.running ? '停止' : '启动' }}
-                  </BaseButton>
-                  <BaseButton variant="outline" size="sm" block class="rounded-xl" @click.stop="openSettings(acc)">
-                    设置
-                  </BaseButton>
-                  <BaseButton variant="outline" size="sm" block class="rounded-xl" @click.stop="openEditModal(acc)">
-                    编辑
-                  </BaseButton>
-                  <BaseButton
-                    variant="danger"
-                    size="sm"
-                    block
-                    class="rounded-xl"
-                    :class="resolveAccountMode(acc) === 'safe' ? '' : 'col-span-2'"
-                    @click.stop="handleDelete(acc)"
-                  >
-                    删除
-                  </BaseButton>
-                  <BaseButton
-                    v-if="resolveAccountMode(acc) === 'safe'"
-                    variant="ghost"
-                    size="sm"
-                    block
-                    class="accounts-safe-check rounded-xl !px-3 !py-1.5 !text-xs"
-                    title="一键分析封禁日志并加入黑名单"
-                    :loading="safeCheckingId === acc.id"
-                    @click.stop="handleSafeCheck(acc)"
-                  >
-                    <div class="i-carbon-security mr-1" />
-                    防封扫描
-                  </BaseButton>
-                </div>
-                <p class="glass-text-muted mt-2 text-xs leading-5">
-                  {{ isCurrentAccount(acc) ? '当前账号已选中，可直接进入设置继续调整。' : '点击卡片任意空白处可切换为当前账号。' }}
-                </p>
+            <template v-else-if="field.key === 'activity'">
+              <div class="mt-2.5 text-base font-semibold leading-6">
+                {{ field.props?.field?.value }}
               </div>
-            </div>
-          </div>
+              <div class="glass-text-muted mt-2 text-xs leading-5">
+                {{ field.props?.field?.secondaryValue }}
+              </div>
+            </template>
 
-          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? '' : 'xl:col-span-2'">
-            <div class="accounts-meta-label flex items-center gap-2">
-              <div class="i-carbon-user-multiple text-sm" />
-              归属
-            </div>
-            <div class="mt-2.5 flex items-center gap-2">
-              <BaseBadge :class="resolveOwnerMeta(acc).badge">
-                {{ resolveOwnerMeta(acc).shortLabel }}
-              </BaseBadge>
-            </div>
-            <div class="mt-2.5 text-sm font-semibold leading-6">
-              {{ resolveOwnerMeta(acc).ownerText }}
-            </div>
-          </div>
+            <template v-else-if="field.key === 'runtime'">
+              <div class="mt-2.5 flex items-center gap-2 text-sm font-semibold">
+                <div class="h-2 w-2 rounded-full" :class="field.props?.field?.dotClass" />
+                {{ field.props?.field?.value }}
+              </div>
+              <div class="mt-2.5 text-xs leading-5" :class="field.props?.field?.noteClass">
+                {{ field.props?.field?.secondaryValue }}
+              </div>
+            </template>
 
-          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? '' : 'xl:col-span-4'">
-            <div class="accounts-meta-label flex items-center gap-2">
-              <div class="i-carbon-time text-sm" />
-              最近登录
-            </div>
-            <div class="mt-2.5 text-base font-semibold leading-6">
-              {{ getLastLoginLabel(acc) }}
-            </div>
-            <div class="glass-text-muted mt-2 text-xs leading-5">
-              首次录入 {{ formatDateTime(acc.createdAt) }}
-            </div>
-          </div>
-
-          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? '' : 'xl:col-span-3'">
-            <div class="accounts-meta-label flex items-center gap-2">
-              <div class="i-carbon-pulse text-sm" />
-              当前状态
-            </div>
-            <div class="mt-2.5 flex items-center gap-2 text-sm font-semibold">
-              <div class="h-2 w-2 rounded-full" :class="resolveRuntimeState(acc).dot" />
-              {{ resolveRuntimeState(acc).label }}
-            </div>
-            <div
-              class="mt-2.5 text-xs leading-5"
-              :class="acc.wsError?.message ? 'accounts-error-banner px-3 py-2' : 'glass-text-muted'"
-            >
-              {{ getAccountStatusDetail(acc) }}
-            </div>
-          </div>
-
-          <div class="accounts-meta-card accounts-record-field" :class="isCompactView ? 'sm:col-span-2' : 'xl:col-span-3'" @click.stop>
-            <div class="accounts-meta-label flex items-center gap-2">
-              <div class="i-carbon-model-alt text-sm" />
-              模式设置
-            </div>
-            <div class="mt-2.5 flex flex-wrap items-center gap-2">
-              <BaseBadge :class="resolveModeMeta(resolveAccountMode(acc)).badge">
-                配置：{{ resolveModeMeta(resolveAccountMode(acc)).label }}
-              </BaseBadge>
-              <BaseBadge v-if="resolveModeExecutionMeta(acc)" :class="resolveModeExecutionMeta(acc)?.badge">
-                {{ resolveModeExecutionMeta(acc)?.label }}
-              </BaseBadge>
-            </div>
-            <p v-if="resolveModeExecutionMeta(acc)?.note" class="mt-2 text-xs leading-5" :class="resolveModeExecutionMeta(acc)?.noteClass">
-              {{ resolveModeExecutionMeta(acc)?.note }}
-            </p>
-            <div class="accounts-mode-toggle-group mt-3 inline-flex flex-wrap items-center gap-0.5 p-1 shadow-inner">
-              <button
-                class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
-                :class="getModeButtonClasses(acc, 'main')"
-                title="设为主号"
-                @click="handleModeChange(acc, 'main')"
-              >
-                主号
-              </button>
-              <button
-                class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
-                :class="getModeButtonClasses(acc, 'alt')"
-                title="设为小号"
-                @click="handleModeChange(acc, 'alt')"
-              >
-                小号
-              </button>
-              <button
-                class="cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-all"
-                :class="getModeButtonClasses(acc, 'safe')"
-                title="设为风险规避"
-                @click="handleModeChange(acc, 'safe')"
-              >
-                避险
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+            <template v-else-if="field.key === 'mode'">
+              <div class="mt-2.5 flex flex-wrap items-center gap-2">
+                <BaseBadge :class="field.props?.field?.badges?.[0]?.class">
+                  配置：{{ field.props?.field?.badges?.[0]?.text }}
+                </BaseBadge>
+                <BaseBadge v-if="field.props?.field?.badges?.[1]?.text" :class="field.props?.field?.badges?.[1]?.class">
+                  {{ field.props?.field?.badges?.[1]?.text }}
+                </BaseBadge>
+              </div>
+              <p v-if="field.props?.field?.note" class="mt-2 text-xs leading-5" :class="field.props?.field?.noteClass">
+                {{ field.props?.field?.note }}
+              </p>
+              <div class="accounts-mode-toggle-wrap">
+                <BaseToggleOptionGroup
+                  class="accounts-mode-toggle-group accounts-mode-toggle-group-card"
+                  item-class="accounts-mode-toggle-button"
+                  :items="field.props?.field?.toggleItems || []"
+                />
+              </div>
+            </template>
+          </BaseRecordMetricCard>
+        </template>
+      </BaseAccountRecordCard>
     </div>
 
     <AccountModal
@@ -3301,6 +3429,21 @@ useIntervalFn(() => {
   color: color-mix(in srgb, var(--ui-status-info) 72%, var(--ui-text-1)) !important;
 }
 
+.accounts-filter-panel {
+  position: relative;
+  z-index: 6;
+  overflow: visible;
+}
+
+.accounts-filter-panel :deep(.base-select-menu) {
+  z-index: 70;
+}
+
+.accounts-management-bar {
+  position: relative;
+  z-index: 1;
+}
+
 .accounts-history-stat,
 .accounts-meta-card,
 .accounts-column-popover {
@@ -3311,28 +3454,30 @@ useIntervalFn(() => {
 
 .accounts-history-stat,
 .accounts-meta-card {
-  padding: 0.875rem;
+  padding: 0.8125rem;
 }
 
 .accounts-record-hero {
-  padding: 0.9375rem;
+  padding: 0.875rem;
 }
 
 .accounts-record-hero-grid {
   align-items: stretch;
-  gap: 0.875rem;
+  gap: 0.75rem;
 }
 
 .accounts-record-inline-meta {
-  border: 1px solid var(--ui-border-subtle) !important;
-  border-radius: 0.875rem;
-  background: color-mix(in srgb, var(--ui-bg-surface) 56%, transparent) !important;
-  padding: 0.75rem 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
 }
 
 .accounts-record-hero-actions {
   border-top: 1px solid var(--ui-border-subtle);
-  padding-top: 0.875rem;
+  padding-top: 0.75rem;
 }
 
 .accounts-record-action-grid {
@@ -3340,11 +3485,47 @@ useIntervalFn(() => {
 }
 
 .accounts-record-action-grid > * {
-  min-height: 2.625rem;
+  min-height: 2.5rem;
 }
 
 .accounts-record-field {
-  min-height: 6.75rem;
+  min-height: 6.5rem;
+}
+
+.accounts-owner-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.625rem;
+  width: 100%;
+}
+
+.accounts-owner-field__badge {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.accounts-owner-field__value {
+  width: 100%;
+  text-align: left;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.5rem;
+  color: var(--ui-text-1);
+  word-break: break-word;
+}
+
+@media (min-width: 1024px) {
+  .accounts-record-inline-meta {
+    align-items: flex-end;
+    text-align: right;
+  }
+}
+
+.accounts-page .accounts-card-shell {
+  min-height: 0 !important;
 }
 
 .accounts-card-meta-grid {
@@ -3576,37 +3757,105 @@ useIntervalFn(() => {
   background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent) !important;
 }
 
-.accounts-mode-toggle-group {
-  border: 1px solid var(--ui-border-subtle) !important;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ui-bg-surface) 54%, transparent) !important;
+.accounts-mode-toggle-wrap {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid color-mix(in srgb, var(--ui-border-subtle) 82%, transparent);
 }
 
-.accounts-mode-toggle {
+.accounts-mode-toggle-wrap-mobile {
+  margin-top: 1rem;
+}
+
+.accounts-mode-toggle-wrap-table {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.accounts-mode-toggle-group {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 0.45rem !important;
+  width: 100%;
+  padding: 0.375rem;
+  border: 1px solid var(--ui-border-subtle) !important;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-bg-surface) 62%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--ui-bg-surface-raised) 72%, transparent),
+    0 12px 28px color-mix(in srgb, var(--ui-shadow-panel) 22%, transparent);
+}
+
+.accounts-mode-toggle-group-mobile {
+  padding: 0.3125rem;
+}
+
+:deep(.accounts-mode-toggle-button) {
+  width: 100%;
+  min-height: 2.5rem;
+  justify-content: center;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.875rem;
+  background: transparent;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  transition:
+    transform 0.18s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+:deep(.accounts-mode-toggle-button:hover) {
+  transform: translateY(-1px);
+}
+
+:deep(.accounts-mode-toggle-button-mobile) {
+  min-height: 2.75rem;
+  font-size: 0.875rem;
+}
+
+:deep(.accounts-mode-toggle) {
   color: var(--ui-text-2) !important;
 }
 
-.accounts-mode-toggle-idle:hover {
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent) !important;
+:deep(.accounts-mode-toggle-idle) {
+  border-color: color-mix(in srgb, var(--ui-border-subtle) 88%, transparent);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 68%, transparent) !important;
+}
+
+:deep(.accounts-mode-toggle-idle:hover) {
+  border-color: color-mix(in srgb, var(--ui-border-strong) 68%, transparent);
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 92%, transparent) !important;
   color: var(--ui-text-1) !important;
 }
 
-.accounts-mode-toggle-active {
-  box-shadow: 0 8px 16px color-mix(in srgb, var(--ui-shadow-panel) 70%, transparent) !important;
+:deep(.accounts-mode-toggle-active) {
+  box-shadow:
+    0 10px 20px color-mix(in srgb, var(--ui-shadow-panel) 42%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--ui-text-1) 12%, transparent) !important;
 }
 
-.accounts-mode-toggle-main {
-  background: var(--ui-brand-soft-15) !important;
+:deep(.accounts-mode-toggle-main) {
+  border-color: color-mix(in srgb, var(--ui-brand-500) 28%, transparent);
+  background: color-mix(in srgb, var(--ui-brand-500) 14%, transparent) !important;
   color: color-mix(in srgb, var(--ui-brand-700) 76%, var(--ui-text-1)) !important;
 }
 
-.accounts-mode-toggle-alt {
-  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
+:deep(.accounts-mode-toggle-alt) {
+  border-color: color-mix(in srgb, var(--ui-status-warning) 26%, transparent);
+  background: color-mix(in srgb, var(--ui-status-warning) 12%, transparent) !important;
   color: color-mix(in srgb, var(--ui-status-warning) 76%, var(--ui-text-1)) !important;
 }
 
-.accounts-mode-toggle-safe {
-  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
+:deep(.accounts-mode-toggle-safe) {
+  border-color: color-mix(in srgb, var(--ui-status-success) 26%, transparent);
+  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent) !important;
   color: color-mix(in srgb, var(--ui-status-success) 76%, var(--ui-text-1)) !important;
 }
 

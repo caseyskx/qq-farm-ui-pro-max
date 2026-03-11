@@ -17,6 +17,8 @@ const { createScheduler } = require('./scheduler');
 const { createModuleLogger } = require('./logger');
 const { recordOperation } = require('./stats');
 const { getDefaultLimiter } = require('./rate-limiter');
+const { cacheFriendSeeds, buildFriendSeedsFromLands, resolveFriendSeedAccountId } = require('./friend-cache-seeds');
+const { resolveVisitorIdentity } = require('./visitor-identity');
 const farmPhaseLogger = createModuleLogger('farm-phase');
 const verbosePhaseDebugEnabled = String(process.env.FARM_VERBOSE_PHASE_DEBUG || '') === '1';
 
@@ -197,18 +199,52 @@ const visitorCache = new Map();
  * gid<=0 视为未知来源，不应被展示为真实好友名
  * 查询失败或好友不存在时，返回 "GID:xxx" 格式
  */
+function resolveVisitorCacheAccountId() {
+    return resolveFriendSeedAccountId(CONFIG.accountId);
+}
+
 async function getFriendNameByGid(gid) {
     const numericGid = toNum(gid);
     if (!Number.isFinite(numericGid) || numericGid <= 0) return '';
     try {
-        const { getCachedFriends } = require('./database');
-        if (!getCachedFriends || !CONFIG.accountId) return `GID:${numericGid}`;
-        const friends = await getCachedFriends(CONFIG.accountId);
+        const { getCachedFriends, findFriendInSharedCaches } = require('./database');
+        const accountId = resolveVisitorCacheAccountId();
+        if (!getCachedFriends || !accountId) return `GID:${numericGid}`;
+        const friends = await getCachedFriends(accountId);
         const friend = friends.find(f => toNum(f.gid) === numericGid);
-        return friend ? (friend.remark || friend.name || `GID:${numericGid}`) : `GID:${numericGid}`;
+        const directName = friend ? (friend.remark || friend.name || `GID:${numericGid}`) : '';
+        if (directName && directName !== `GID:${numericGid}`) {
+            return directName;
+        }
+        if (typeof findFriendInSharedCaches === 'function') {
+            const shared = await findFriendInSharedCaches(numericGid, { accountId });
+            const sharedName = String(shared && shared.friend && shared.friend.name || '').trim();
+            if (sharedName && sharedName !== `GID:${numericGid}`) {
+                return sharedName;
+            }
+        }
+        return directName || `GID:${numericGid}`;
     } catch {
         return `GID:${numericGid}`;
     }
+}
+
+async function resolveVisitorActor(gid, kind, landId) {
+    return await resolveVisitorIdentity({
+        gid,
+        kind,
+        landId,
+        accountId: resolveVisitorCacheAccountId(),
+        getFriendNameByGid,
+    });
+}
+
+async function cacheVisitorFriendSeeds(lands) {
+    const accountId = resolveVisitorCacheAccountId();
+    if (!accountId) return;
+    const seeds = buildFriendSeedsFromLands(lands, toNum(getUserState().gid));
+    if (seeds.length <= 0) return;
+    await cacheFriendSeeds(seeds, { accountId, immediate: true });
 }
 
 function buildVisitorLogMessage(kind, landId, actorName) {
@@ -234,6 +270,7 @@ function buildVisitorLogMessage(kind, landId, actorName) {
  */
 async function detectAndLogVisitorChanges(lands) {
     if (!lands || lands.length === 0) return;
+    await cacheVisitorFriendSeeds(lands);
 
     for (const land of lands) {
         if (!land || !land.unlocked || !land.plant) continue;
@@ -248,9 +285,9 @@ async function detectAndLogVisitorChanges(lands) {
         // 检测新增的放草者
         for (const gid of currentWeedOwners) {
             if (!cached.weed_owners.includes(gid)) {
-                const name = await getFriendNameByGid(gid);
-                log('访客', buildVisitorLogMessage('weed', landId, name), {
-                    module: 'farm', event: 'visitor', result: 'weed', gid, landId, sourceKnown: !!name
+                const actor = await resolveVisitorActor(gid, 'weed', landId);
+                log('访客', buildVisitorLogMessage('weed', landId, actor.name), {
+                    module: 'farm', event: 'visitor', result: 'weed', gid: actor.gid || gid, landId, sourceKnown: !!actor.known, source: actor.source
                 });
             }
         }
@@ -258,9 +295,9 @@ async function detectAndLogVisitorChanges(lands) {
         // 检测新增的放虫者
         for (const gid of currentInsectOwners) {
             if (!cached.insect_owners.includes(gid)) {
-                const name = await getFriendNameByGid(gid);
-                log('访客', buildVisitorLogMessage('insect', landId, name), {
-                    module: 'farm', event: 'visitor', result: 'insect', gid, landId, sourceKnown: !!name
+                const actor = await resolveVisitorActor(gid, 'insect', landId);
+                log('访客', buildVisitorLogMessage('insect', landId, actor.name), {
+                    module: 'farm', event: 'visitor', result: 'insect', gid: actor.gid || gid, landId, sourceKnown: !!actor.known, source: actor.source
                 });
             }
         }
@@ -268,9 +305,9 @@ async function detectAndLogVisitorChanges(lands) {
         // 检测新增的偷菜者
         for (const gid of currentStealers) {
             if (!cached.stealers.includes(gid)) {
-                const name = await getFriendNameByGid(gid);
-                log('访客', buildVisitorLogMessage('steal', landId, name), {
-                    module: 'farm', event: 'visitor', result: 'steal', gid, landId, sourceKnown: !!name
+                const actor = await resolveVisitorActor(gid, 'steal', landId);
+                log('访客', buildVisitorLogMessage('steal', landId, actor.name), {
+                    module: 'farm', event: 'visitor', result: 'steal', gid: actor.gid || gid, landId, sourceKnown: !!actor.known, source: actor.source
                 });
             }
         }
@@ -1229,6 +1266,7 @@ async function getAvailableSeeds() {
                     requiredLevel,
                     locked: !goods.unlocked || state.level < requiredLevel,
                     soldOut: isSoldOut,
+                    image: toNum(goods.item_id) > 0 ? getSeedImageBySeedId(toNum(goods.item_id)) : '',
                 });
             }
         }
@@ -1250,6 +1288,7 @@ async function getAvailableSeeds() {
             unknownMeta: true,
             locked: false,
             soldOut: false,
+            image: String((s && s.image) || getSeedImageBySeedId(toNum(s && s.seedId)) || ''),
         }));
     }
     return list.sort((a, b) => {

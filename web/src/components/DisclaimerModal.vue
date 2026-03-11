@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import BaseBadge from '@/components/ui/BaseBadge.vue'
+
 defineProps<{
   show: boolean
 }>()
@@ -50,9 +52,9 @@ const disclaimerHtml = `
       >
         <!-- 头部标题 -->
         <div class="disclaimer-header shrink-0 px-6 pb-4 pt-6 text-center">
-          <div class="disclaimer-badge-shell mx-auto mb-3 h-12 w-12 flex items-center justify-center rounded-xl shadow-lg">
+          <BaseBadge as="div" surface="glass-dark" class="disclaimer-badge-shell mx-auto mb-3 h-12 w-12 flex items-center justify-center rounded-xl shadow-lg">
             <div class="disclaimer-warning-icon i-carbon-warning-alt text-2xl drop-shadow-md" />
-          </div>
+          </BaseBadge>
           <h3 class="glass-text-main text-xl font-bold tracking-tight">
             软件使用免责声明与条款
           </h3>
@@ -195,6 +197,7 @@ const disclaimerHtml = `
 }
 
 .disclaimer-badge-shell {
+  border-color: color-mix(in srgb, var(--ui-text-on-brand) 18%, transparent);
   background: linear-gradient(
     135deg,
     var(--ui-brand-600),

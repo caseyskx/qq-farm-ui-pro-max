@@ -69,3 +69,18 @@ test('prepareAccountUpsertPayload keeps qq identity aligned when qq code update 
     assert.equal(result.payload.code, 'qq-code');
     assert.equal(result.payload.authTicket, '');
 });
+
+test('prepareAccountUpsertPayload allows qq manual create without qq/uin', () => {
+    const result = prepareAccountUpsertPayload({
+        platform: 'qq',
+        loginType: 'manual',
+        code: 'qq-code',
+    }, {
+        isUpdate: false,
+    });
+
+    assert.equal(result.error, '');
+    assert.equal(result.payload.uin, undefined);
+    assert.equal(result.payload.qq, undefined);
+    assert.equal(result.payload.authTicket, '');
+});

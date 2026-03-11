@@ -1,10 +1,27 @@
 const io = require('socket.io-client');
+const { version } = require('../../package.json');
 const { createModuleLogger } = require('../services/logger');
 const { createRuntimeEngine } = require('../runtime/runtime-engine');
 const { initJobs } = require('../jobs/index');
 const { registerRuntimeShutdownHandlers } = require('../runtime/graceful-shutdown');
 const process = require('node:process');
+const { initDatabase, closeDatabase } = require('../services/database');
 const workerLogger = createModuleLogger('worker-client');
+
+function buildAssignedAccountFingerprint(account) {
+    if (!account || account.id === undefined || account.id === null) {
+        return '';
+    }
+    const stableIdentity = {
+        id: String(account.id),
+        platform: String(account.platform || '').trim(),
+        uin: String(account.uin || '').trim(),
+        qq: String(account.qq || '').trim(),
+        code: String(account.code || '').trim(),
+        authTicket: String(account.authTicket || '').trim(),
+    };
+    return JSON.stringify(stableIdentity);
+}
 
 class WorkerClient {
     constructor(masterUrl, workerToken, deps = {}) {
@@ -13,19 +30,28 @@ class WorkerClient {
         this.createRuntimeEngineRef = deps.createRuntimeEngineRef || createRuntimeEngine;
         this.initJobsRef = deps.initJobsRef || initJobs;
         this.registerRuntimeShutdownHandlersRef = deps.registerRuntimeShutdownHandlersRef || registerRuntimeShutdownHandlers;
+        this.initDatabaseRef = deps.initDatabaseRef || initDatabase;
+        this.closeDatabaseRef = deps.closeDatabaseRef || closeDatabase;
+        this.setIntervalRef = deps.setIntervalRef || setInterval;
+        this.clearIntervalRef = deps.clearIntervalRef || clearInterval;
         this.logger = deps.logger || workerLogger;
         this.masterUrl = masterUrl || this.processRef.env.MASTER_URL || 'http://localhost:3000';
         this.workerToken = workerToken || this.processRef.env.WORKER_TOKEN || 'default_cluster_token';
+        this.nodeId = String(deps.nodeId || this.processRef.env.WORKER_NODE_ID || `worker-${this.processRef.pid}-${Date.now().toString().slice(-4)}`).trim();
+        this.nodeVersion = String(deps.version || version || '').trim();
+        this.heartbeatIntervalMs = Math.max(5000, Number.parseInt(deps.heartbeatIntervalMs || this.processRef.env.WORKER_HEARTBEAT_INTERVAL_MS, 10) || 15000);
         this.socket = null;
         this.runtimeEngine = null;
         this.jobRuntime = null;
         this.shutdownRegistration = null;
         this.assignedAccounts = new Set();
         this.assignedAccountData = new Map(); // 用于差分比对 (Diff Loading)
+        this.heartbeatHandle = null;
     }
 
     async init() {
         this.logger.info(`[Worker] 正在初始化工作节点...`);
+        await this.initDatabaseRef();
         // 初始化必要的执行队列 (不包括写库操作，纯业务运行库)
         this.jobRuntime = this.initJobsRef();
 
@@ -77,6 +103,7 @@ class WorkerClient {
 
         const socket = this.socket;
         this.socket = null;
+        this.stopHeartbeatLoop();
         if (socket) {
             try {
                 if (typeof socket.removeAllListeners === 'function') {
@@ -107,8 +134,47 @@ class WorkerClient {
             });
         }
 
+        try {
+            await this.closeDatabaseRef();
+        } catch (error) {
+            this.logger.warn('[Worker] 关闭数据库连接失败', {
+                error: error && error.message ? error.message : String(error),
+            });
+        }
+
         this.assignedAccounts = new Set();
         this.assignedAccountData = new Map();
+    }
+
+    stopHeartbeatLoop() {
+        if (this.heartbeatHandle) {
+            this.clearIntervalRef(this.heartbeatHandle);
+            this.heartbeatHandle = null;
+        }
+    }
+
+    startHeartbeatLoop() {
+        if (this.heartbeatHandle) {
+            return;
+        }
+        this.heartbeatHandle = this.setIntervalRef(() => {
+            this.sendHeartbeat();
+        }, this.heartbeatIntervalMs);
+    }
+
+    sendHeartbeat(status = '') {
+        if (!this.socket || !this.socket.connected) {
+            return;
+        }
+        const hasAssignments = this.assignedAccounts.size > 0;
+        this.socket.emit('worker:heartbeat', {
+            nodeId: this.nodeId,
+            role: 'worker',
+            status: status || (hasAssignments ? 'active' : 'idle'),
+            version: this.nodeVersion,
+            assignedCount: this.assignedAccounts.size,
+            updatedAt: Date.now(),
+        });
     }
 
     connectToMaster() {
@@ -121,17 +187,21 @@ class WorkerClient {
             timeout: 10000,
             auth: {
                 token: this.workerToken,
-                nodeId: `worker-${this.processRef.pid}-${Date.now().toString().slice(-4)}`
+                nodeId: this.nodeId,
             }
         });
 
         this.socket.on('connect', () => {
             this.logger.info(`[Worker] 已成功连接到 Master，准备接收任务...`);
+            this.stopHeartbeatLoop();
+            this.startHeartbeatLoop();
             this.socket.emit('worker:ready');
+            this.sendHeartbeat('ready');
         });
 
         this.socket.on('disconnect', () => {
             this.logger.warn(`[Worker] 与 Master 的连接已断开，进入离线保护模式`);
+            this.stopHeartbeatLoop();
         });
 
         this.socket.on('connect_error', (err) => {
@@ -153,7 +223,7 @@ class WorkerClient {
             for (const acc of accounts) {
                 const id = String(acc.id);
                 newSet.add(id);
-                newMap.set(id, JSON.stringify(acc)); // 以字串作为指纹比对凭据变化
+                newMap.set(id, buildAssignedAccountFingerprint(acc));
                 accountMap.set(id, acc);
             }
 
@@ -195,8 +265,9 @@ class WorkerClient {
             // 更新引用
             this.assignedAccounts = newSet;
             this.assignedAccountData = newMap;
+            this.sendHeartbeat();
         });
     }
 }
 
-module.exports = { WorkerClient };
+module.exports = { WorkerClient, buildAssignedAccountFingerprint };

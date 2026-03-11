@@ -2,6 +2,7 @@
 import { onMounted, ref, watch } from 'vue'
 import api from '@/api'
 
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 
 const props = defineProps<{
@@ -297,9 +298,9 @@ onMounted(() => {
         <div class="custom-scrollbar flex-1 overflow-y-auto px-6 py-4">
           <div class="leaderboard-hint glass-text-muted mb-3 flex items-center justify-between rounded-2xl px-4 py-2 text-[11px]">
             <span>{{ sortHintMap[sortBy] || sortHintMap.level }}</span>
-            <span class="leaderboard-hint-pill rounded-full px-2 py-0.5 text-[10px]">
+            <BaseBadge surface="meta" tone="warning" class="leaderboard-hint-pill rounded-full px-2 py-0.5 text-[10px]">
               离线显示快照
-            </span>
+            </BaseBadge>
           </div>
 
           <div v-if="loading && leaderboardData.length === 0" class="glass-text-muted h-64 flex flex-col items-center justify-center">
@@ -379,9 +380,9 @@ onMounted(() => {
                       >
                         {{ getLevelText(item) }}
                       </span>
-                      <span v-if="!isAccountOnline(item) && hasSnapshot(item)" class="leaderboard-snapshot-pill inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px]">
+                      <BaseBadge v-if="!isAccountOnline(item) && hasSnapshot(item)" surface="meta" tone="warning" class="leaderboard-snapshot-pill inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px]">
                         快照
-                      </span>
+                      </BaseBadge>
                     </div>
                   </div>
                 </div>
@@ -504,13 +505,11 @@ onMounted(() => {
 .leaderboard-select,
 .leaderboard-close,
 .leaderboard-hint,
-.leaderboard-hint-pill,
 .leaderboard-head,
 .leaderboard-avatar,
 .leaderboard-avatar-fallback,
 .leaderboard-platform-badge,
 .leaderboard-level-badge,
-.leaderboard-snapshot-pill,
 .leaderboard-status {
   border: 1px solid var(--ui-border-subtle) !important;
 }
@@ -550,6 +549,14 @@ onMounted(() => {
 }
 
 .leaderboard-hint-pill,
+.leaderboard-snapshot-pill {
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  line-height: 1;
+}
+
 .leaderboard-level-badge-active,
 .leaderboard-status-online {
   background: var(--ui-brand-soft-12) !important;
@@ -573,7 +580,6 @@ onMounted(() => {
   color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1)) !important;
 }
 
-.leaderboard-snapshot-pill,
 .leaderboard-status-snapshot,
 .leaderboard-status-dot-snapshot {
   background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;

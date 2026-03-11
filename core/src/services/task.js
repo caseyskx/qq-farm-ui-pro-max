@@ -8,6 +8,7 @@ const { types } = require('../utils/proto');
 const { toLong, toNum, log, logWarn, sleep } = require('../utils/utils');
 const { createScheduler } = require('./scheduler');
 const { recordOperation } = require('./stats');
+const { getRewardSummary } = require('./common');
 
 let checking = false;
 let taskClaimDoneDateKey = '';
@@ -116,22 +117,6 @@ function analyzeTaskList(tasks, category = 'main') {
         }
     }
     return claimable;
-}
-
-/**
- * 计算奖励摘要
- */
-function getRewardSummary(items) {
-    const summary = [];
-    for (const item of items) {
-        const id = toNum(item.id);
-        const count = toNum(item.count);
-        if (id === 1 || id === 1001) summary.push(`金币${count}`);
-        else if (id === 2 || id === 1101) summary.push(`经验${count}`);
-        else if (id === 1002) summary.push(`点券${count}`);
-        else summary.push(`物品#${id}x${count}`);
-    }
-    return summary.join('/');
 }
 
 function buildDailyTasksForDebug(taskInfo) {

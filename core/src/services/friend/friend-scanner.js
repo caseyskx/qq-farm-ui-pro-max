@@ -1,7 +1,7 @@
 
 const { CONFIG, PlantPhase, PHASE_NAMES } = require('../../config/config');
 const { getPlantName, getPlantById, getSeedImageBySeedId } = require('../../config/gameConfig');
-const { isAutomationOn, getFriendBlacklist, getStakeoutStealConfig } = require('../../models/store');
+const { isAutomationOn, getFriendBlacklist, getStakeoutStealConfig, getFriendQuietHours } = require('../../models/store');
 const { getUserState, networkEvents } = require('../../utils/network');
 const { toLong, toNum, toTimeSec, getServerTimeSec, log, logWarn, sleep } = require('../../utils/utils');
 const { getCurrentPhase, setOperationLimitsCallback } = require('../farm');
@@ -57,6 +57,69 @@ function _logPeriodicStatus(cacheKey, message, options = {}) {
 
 function _clearPeriodicStatus(...keys) {
     keys.forEach(key => _periodicStatusLogCache.delete(key));
+}
+
+function getDelayUntilFriendQuietHoursEndMs(now = new Date()) {
+    if (!decision.inFriendQuietHours(now)) return 0;
+    const cfg = getFriendQuietHours();
+    if (!cfg || !cfg.enabled) return 0;
+
+    const start = decision.parseTimeToMinutes(cfg.start);
+    const end = decision.parseTimeToMinutes(cfg.end);
+    if (start === null || end === null || start === end) return 0;
+
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const seconds = Math.max(0, now.getSeconds());
+    const milliseconds = Math.max(0, now.getMilliseconds());
+    const carryMs = (60 - seconds) * 1000 - milliseconds;
+    const minutesUntilEnd = start < end
+        ? Math.max(0, end - currentMinutes)
+        : (currentMinutes >= start
+            ? ((24 * 60) - currentMinutes + end)
+            : Math.max(0, end - currentMinutes));
+
+    return Math.max(5000, minutesUntilEnd * 60 * 1000 + carryMs + 5000);
+}
+
+function scheduleDeferredFriendApplicationCheck(reason = 'quiet_hours') {
+    const waitMs = getDelayUntilFriendQuietHoursEndMs();
+    if (waitMs <= 0) return;
+    state.friendScheduler.setTimeoutTask('friend_auto_accept_after_quiet', waitMs, () => checkAndAcceptApplications());
+    log('申请', `当前处于静默时段，自动同意好友顺延至静默结束后再执行`, {
+        module: 'friend',
+        event: 'friend_auto_accept_deferred',
+        result: 'ok',
+        reason,
+        waitMs,
+    });
+}
+
+function scheduleDeferredStakeout(friendGid, friendName, targetLandIds, delaySec) {
+    const waitMs = getDelayUntilFriendQuietHoursEndMs();
+    if (waitMs <= 0) return false;
+    const retryKey = `stake_quiet_${friendGid}_${[...targetLandIds].sort((a, b) => a - b).join('_')}`;
+    state.friendScheduler.setTimeoutTask(retryKey, waitMs, () => {
+        runStakeoutSteal(friendGid, friendName, targetLandIds, delaySec).catch(() => { });
+    });
+    log('蹲守', `${friendName}: 当前处于静默时段，顺延到静默结束后再尝试`, {
+        module: 'friend',
+        event: 'stakeout_deferred_by_quiet',
+        result: 'ok',
+        friendName,
+        friendGid,
+        targetLandIds,
+        waitMs,
+    });
+    return true;
+}
+
+function _resolveFriendIdentifier(friend) {
+    const openId = String(friend && friend.open_id || '').trim();
+    if (openId) return openId;
+    const uin = String(friend && friend.uin || '').trim();
+    if (uin) return uin;
+    const gid = toNum(friend && friend.gid);
+    return gid > 0 ? String(gid) : '';
 }
 
 function _logModeScopePolicy(policy) {
@@ -377,7 +440,7 @@ async function getFriendsList() {
         return filtered
             .map(f => ({
                 gid: toNum(f.gid),
-                uin: f.open_id != null ? String(f.open_id) : (f.uin != null ? toNum(f.uin) : toNum(f.gid)),
+                uin: _resolveFriendIdentifier(f),
                 name: f.remark || f.name || `GID:${toNum(f.gid)}`,
                 avatarUrl: String(f.avatar_url || '').trim(),
                 farmLevel: Math.max(0, toNum(f.level) || 0),
@@ -982,6 +1045,10 @@ function onFriendApplicationReceived(applications) {
 
     // If auto accept is on, do so
     if (isAutomationOn('friend_auto_accept')) {
+        if (decision.inFriendQuietHours()) {
+            scheduleDeferredFriendApplicationCheck('push_event');
+            return;
+        }
         const gids = applications.map(a => toNum(a.gid));
         acceptFriendsWithRetry(gids);
     }
@@ -989,6 +1056,10 @@ function onFriendApplicationReceived(applications) {
 
 async function checkAndAcceptApplications() {
     if (!isAutomationOn('friend_auto_accept')) return;
+    if (decision.inFriendQuietHours()) {
+        scheduleDeferredFriendApplicationCheck('periodic_check');
+        return;
+    }
     try {
         const reply = await actions.getApplications();
         const applications = reply.applications || [];
@@ -1080,6 +1151,21 @@ function scheduleStakeout(friendGid, friendName, upcomingMature, delaySec) {
 }
 
 async function runStakeoutSteal(friendGid, friendName, targetLandIds, delaySec) {
+    if (decision.inFriendQuietHours()) {
+        if (scheduleDeferredStakeout(friendGid, friendName, targetLandIds, delaySec)) {
+            return;
+        }
+        log('蹲守', `${friendName}: 当前处于静默时段，已跳过本次蹲守`, {
+            module: 'friend',
+            event: 'stakeout_skipped_by_quiet',
+            result: 'ok',
+            friendName,
+            friendGid,
+            targetLandIds,
+        });
+        return;
+    }
+
     log('蹲守', `触发 ${friendName}: 准备进入农场偷取 ${targetLandIds.length} 块`, {
         module: 'friend', event: 'stakeout_trigger', result: 'ok',
         friendName, friendGid, targetLandIds,

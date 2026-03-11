@@ -8,9 +8,9 @@ loadProjectEnv();
 
 const CONFIG = {
     serverUrl: 'wss://gate-obt.nqf.qq.com/prod/ws',
-    // 2026-03-10 通过在线握手验证：旧值 1.6.2.18_20260227 会被服务端踢下线为“版本过低”；
-    // 将构建日期提升到 20260310 后，服务端不再返回版本过低，后续失败转为账号 code 本身问题。
-    clientVersion: process.env.FARM_CLIENT_VERSION || '1.6.2.18_20260310',
+    // 2026-03-11 同步参考工程版本到 1.7.0.5_20260306。
+    // 若本地设置了 FARM_CLIENT_VERSION，则仍以环境变量为准。
+    clientVersion: process.env.FARM_CLIENT_VERSION || '1.7.0.5_20260306',
     platform: 'qq',              // 平台: qq 或 wx (可通过 --wx 切换为微信)
     os: 'iOS',
     heartbeatInterval: 25000,    // 心跳间隔 25秒

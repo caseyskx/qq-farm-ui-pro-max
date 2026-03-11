@@ -896,15 +896,15 @@ function resolveUserState(user: User) {
   const permanent = !!user.card && !user.card.expiresAt
 
   if (isBanned) {
-    return { key: 'banned', label: '已封禁', badgeClass: 'ui-meta-chip ui-meta-chip--danger' }
+    return { key: 'banned', label: '已封禁', badgeTone: 'danger' as const }
   }
   if (isExpired) {
-    return { key: 'expired', label: '已过期', badgeClass: 'ui-meta-chip ui-meta-chip--warning' }
+    return { key: 'expired', label: '已过期', badgeTone: 'warning' as const }
   }
   if (permanent) {
-    return { key: 'permanent', label: '永久有效', badgeClass: 'ui-meta-chip ui-meta-chip--info' }
+    return { key: 'permanent', label: '永久有效', badgeTone: 'info' as const }
   }
-  return { key: 'active', label: '正常', badgeClass: 'ui-meta-chip ui-meta-chip--success' }
+  return { key: 'active', label: '正常', badgeTone: 'success' as const }
 }
 
 function resolveCardGroup(user: User): CardFilter {
@@ -917,18 +917,18 @@ function resolveCardGroup(user: User): CardFilter {
   return 'standard'
 }
 
-function getRoleBadgeClass(role: string) {
-  return role === 'admin' ? 'ui-meta-chip ui-meta-chip--owner' : 'ui-meta-chip ui-meta-chip--brand'
+function getRoleBadgeTone(role: string) {
+  return role === 'admin' ? 'owner' : 'brand'
 }
 
-function getCardBadgeClass(user: User) {
+function getCardBadgeTone(user: User) {
   if (!user.card)
-    return 'ui-meta-chip ui-meta-chip--neutral'
+    return 'neutral'
   if (user.card.type === 'T')
-    return 'ui-meta-chip ui-meta-chip--warning'
+    return 'warning'
   if (!user.card.expiresAt)
-    return 'ui-meta-chip ui-meta-chip--info'
-  return 'ui-meta-chip ui-meta-chip--brand'
+    return 'info'
+  return 'brand'
 }
 
 function matchUserFilters(user: User) {
@@ -1623,13 +1623,13 @@ onBeforeUnmount(() => {
                   />
                   <div class="ui-mobile-record-body">
                     <div class="ui-mobile-record-badges">
-                      <BaseBadge :class="getRoleBadgeClass(user.role)">
+                      <BaseBadge surface="meta" :tone="getRoleBadgeTone(user.role)">
                         {{ user.role === 'admin' ? '管理员' : '普通用户' }}
                       </BaseBadge>
-                      <BaseBadge :class="getCardBadgeClass(user)">
+                      <BaseBadge surface="meta" :tone="getCardBadgeTone(user)">
                         {{ user.card ? formatCardType(user.card.type) : '-' }}
                       </BaseBadge>
-                      <BaseBadge :class="resolveUserState(user).badgeClass">
+                      <BaseBadge surface="meta" :tone="resolveUserState(user).badgeTone">
                         {{ resolveUserState(user).label }}
                       </BaseBadge>
                     </div>
@@ -1769,12 +1769,12 @@ onBeforeUnmount(() => {
                 </div>
               </td>
               <td class="whitespace-nowrap px-6 py-4">
-                <BaseBadge :class="getRoleBadgeClass(user.role)">
+                <BaseBadge surface="meta" :tone="getRoleBadgeTone(user.role)">
                   {{ user.role === 'admin' ? '管理员' : '普通用户' }}
                 </BaseBadge>
               </td>
               <td class="whitespace-nowrap px-6 py-4">
-                <BaseBadge :class="getCardBadgeClass(user)">
+                <BaseBadge surface="meta" :tone="getCardBadgeTone(user)">
                   {{ user.card ? formatCardType(user.card.type) : '-' }}
                 </BaseBadge>
               </td>
@@ -1795,7 +1795,7 @@ onBeforeUnmount(() => {
                 {{ user.card ? formatExpiry(user.card.expiresAt) : '永久' }}
               </td>
               <td class="whitespace-nowrap px-6 py-4">
-                <BaseBadge :class="resolveUserState(user).badgeClass">
+                <BaseBadge surface="meta" :tone="resolveUserState(user).badgeTone">
                   {{ resolveUserState(user).label }}
                 </BaseBadge>
               </td>
@@ -2094,7 +2094,7 @@ onBeforeUnmount(() => {
                   UIN: {{ account.uin || '未绑定' }}
                 </div>
               </div>
-              <BaseBadge class="ui-meta-chip ui-meta-chip--info">
+              <BaseBadge surface="meta" tone="info">
                 {{ formatAccountState(account) }}
               </BaseBadge>
             </div>

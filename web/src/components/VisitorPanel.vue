@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import type { MetaBadgeTone } from '@/utils/ui-badge'
 import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
+import BaseBadge from '@/components/ui/BaseBadge.vue'
 import BaseEmptyState from '@/components/ui/BaseEmptyState.vue'
 import { useStatusStore } from '@/stores/status'
 
@@ -24,18 +26,24 @@ function getTypeText(result: string) {
   return '访客'
 }
 
-function getTypeClass(result: string) {
+function getTypeTone(result: string): MetaBadgeTone {
   if (result === 'weed')
-    return 'visitor-type-badge visitor-type-badge--weed'
+    return 'success'
   if (result === 'insect')
-    return 'visitor-type-badge visitor-type-badge--insect'
+    return 'warning'
   if (result === 'steal')
-    return 'visitor-type-badge visitor-type-badge--steal'
-  return 'visitor-type-badge visitor-type-badge--visit'
+    return 'danger'
+  return 'info'
 }
 
-function getSummaryBadgeClass(type: 'total' | 'weed' | 'insect' | 'steal') {
-  return `visitor-summary-pill visitor-summary-pill--${type}`
+function getSummaryBadgeTone(type: 'total' | 'weed' | 'insect' | 'steal'): MetaBadgeTone {
+  if (type === 'weed')
+    return 'success'
+  if (type === 'insect')
+    return 'warning'
+  if (type === 'steal')
+    return 'danger'
+  return 'info'
 }
 
 const visitorLogs = computed(() => {
@@ -64,10 +72,10 @@ const summary = computed(() => {
 })
 
 const summaryChips = computed(() => [
-  { key: 'total', label: `最近 ${summary.value.total} 条`, tone: getSummaryBadgeClass('total') },
-  { key: 'weed', label: `放草 ${summary.value.weed}`, tone: getSummaryBadgeClass('weed') },
-  { key: 'insect', label: `放虫 ${summary.value.insect}`, tone: getSummaryBadgeClass('insect') },
-  { key: 'steal', label: `偷菜 ${summary.value.steal}`, tone: getSummaryBadgeClass('steal') },
+  { key: 'total', label: `最近 ${summary.value.total} 条`, tone: getSummaryBadgeTone('total') },
+  { key: 'weed', label: `放草 ${summary.value.weed}`, tone: getSummaryBadgeTone('weed') },
+  { key: 'insect', label: `放虫 ${summary.value.insect}`, tone: getSummaryBadgeTone('insect') },
+  { key: 'steal', label: `偷菜 ${summary.value.steal}`, tone: getSummaryBadgeTone('steal') },
 ])
 </script>
 
@@ -83,9 +91,15 @@ const summaryChips = computed(() => [
           最近的好友互动、偷菜、放草和放虫事件会按时间倒序展示。
         </p>
         <div class="visitor-toolbar__chips ui-bulk-actions">
-          <span v-for="item in summaryChips" :key="item.key" :class="item.tone">
+          <BaseBadge
+            v-for="item in summaryChips"
+            :key="item.key"
+            surface="meta"
+            :tone="item.tone"
+            class="visitor-summary-pill"
+          >
             {{ item.label }}
-          </span>
+          </BaseBadge>
         </div>
       </div>
 
@@ -107,7 +121,13 @@ const summaryChips = computed(() => [
           <div class="ui-mobile-record-head">
             <div class="ui-mobile-record-body">
               <div class="ui-mobile-record-badges">
-                <span class="rounded px-2 py-0.5 font-medium" :class="getTypeClass(String(log?.meta?.result || ''))">{{ getTypeText(String(log?.meta?.result || '')) }}</span>
+                <BaseBadge
+                  surface="meta"
+                  :tone="getTypeTone(String(log?.meta?.result || ''))"
+                  class="visitor-type-badge"
+                >
+                  {{ getTypeText(String(log?.meta?.result || '')) }}
+                </BaseBadge>
               </div>
               <h3 class="ui-mobile-record-title mt-3">
                 {{ String(log.msg || '').trim() || '访客事件' }}
@@ -157,9 +177,7 @@ const summaryChips = computed(() => [
 
 .visitor-shell,
 .visitor-empty-state,
-.visitor-log-card,
-.visitor-summary-pill,
-.visitor-type-badge {
+.visitor-log-card {
   border: 1px solid var(--ui-border-subtle) !important;
 }
 
@@ -195,34 +213,12 @@ const summaryChips = computed(() => [
 .visitor-type-badge {
   display: inline-flex;
   align-items: center;
+  gap: 0.35rem;
+  min-height: 1.85rem;
   border-radius: 999px;
   padding: 0.25rem 0.625rem;
   font-size: 0.75rem;
   font-weight: 600;
-}
-
-.visitor-summary-pill--total,
-.visitor-type-badge--visit {
-  background: color-mix(in srgb, var(--ui-status-info) 10%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-info) 78%, var(--ui-text-1)) !important;
-}
-
-.visitor-summary-pill--weed,
-.visitor-type-badge--weed {
-  background: color-mix(in srgb, var(--ui-status-success) 10%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1)) !important;
-}
-
-.visitor-summary-pill--insect,
-.visitor-type-badge--insect {
-  background: color-mix(in srgb, var(--ui-status-warning) 10%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-warning) 80%, var(--ui-text-1)) !important;
-}
-
-.visitor-summary-pill--steal,
-.visitor-type-badge--steal {
-  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent) !important;
-  color: color-mix(in srgb, var(--ui-status-danger) 80%, var(--ui-text-1)) !important;
 }
 
 .visitor-log-list {

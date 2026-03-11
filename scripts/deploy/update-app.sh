@@ -4,10 +4,12 @@ set -Eeuo pipefail
 
 APP_SERVICE="${APP_SERVICE:-qq-farm-bot}"
 COMPOSE_APP_SERVICE="${COMPOSE_APP_SERVICE:-${APP_SERVICE}}"
-APP_CONTAINER_NAME="${APP_CONTAINER_NAME:-${APP_SERVICE}}"
+STACK_NAME="${STACK_NAME:-qq-farm}"
+APP_CONTAINER_NAME="${APP_CONTAINER_NAME:-${STACK_NAME}-bot}"
 DEPLOY_DIR="${DEPLOY_DIR:-$(pwd)}"
 DEPLOY_BASE_DIR="${DEPLOY_BASE_DIR:-/opt}"
-CURRENT_LINK="${CURRENT_LINK:-${DEPLOY_BASE_DIR}/qq-farm-bot-current}"
+CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
+CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
 REPO_SLUG="${REPO_SLUG:-smdk000/qq-farm-ui-pro-max}"
 REPO_REF="${REPO_REF:-main}"
 RAW_BASE_URL="${RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}}"
@@ -32,9 +34,30 @@ SKIP_IMAGE_ARCH_CHECK="${SKIP_IMAGE_ARCH_CHECK:-0}"
 SOURCE_CACHE_DIR="${SOURCE_CACHE_DIR:-${DEPLOY_BASE_DIR}/.qq-farm-build-src/${REPO_REF}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd || pwd)"
+STACK_LAYOUT_PATH="${SCRIPT_DIR}/stack-layout.sh"
+if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+    BOOTSTRAP_DIR="${TMPDIR:-/tmp}/qq-farm-deploy-bootstrap/${REPO_SLUG//\//_}/${REPO_REF}"
+    mkdir -p "${BOOTSTRAP_DIR}"
+    STACK_LAYOUT_PATH="${BOOTSTRAP_DIR}/stack-layout.sh"
+    if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+        command -v curl >/dev/null 2>&1 || {
+            echo "[ERROR] 缺少 stack-layout.sh 且系统未安装 curl，无法继续执行。" >&2
+            exit 1
+        }
+        curl -fsSL "${RAW_BASE_URL}/scripts/deploy/stack-layout.sh" -o "${STACK_LAYOUT_PATH}"
+    fi
+fi
+# shellcheck source=stack-layout.sh
+. "${STACK_LAYOUT_PATH}"
 ADMIN_PASSWORD_EXPLICIT=0
 ADMIN_PASSWORD_OVERRIDE=""
 APP_IMAGE_SELECTED=""
+CURRENT_LINK_EXPLICIT=0
+STACK_DIR_NAME=""
+
+if [ -n "${CURRENT_LINK_INPUT}" ]; then
+    CURRENT_LINK_EXPLICIT=1
+fi
 
 if [ "${ADMIN_PASSWORD+x}" = "x" ] && [ -n "${ADMIN_PASSWORD}" ]; then
     ADMIN_PASSWORD_EXPLICIT=1
@@ -46,6 +69,15 @@ print_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+refresh_stack_layout() {
+    STACK_NAME="$(normalize_stack_name "${STACK_NAME:-qq-farm}")"
+    STACK_DIR_NAME="$(stack_dir_name "${STACK_NAME}")"
+    APP_CONTAINER_NAME="$(stack_container_name "${STACK_NAME}" "bot")"
+    if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
+        CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
+    fi
+}
+
 mask_secret() {
     local value="$1"
     if [ "${#value}" -le 2 ]; then
@@ -55,6 +87,14 @@ mask_secret() {
     printf '%s%s%s' "${value:0:1}" "$(printf '%*s' "$(( ${#value} - 2 ))" '' | tr ' ' '*')" "${value: -1}"
 }
 
+current_app_role() {
+    printf '%s\n' "${APP_ROLE:-${ROLE:-standalone}}"
+}
+
+is_worker_role() {
+    [ "$(current_app_role)" = "worker" ]
+}
+
 trap 'print_error "主程序更新失败，请检查上方日志。"' ERR
 
 parse_args() {
@@ -62,6 +102,10 @@ parse_args() {
         case "$1" in
             --deploy-dir)
                 DEPLOY_DIR="${2:-}"
+                shift 2
+                ;;
+            --stack-name)
+                STACK_NAME="${2:-}"
                 shift 2
                 ;;
             --image)
@@ -86,9 +130,11 @@ parse_args() {
                 ;;
         esac
     done
+
+    refresh_stack_layout
 }
 
-if [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+if [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
     SUDO="sudo"
 fi
 
@@ -144,6 +190,7 @@ load_deploy_env() {
         # shellcheck disable=SC1090
         . "${file}"
         set +a
+        refresh_stack_layout
     fi
 }
 
@@ -164,11 +211,25 @@ sync_env_from_shell() {
     local file="$1"
     local keys=(
         ADMIN_PASSWORD
+        STACK_NAME
+        APP_ROLE
+        SHARED_DOCKER_NETWORK
+        SHARED_DOCKER_NETWORK_EXTERNAL
+        MASTER_URL
+        WORKER_TOKEN
+        WORKER_NODE_ID
+        WORKER_HEARTBEAT_INTERVAL_MS
         WEB_PORT
         APP_IMAGE
+        MYSQL_HOST
+        MYSQL_PORT
         COOKIE_SECURE
         CORS_ORIGINS
         JWT_SECRET
+        REDIS_HOST
+        REDIS_PORT
+        REDIS_PASSWORD
+        IPAD860_URL
         WX_API_KEY
         WX_API_URL
         WX_APP_ID
@@ -279,7 +340,7 @@ append_unique_app_image_candidate() {
 
     [ -n "${candidate}" ] || return 0
 
-    for existing in "${APP_IMAGE_CANDIDATES[@]}"; do
+    for existing in "${APP_IMAGE_CANDIDATES[@]-}"; do
         if [ "${existing}" = "${candidate}" ]; then
             return 0
         fi
@@ -304,7 +365,7 @@ build_app_image_candidates() {
 select_local_app_image_candidate() {
     local candidate=""
 
-    for candidate in "${APP_IMAGE_CANDIDATES[@]}"; do
+    for candidate in "${APP_IMAGE_CANDIDATES[@]-}"; do
         if image_exists "${candidate}"; then
             printf '%s\n' "${candidate}"
             return 0
@@ -312,6 +373,17 @@ select_local_app_image_candidate() {
     done
 
     return 1
+}
+
+is_local_only_image_ref() {
+    case "$1" in
+        */*)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
 }
 
 use_selected_app_image() {
@@ -388,11 +460,10 @@ prepare_source_checkout() {
     local first_entry=""
     local strip_args=()
 
-    if [ -f "${cache_dir}/pnpm-workspace.yaml" ]; then
+    if [ -f "${cache_dir}/pnpm-workspace.yaml" ] && [ -f "${cache_dir}/core/Dockerfile" ]; then
         return 0
     fi
 
-    print_warning "镜像仓库不可用，开始下载源码包用于本地构建..."
     if [ -n "${SUDO}" ]; then
         "${SUDO}" mkdir -p "${cache_parent}"
         "${SUDO}" chown -R "$(id -u):$(id -g)" "${cache_parent}"
@@ -400,7 +471,6 @@ prepare_source_checkout() {
         mkdir -p "${cache_parent}"
     fi
 
-    curl -fsSL "${SOURCE_ARCHIVE_URL}" -o "${archive}"
     if [ -n "${SUDO}" ]; then
         "${SUDO}" rm -rf "${cache_dir}"
         "${SUDO}" mkdir -p "${cache_dir}"
@@ -409,11 +479,47 @@ prepare_source_checkout() {
         rm -rf "${cache_dir}"
         mkdir -p "${cache_dir}"
     fi
-    first_entry="$(tar -tzf "${archive}" | head -n 1 || true)"
-    if [[ "${first_entry}" == */* ]]; then
-        strip_args=(--strip-components=1)
+
+    print_warning "镜像仓库不可用，开始下载源码包用于本地构建..."
+    if curl -fsSL "${SOURCE_ARCHIVE_URL}" -o "${archive}"; then
+        first_entry="$(tar -tzf "${archive}" | head -n 1 || true)"
+        if [[ "${first_entry}" == */* ]]; then
+            strip_args=(--strip-components=1)
+        fi
+        tar -xzf "${archive}" "${strip_args[@]}" -C "${cache_dir}"
+        if [ -f "${cache_dir}/pnpm-workspace.yaml" ] && [ -f "${cache_dir}/core/Dockerfile" ]; then
+            return 0
+        fi
     fi
-    tar -xzf "${archive}" "${strip_args[@]}" -C "${cache_dir}"
+
+    if [ -f "${REPO_ROOT}/pnpm-workspace.yaml" ] && [ -f "${REPO_ROOT}/core/Dockerfile" ]; then
+        print_warning "源码包不可用或不完整，改用本地源码工作区进行构建..."
+        if [ -n "${SUDO}" ]; then
+            "${SUDO}" rm -rf "${cache_dir}"
+            "${SUDO}" mkdir -p "${cache_dir}"
+            "${SUDO}" chown -R "$(id -u):$(id -g)" "${cache_dir}"
+        else
+            rm -rf "${cache_dir}"
+            mkdir -p "${cache_dir}"
+        fi
+        (
+            cd "${REPO_ROOT}"
+            tar \
+                --exclude='.git' \
+                --exclude='node_modules' \
+                --exclude='deploy/offline' \
+                --exclude='logs' \
+                --exclude='core/data' \
+                -cf - pnpm-workspace.yaml pnpm-lock.yaml package.json core web scripts/service
+        ) | (
+            cd "${cache_dir}"
+            tar -xf -
+        )
+        return 0
+    fi
+
+    print_error "无法准备主程序源码缓存，请检查 GitHub 网络连通性。"
+    return 1
 }
 
 build_image_from_source() {
@@ -470,11 +576,17 @@ resolve_app_image() {
 
     build_app_image_candidates "${requested_image}"
 
+    if is_local_only_image_ref "${requested_image}" && image_exists "${requested_image}"; then
+        print_info "检测到本地测试镜像，直接使用本地缓存: ${requested_image}"
+        use_selected_app_image "${requested_image}" "${requested_image}"
+        return 0
+    fi
+
     if is_truthy "${SKIP_DOCKER_PULL}"; then
         candidate="$(select_local_app_image_candidate || true)"
         if [ -z "${candidate}" ]; then
             print_error "已启用本地镜像模式，但没有找到可用主程序镜像缓存。"
-            print_error "已尝试的本地标签: ${APP_IMAGE_CANDIDATES[*]}"
+            print_error "已尝试的本地标签: ${APP_IMAGE_CANDIDATES[*]-}"
             return 1
         fi
 
@@ -483,7 +595,7 @@ resolve_app_image() {
         return 0
     fi
 
-    for candidate in "${APP_IMAGE_CANDIDATES[@]}"; do
+    for candidate in "${APP_IMAGE_CANDIDATES[@]-}"; do
         print_info "尝试拉取主程序镜像: ${candidate}"
         if pull_one_image "${candidate}"; then
             use_selected_app_image "${requested_image}" "${candidate}"
@@ -533,6 +645,7 @@ run_announcement_check_if_available() {
 
 resolve_deploy_dir() {
     if [ -f "${DEPLOY_DIR}/docker-compose.yml" ]; then
+        load_deploy_env "${DEPLOY_DIR}/.env"
         return 0
     fi
 
@@ -544,9 +657,10 @@ resolve_deploy_dir() {
     fi
 
     local latest=""
-    latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name qq-farm-bot 2>/dev/null | sort | tail -n 1)"
+    latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name "${STACK_DIR_NAME:-$(stack_dir_name "${STACK_NAME}")}" 2>/dev/null | sort | tail -n 1)"
     if [ -n "${latest}" ] && [ -f "${latest}/docker-compose.yml" ]; then
         DEPLOY_DIR="${latest}"
+        load_deploy_env "${DEPLOY_DIR}/.env"
         return 0
     fi
 
@@ -566,6 +680,12 @@ sync_bundle() {
     local bundle_repair_deploy=""
     local bundle_fresh=""
     local bundle_quick=""
+    local bundle_install_or_update=""
+    local bundle_update_agent=""
+    local bundle_install_update_agent=""
+    local bundle_manual_config_wizard=""
+    local bundle_stack_layout=""
+    local bundle_verify_stack=""
 
     mkdir -p "${init_dir}"
 
@@ -588,6 +708,12 @@ sync_bundle() {
         bundle_repair_deploy="${SCRIPT_DIR}/repair-deploy.sh"
         bundle_fresh="${SCRIPT_DIR}/fresh-install.sh"
         bundle_quick="${SCRIPT_DIR}/quick-deploy.sh"
+        bundle_install_or_update="${SCRIPT_DIR}/install-or-update.sh"
+        bundle_update_agent="${SCRIPT_DIR}/update-agent.sh"
+        bundle_install_update_agent="${SCRIPT_DIR}/install-update-agent-service.sh"
+        bundle_manual_config_wizard="${SCRIPT_DIR}/manual-config-wizard.sh"
+        bundle_stack_layout="${SCRIPT_DIR}/stack-layout.sh"
+        bundle_verify_stack="${SCRIPT_DIR}/verify-stack.sh"
     elif [ -f "${SCRIPT_DIR}/docker-compose.yml" ] \
         && [ -f "${SCRIPT_DIR}/.env.example" ] \
         && [ -f "${SCRIPT_DIR}/init-db/01-init.sql" ]; then
@@ -600,6 +726,12 @@ sync_bundle() {
         bundle_repair_deploy="${bundle_dir}/repair-deploy.sh"
         bundle_fresh="${bundle_dir}/fresh-install.sh"
         bundle_quick="${bundle_dir}/quick-deploy.sh"
+        bundle_install_or_update="${bundle_dir}/install-or-update.sh"
+        bundle_update_agent="${bundle_dir}/update-agent.sh"
+        bundle_install_update_agent="${bundle_dir}/install-update-agent-service.sh"
+        bundle_manual_config_wizard="${bundle_dir}/manual-config-wizard.sh"
+        bundle_stack_layout="${bundle_dir}/stack-layout.sh"
+        bundle_verify_stack="${bundle_dir}/verify-stack.sh"
     fi
 
     if [ -n "${bundle_dir}" ]; then
@@ -625,6 +757,36 @@ sync_bundle() {
         fi
         copy_file_if_needed "${bundle_fresh}" "${target_dir}/fresh-install.sh"
         copy_file_if_needed "${bundle_quick}" "${target_dir}/quick-deploy.sh"
+        if [ -n "${bundle_install_or_update}" ] && [ -f "${bundle_install_or_update}" ]; then
+            copy_file_if_needed "${bundle_install_or_update}" "${target_dir}/install-or-update.sh"
+        else
+            download_file "scripts/deploy/install-or-update.sh" "${target_dir}/install-or-update.sh"
+        fi
+        if [ -n "${bundle_update_agent}" ] && [ -f "${bundle_update_agent}" ]; then
+            copy_file_if_needed "${bundle_update_agent}" "${target_dir}/update-agent.sh"
+        else
+            download_file "scripts/deploy/update-agent.sh" "${target_dir}/update-agent.sh"
+        fi
+        if [ -n "${bundle_install_update_agent}" ] && [ -f "${bundle_install_update_agent}" ]; then
+            copy_file_if_needed "${bundle_install_update_agent}" "${target_dir}/install-update-agent-service.sh"
+        else
+            download_file "scripts/deploy/install-update-agent-service.sh" "${target_dir}/install-update-agent-service.sh"
+        fi
+        if [ -n "${bundle_manual_config_wizard}" ] && [ -f "${bundle_manual_config_wizard}" ]; then
+            copy_file_if_needed "${bundle_manual_config_wizard}" "${target_dir}/manual-config-wizard.sh"
+        else
+            download_file "scripts/deploy/manual-config-wizard.sh" "${target_dir}/manual-config-wizard.sh"
+        fi
+        if [ -n "${bundle_stack_layout}" ] && [ -f "${bundle_stack_layout}" ]; then
+            copy_file_if_needed "${bundle_stack_layout}" "${target_dir}/stack-layout.sh"
+        else
+            download_file "scripts/deploy/stack-layout.sh" "${target_dir}/stack-layout.sh"
+        fi
+        if [ -n "${bundle_verify_stack}" ] && [ -f "${bundle_verify_stack}" ]; then
+            copy_file_if_needed "${bundle_verify_stack}" "${target_dir}/verify-stack.sh"
+        else
+            download_file "scripts/deploy/verify-stack.sh" "${target_dir}/verify-stack.sh"
+        fi
     else
         if [ "${PRESERVE_COMPOSE_LAYOUT}" != "1" ]; then
             download_file "deploy/docker-compose.yml" "${target_dir}/docker-compose.yml"
@@ -640,9 +802,15 @@ sync_bundle() {
         download_file "scripts/deploy/repair-deploy.sh" "${target_dir}/repair-deploy.sh"
         download_file "scripts/deploy/fresh-install.sh" "${target_dir}/fresh-install.sh"
         download_file "scripts/deploy/quick-deploy.sh" "${target_dir}/quick-deploy.sh"
+        download_file "scripts/deploy/install-or-update.sh" "${target_dir}/install-or-update.sh"
+        download_file "scripts/deploy/update-agent.sh" "${target_dir}/update-agent.sh"
+        download_file "scripts/deploy/install-update-agent-service.sh" "${target_dir}/install-update-agent-service.sh"
+        download_file "scripts/deploy/manual-config-wizard.sh" "${target_dir}/manual-config-wizard.sh"
+        download_file "scripts/deploy/stack-layout.sh" "${target_dir}/stack-layout.sh"
+        download_file "scripts/deploy/verify-stack.sh" "${target_dir}/verify-stack.sh"
     fi
 
-    chmod +x "${target_dir}/update-app.sh" "${target_dir}/repair-mysql.sh" "${target_dir}/repair-deploy.sh" "${target_dir}/fresh-install.sh" "${target_dir}/quick-deploy.sh"
+    chmod +x "${target_dir}/update-app.sh" "${target_dir}/repair-mysql.sh" "${target_dir}/repair-deploy.sh" "${target_dir}/fresh-install.sh" "${target_dir}/quick-deploy.sh" "${target_dir}/install-or-update.sh" "${target_dir}/update-agent.sh" "${target_dir}/install-update-agent-service.sh" "${target_dir}/manual-config-wizard.sh" "${target_dir}/stack-layout.sh" "${target_dir}/verify-stack.sh"
 }
 
 wait_for_app() {
@@ -674,6 +842,11 @@ wait_for_app() {
 }
 
 apply_admin_password_override() {
+    if is_worker_role; then
+        print_info "当前为 worker 角色，跳过管理员密码同步。"
+        return 0
+    fi
+
     if [ "${ADMIN_PASSWORD_EXPLICIT}" != "1" ] || [ -z "${ADMIN_PASSWORD_OVERRIDE}" ]; then
         return 0
     fi
@@ -725,7 +898,7 @@ NODE
 }
 
 compose_pull_with_retry() {
-    local requested_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.18}"
+    local requested_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.19}"
 
     if is_truthy "${SKIP_DOCKER_PULL}"; then
         print_info "检测到 SKIP_DOCKER_PULL=${SKIP_DOCKER_PULL}，跳过主程序镜像拉取，直接使用本地镜像。"
@@ -749,7 +922,7 @@ main() {
     load_deploy_env "${DEPLOY_DIR}/.env"
     APP_SERVICE="${APP_SERVICE:-qq-farm-bot}"
     COMPOSE_APP_SERVICE="${COMPOSE_APP_SERVICE:-${APP_SERVICE}}"
-    APP_CONTAINER_NAME="${APP_CONTAINER_NAME:-${APP_SERVICE}}"
+    refresh_stack_layout
     if [ -n "${APP_IMAGE_OVERRIDE}" ]; then
         APP_IMAGE="${APP_IMAGE_OVERRIDE}"
     fi
@@ -759,7 +932,7 @@ main() {
     load_deploy_env "${DEPLOY_DIR}/.env"
     APP_SERVICE="${APP_SERVICE:-qq-farm-bot}"
     COMPOSE_APP_SERVICE="${COMPOSE_APP_SERVICE:-${APP_SERVICE}}"
-    APP_CONTAINER_NAME="${APP_CONTAINER_NAME:-${APP_SERVICE}}"
+    refresh_stack_layout
     if [ -n "${APP_IMAGE_OVERRIDE}" ]; then
         APP_IMAGE="${APP_IMAGE_OVERRIDE}"
     fi
@@ -779,7 +952,7 @@ main() {
         print_warning "检测到 SKIP_DB_REPAIR=${SKIP_DB_REPAIR}，跳过数据库修复步骤。"
     else
         print_info "先执行旧 MySQL 结构修复脚本..."
-        "${DEPLOY_DIR}/repair-mysql.sh" --deploy-dir "${DEPLOY_DIR}"
+        bash "${DEPLOY_DIR}/repair-mysql.sh" --deploy-dir "${DEPLOY_DIR}"
     fi
     compose_pull_with_retry
     "${DOCKER[@]}" compose up -d --no-deps "${COMPOSE_APP_SERVICE}"
@@ -793,13 +966,19 @@ main() {
     echo ""
     print_success "主程序更新完成。"
     echo "部署目录: ${DEPLOY_DIR}"
+    echo "应用角色: $(current_app_role)"
     echo "Compose 服务: ${COMPOSE_APP_SERVICE}"
     echo "容器名称: ${APP_CONTAINER_NAME}"
     echo "旧镜像 ID: ${old_image:-unknown}"
     echo "新镜像 ID: ${new_image:-unknown}"
     echo "未变更服务: qq-farm-mysql / qq-farm-redis / qq-farm-ipad860"
+    echo "统一安装/更新入口: ${DEPLOY_DIR}/install-or-update.sh"
     echo "部署包修复脚本: ${DEPLOY_DIR}/repair-deploy.sh"
     echo "数据库修复脚本: ${DEPLOY_DIR}/repair-mysql.sh"
+    echo "手动修复向导: ${DEPLOY_DIR}/manual-config-wizard.sh"
+    echo "安装后核验脚本: ${DEPLOY_DIR}/verify-stack.sh"
+    echo "后台更新代理: ${DEPLOY_DIR}/update-agent.sh --once"
+    echo "安装代理常驻服务: ${DEPLOY_DIR}/install-update-agent-service.sh"
     echo ""
 }
 

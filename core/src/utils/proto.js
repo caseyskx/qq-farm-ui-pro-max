@@ -124,6 +124,7 @@ async function loadProto() {
 
     // 好友
     types.GetAllFriendsRequest = root.lookupType('gamepb.friendpb.GetAllRequest');
+    types.GetGameFriendsRequest = root.lookupType('gamepb.friendpb.GetGameFriendsRequest');
     types.GetAllFriendsReply = root.lookupType('gamepb.friendpb.GetAllReply');
     types.GetApplicationsRequest = root.lookupType('gamepb.friendpb.GetApplicationsRequest');
     types.GetApplicationsReply = root.lookupType('gamepb.friendpb.GetApplicationsReply');

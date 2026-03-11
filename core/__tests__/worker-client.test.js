@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { WorkerClient } = require('../src/cluster/worker-client');
+const { WorkerClient, buildAssignedAccountFingerprint } = require('../src/cluster/worker-client');
 
 function createLogger() {
     const calls = [];
@@ -48,6 +48,7 @@ test('WorkerClient init wires jobs, runtime engine, shutdown handlers and master
     const socket = createSocket();
     const logger = createLogger();
     const calls = [];
+    const intervalHandles = [];
     const runtimeEngine = {
         async start(options) {
             calls.push(['runtime.start', options]);
@@ -74,36 +75,62 @@ test('WorkerClient init wires jobs, runtime engine, shutdown handlers and master
             calls.push(['initJobs']);
             return { stop() { calls.push(['jobs.stop']); } };
         },
+        initDatabaseRef: async () => {
+            calls.push(['database.init']);
+        },
+        closeDatabaseRef: async () => {
+            calls.push(['database.close']);
+        },
         registerRuntimeShutdownHandlersRef: (options) => {
             calls.push(['registerShutdown', typeof options.runtimeEngine.stop]);
             return { dispose() { calls.push(['shutdown.dispose']); } };
+        },
+        setIntervalRef: (handler, delay) => {
+            intervalHandles.push(['set', delay, typeof handler]);
+            return { id: 'heartbeat' };
+        },
+        clearIntervalRef: (handle) => {
+            intervalHandles.push(['clear', handle && handle.id]);
         },
         logger,
     });
 
     await client.init();
 
-    assert.deepEqual(calls.slice(0, 4), [
+    assert.deepEqual(calls.slice(0, 5), [
+        ['database.init'],
         ['initJobs'],
         ['createRuntimeEngine', 4321],
         ['registerShutdown', 'function'],
         ['runtime.start', { startAdminServer: false, autoStartAccounts: false }],
     ]);
-    assert.equal(calls[4][0], 'ioFactory');
-    assert.equal(calls[4][1], 'http://master:3000');
-    assert.equal(calls[4][2].auth.token, 'worker-token');
-    assert.match(calls[4][2].auth.nodeId, /^worker-4321-/);
+    assert.equal(calls[5][0], 'ioFactory');
+    assert.equal(calls[5][1], 'http://master:3000');
+    assert.equal(calls[5][2].auth.token, 'worker-token');
+    assert.match(calls[5][2].auth.nodeId, /^worker-4321-/);
 
     const connectHandler = socket.handlers.get('connect');
     assert.equal(typeof connectHandler, 'function');
     connectHandler();
-    assert.deepEqual(socket.emitted, [['worker:ready', undefined]]);
+    assert.deepEqual(socket.emitted, [
+        ['worker:ready', undefined],
+        ['worker:heartbeat', {
+            nodeId: calls[5][2].auth.nodeId,
+            role: 'worker',
+            status: 'ready',
+            version: '4.5.18',
+            assignedCount: 0,
+            updatedAt: socket.emitted[1][1].updatedAt,
+        }],
+    ]);
+    assert.deepEqual(intervalHandles, [['set', 15000, 'function']]);
 });
 
 test('WorkerClient stop tears down shutdown hooks, socket, jobs and runtime engine', async () => {
     const socket = createSocket();
     const logger = createLogger();
     const calls = [];
+    const intervalHandles = [];
     const client = new WorkerClient('', '', {
         processRef: { env: {}, pid: 1 },
         ioFactory: () => socket,
@@ -118,31 +145,46 @@ test('WorkerClient stop tears down shutdown hooks, socket, jobs and runtime engi
         }),
         initJobsRef: () => ({
             stop() {
-                calls.push(['jobs.stop']);
+            calls.push(['jobs.stop']);
             },
         }),
+        initDatabaseRef: async () => {
+            calls.push(['database.init']);
+        },
+        closeDatabaseRef: async () => {
+            calls.push(['database.close']);
+        },
         registerRuntimeShutdownHandlersRef: () => ({
             dispose() {
                 calls.push(['shutdown.dispose']);
             },
         }),
+        setIntervalRef: () => ({ id: 'heartbeat' }),
+        clearIntervalRef: (handle) => {
+            intervalHandles.push(['clear', handle && handle.id]);
+        },
         logger,
     });
 
     await client.init();
+    const connectHandler = socket.handlers.get('connect');
+    connectHandler();
     client.assignedAccounts = new Set(['1']);
     client.assignedAccountData = new Map([['1', '{"id":"1"}']]);
 
     await client.stop();
 
     assert.deepEqual(calls, [
+        ['database.init'],
         ['shutdown.dispose'],
         ['jobs.stop'],
         ['runtime.stop', { stopAdminServer: false }],
+        ['database.close'],
     ]);
     assert.deepEqual(socket.calls, ['removeAllListeners', 'disconnect', 'close']);
     assert.equal(client.assignedAccounts.size, 0);
     assert.equal(client.assignedAccountData.size, 0);
+    assert.deepEqual(intervalHandles, [['clear', 'heartbeat']]);
 });
 
 test('WorkerClient account diff stops removed accounts, restarts changed accounts and starts new ones', async () => {
@@ -167,6 +209,8 @@ test('WorkerClient account diff stops removed accounts, restarts changed account
             },
         }),
         initJobsRef: () => ({ stop() {} }),
+        initDatabaseRef: async () => {},
+        closeDatabaseRef: async () => {},
         registerRuntimeShutdownHandlersRef: () => ({ dispose() {} }),
         logger,
     });
@@ -174,9 +218,9 @@ test('WorkerClient account diff stops removed accounts, restarts changed account
     await client.init();
     client.assignedAccounts = new Set(['removed', 'changed', 'same']);
     client.assignedAccountData = new Map([
-        ['removed', JSON.stringify({ id: 'removed', name: 'A' })],
-        ['changed', JSON.stringify({ id: 'changed', name: 'B', code: 'old' })],
-        ['same', JSON.stringify({ id: 'same', name: 'C' })],
+        ['removed', buildAssignedAccountFingerprint({ id: 'removed', name: 'A' })],
+        ['changed', buildAssignedAccountFingerprint({ id: 'changed', name: 'B', code: 'old' })],
+        ['same', buildAssignedAccountFingerprint({ id: 'same', name: 'C' })],
     ]);
 
     const assignHandler = socket.handlers.get('master:assign:accounts');
@@ -194,6 +238,75 @@ test('WorkerClient account diff stops removed accounts, restarts changed account
         ['startWorker', 'new'],
     ]);
     assert.deepEqual([...client.assignedAccounts], ['changed', 'same', 'new']);
-    assert.equal(client.assignedAccountData.get('same'), JSON.stringify({ id: 'same', name: 'C' }));
-    assert.equal(client.assignedAccountData.get('new'), JSON.stringify({ id: 'new', name: 'D' }));
+    assert.equal(client.assignedAccountData.get('same'), buildAssignedAccountFingerprint({ id: 'same', name: 'C' }));
+    assert.equal(client.assignedAccountData.get('new'), buildAssignedAccountFingerprint({ id: 'new', name: 'D' }));
+});
+
+test('WorkerClient account diff ignores runtime-only field changes after master reconnect', async () => {
+    const socket = createSocket();
+    const logger = createLogger();
+    const calls = [];
+
+    const client = new WorkerClient('', '', {
+        processRef: { env: {}, pid: 100 },
+        ioFactory: () => socket,
+        createRuntimeEngineRef: () => ({
+            async start() {},
+            async stop() {},
+            async startWorker(account) {
+                calls.push(['startWorker', account.id]);
+            },
+            stopWorker(accountId) {
+                calls.push(['stopWorker', accountId]);
+            },
+            async restartWorker(account) {
+                calls.push(['restartWorker', account.id]);
+            },
+        }),
+        initJobsRef: () => ({ stop() {} }),
+        initDatabaseRef: async () => {},
+        closeDatabaseRef: async () => {},
+        registerRuntimeShutdownHandlersRef: () => ({ dispose() {} }),
+        logger,
+    });
+
+    await client.init();
+    client.assignedAccounts = new Set(['1']);
+    client.assignedAccountData = new Map([
+        ['1', buildAssignedAccountFingerprint({
+            id: '1',
+            platform: 'wechat',
+            uin: 'wxd8101315',
+            code: 'stable-login-code',
+        })],
+    ]);
+
+    const assignHandler = socket.handlers.get('master:assign:accounts');
+    await assignHandler({
+        accounts: [
+            {
+                id: '1',
+                platform: 'wechat',
+                uin: 'wxd8101315',
+                code: 'stable-login-code',
+                running: true,
+                connected: false,
+                gold: 12345,
+                exp: 678,
+                lastStatusAt: Date.now(),
+                wsError: { code: 400, message: 'temporary' },
+            },
+        ],
+    });
+
+    assert.deepEqual(calls, []);
+    assert.equal(
+        client.assignedAccountData.get('1'),
+        buildAssignedAccountFingerprint({
+            id: '1',
+            platform: 'wechat',
+            uin: 'wxd8101315',
+            code: 'stable-login-code',
+        }),
+    );
 });

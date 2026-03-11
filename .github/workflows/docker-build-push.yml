@@ -19,7 +19,7 @@ on:
       version:
         description: 'Version (e.g., v3.6.0)'
         required: false
-        default: 'v4.5.18'
+        default: 'v4.5.19'
       push_to_docker_hub:
         description: 'Push to Docker Hub'
         required: false
@@ -162,9 +162,9 @@ jobs:
           echo "### 🚀 快速部署" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo '# 全新服务器完整部署' >> $GITHUB_STEP_SUMMARY
-          echo 'bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)' >> $GITHUB_STEP_SUMMARY
+          echo '# 全新服务器统一入口' >> $GITHUB_STEP_SUMMARY
+          echo 'bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/install-or-update.sh) --action install' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo '# 已部署服务器仅更新主程序' >> $GITHUB_STEP_SUMMARY
-          echo 'cd /opt/YYYY_MM_DD/qq-farm-bot && ./update-app.sh' >> $GITHUB_STEP_SUMMARY
+          echo '# 已部署服务器统一更新入口' >> $GITHUB_STEP_SUMMARY
+          echo '/opt/qq-farm-current/install-or-update.sh --action update --preserve-current' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

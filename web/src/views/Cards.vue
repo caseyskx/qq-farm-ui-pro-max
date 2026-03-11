@@ -1016,7 +1016,7 @@ function toneClass(tone: string) {
                       <BaseBadge :class="toneClass(card.statusTone)">
                         {{ card.statusLabel }}
                       </BaseBadge>
-                      <BaseBadge class="cards-type-badge text-xs">
+                      <BaseBadge surface="meta" tone="neutral" class="cards-type-badge text-xs">
                         {{ formatCardType(card.type) }}
                       </BaseBadge>
                     </div>
@@ -1757,8 +1757,6 @@ function toneClass(tone: string) {
 }
 
 .cards-type-badge {
-  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent) !important;
-  color: var(--ui-text-2) !important;
   border-radius: 999px;
 }
 

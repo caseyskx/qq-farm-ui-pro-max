@@ -4,16 +4,18 @@ set -Eeuo pipefail
 
 APP_NAME="QQ 农场智能助手"
 APP_SERVICE="qq-farm-bot"
-STACK_CONTAINERS=("qq-farm-bot" "qq-farm-mysql" "qq-farm-redis" "qq-farm-ipad860")
 REPO_SLUG="${REPO_SLUG:-smdk000/qq-farm-ui-pro-max}"
 REPO_REF="${REPO_REF:-main}"
 RAW_BASE_URL="${RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}}"
 SOURCE_ARCHIVE_URL="${SOURCE_ARCHIVE_URL:-https://codeload.github.com/${REPO_SLUG}/tar.gz/${REPO_REF}}"
 DATE_STAMP="$(date +%Y_%m_%d)"
 DEPLOY_BASE_DIR="${DEPLOY_BASE_DIR:-/opt}"
+STACK_NAME="${STACK_NAME:-qq-farm}"
 DEPLOY_DIR="${DEPLOY_DIR:-${DEPLOY_BASE_DIR}/${DATE_STAMP}/qq-farm-bot}"
-CURRENT_LINK="${CURRENT_LINK:-${DEPLOY_BASE_DIR}/qq-farm-bot-current}"
-SOURCE_CACHE_DIR="${SOURCE_CACHE_DIR:-${DEPLOY_BASE_DIR}/.qq-farm-build-src/${REPO_REF}}"
+CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
+SOURCE_CACHE_DIR_INPUT="${SOURCE_CACHE_DIR:-}"
+CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
+SOURCE_CACHE_DIR="${SOURCE_CACHE_DIR_INPUT:-${DEPLOY_BASE_DIR}/.qq-farm-build-src/${REPO_REF}}"
 OFFICIAL_DOCKERHUB_APP_IMAGE="${OFFICIAL_DOCKERHUB_APP_IMAGE:-smdk000/qq-farm-bot-ui}"
 OFFICIAL_GHCR_APP_IMAGE="${OFFICIAL_GHCR_APP_IMAGE:-ghcr.io/${REPO_SLUG}}"
 
@@ -26,6 +28,22 @@ COMPOSE_PULL_RETRIES="${COMPOSE_PULL_RETRIES:-3}"
 PULL_RETRY_DELAY_SECONDS="${PULL_RETRY_DELAY_SECONDS:-10}"
 ADMIN_PASSWORD_EXPLICIT=0
 ADMIN_PASSWORD_OVERRIDE=""
+DEPLOY_DIR_EXPLICIT=0
+CURRENT_LINK_EXPLICIT=0
+SOURCE_CACHE_DIR_EXPLICIT=0
+STACK_DIR_NAME=""
+APP_CONTAINER_NAME=""
+MYSQL_CONTAINER_NAME=""
+REDIS_CONTAINER_NAME=""
+IPAD860_CONTAINER_NAME=""
+STACK_CONTAINERS=()
+
+if [ -n "${CURRENT_LINK_INPUT}" ]; then
+    CURRENT_LINK_EXPLICIT=1
+fi
+if [ -n "${SOURCE_CACHE_DIR_INPUT}" ]; then
+    SOURCE_CACHE_DIR_EXPLICIT=1
+fi
 
 if [ "${ADMIN_PASSWORD+x}" = "x" ] && [ -n "${ADMIN_PASSWORD}" ]; then
     ADMIN_PASSWORD_EXPLICIT=1
@@ -37,6 +55,23 @@ print_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+refresh_stack_layout() {
+    STACK_NAME="$(normalize_stack_name "${STACK_NAME:-qq-farm}")"
+    STACK_DIR_NAME="$(stack_dir_name "${STACK_NAME}")"
+    APP_CONTAINER_NAME="$(stack_container_name "${STACK_NAME}" "bot")"
+    MYSQL_CONTAINER_NAME="$(stack_container_name "${STACK_NAME}" "mysql")"
+    REDIS_CONTAINER_NAME="$(stack_container_name "${STACK_NAME}" "redis")"
+    IPAD860_CONTAINER_NAME="$(stack_container_name "${STACK_NAME}" "ipad860")"
+    STACK_CONTAINERS=("${APP_CONTAINER_NAME}" "${MYSQL_CONTAINER_NAME}" "${REDIS_CONTAINER_NAME}" "${IPAD860_CONTAINER_NAME}")
+
+    if [ "${DEPLOY_DIR_EXPLICIT}" != "1" ]; then
+        DEPLOY_DIR="${DEPLOY_BASE_DIR}/${DATE_STAMP}/${STACK_DIR_NAME}"
+    fi
+    if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
+        CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
+    fi
+}
+
 mask_secret() {
     local value="$1"
     if [ "${#value}" -le 2 ]; then
@@ -46,8 +81,31 @@ mask_secret() {
     printf '%s%s%s' "${value:0:1}" "$(printf '%*s' "$(( ${#value} - 2 ))" '' | tr ' ' '*')" "${value: -1}"
 }
 
+current_app_role() {
+    printf '%s\n' "${APP_ROLE:-${ROLE:-standalone}}"
+}
+
+is_worker_role() {
+    [ "$(current_app_role)" = "worker" ]
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd || pwd)"
+STACK_LAYOUT_PATH="${SCRIPT_DIR}/stack-layout.sh"
+if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+    BOOTSTRAP_DIR="${TMPDIR:-/tmp}/qq-farm-deploy-bootstrap/${REPO_SLUG//\//_}/${REPO_REF}"
+    mkdir -p "${BOOTSTRAP_DIR}"
+    STACK_LAYOUT_PATH="${BOOTSTRAP_DIR}/stack-layout.sh"
+    if [ ! -f "${STACK_LAYOUT_PATH}" ]; then
+        command -v curl >/dev/null 2>&1 || {
+            echo "[ERROR] 缺少 stack-layout.sh 且系统未安装 curl，无法继续执行。" >&2
+            exit 1
+        }
+        curl -fsSL "${RAW_BASE_URL}/scripts/deploy/stack-layout.sh" -o "${STACK_LAYOUT_PATH}"
+    fi
+fi
+# shellcheck source=stack-layout.sh
+. "${STACK_LAYOUT_PATH}"
 USE_LOCAL_BUNDLE=0
 LOCAL_BUNDLE_DIR=""
 LOCAL_SCRIPT_BUNDLE_DIR=""
@@ -70,10 +128,15 @@ parse_args() {
                 ;;
             --deploy-dir)
                 DEPLOY_DIR="${2:-}"
+                DEPLOY_DIR_EXPLICIT=1
                 shift 2
                 ;;
             --deploy-base-dir)
                 DEPLOY_BASE_DIR="${2:-}"
+                shift 2
+                ;;
+            --stack-name)
+                STACK_NAME="${2:-}"
                 shift 2
                 ;;
             --non-interactive)
@@ -91,8 +154,9 @@ parse_args() {
         esac
     done
 
-    if [ -n "${DEPLOY_BASE_DIR:-}" ] && [ -z "${DEPLOY_DIR:-}" ]; then
-        DEPLOY_DIR="${DEPLOY_BASE_DIR}/${DATE_STAMP}/qq-farm-bot"
+    refresh_stack_layout
+    if [ "${SOURCE_CACHE_DIR_EXPLICIT}" != "1" ]; then
+        SOURCE_CACHE_DIR="${DEPLOY_BASE_DIR}/.qq-farm-build-src/${REPO_REF}"
     fi
 }
 
@@ -110,7 +174,7 @@ elif [ -f "${SCRIPT_DIR}/docker-compose.yml" ] \
     LOCAL_SCRIPT_BUNDLE_DIR="${SCRIPT_DIR}"
 fi
 
-if [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+if [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
     SUDO="sudo"
 fi
 
@@ -226,6 +290,12 @@ copy_or_download_bundle() {
         cp "${LOCAL_SCRIPT_BUNDLE_DIR}/repair-deploy.sh" "${target_dir}/repair-deploy.sh"
         cp "${LOCAL_SCRIPT_BUNDLE_DIR}/fresh-install.sh" "${target_dir}/fresh-install.sh"
         cp "${LOCAL_SCRIPT_BUNDLE_DIR}/quick-deploy.sh" "${target_dir}/quick-deploy.sh"
+        cp "${LOCAL_SCRIPT_BUNDLE_DIR}/install-or-update.sh" "${target_dir}/install-or-update.sh"
+        cp "${LOCAL_SCRIPT_BUNDLE_DIR}/update-agent.sh" "${target_dir}/update-agent.sh"
+        cp "${LOCAL_SCRIPT_BUNDLE_DIR}/install-update-agent-service.sh" "${target_dir}/install-update-agent-service.sh"
+        cp "${LOCAL_SCRIPT_BUNDLE_DIR}/manual-config-wizard.sh" "${target_dir}/manual-config-wizard.sh"
+        cp "${LOCAL_SCRIPT_BUNDLE_DIR}/stack-layout.sh" "${target_dir}/stack-layout.sh"
+        cp "${LOCAL_SCRIPT_BUNDLE_DIR}/verify-stack.sh" "${target_dir}/verify-stack.sh"
     else
         download_file "deploy/docker-compose.yml" "${target_dir}/docker-compose.yml"
         download_file "deploy/.env.example" "${target_dir}/.env.example"
@@ -236,6 +306,12 @@ copy_or_download_bundle() {
         download_file "scripts/deploy/repair-deploy.sh" "${target_dir}/repair-deploy.sh"
         download_file "scripts/deploy/fresh-install.sh" "${target_dir}/fresh-install.sh"
         download_file "scripts/deploy/quick-deploy.sh" "${target_dir}/quick-deploy.sh"
+        download_file "scripts/deploy/install-or-update.sh" "${target_dir}/install-or-update.sh"
+        download_file "scripts/deploy/update-agent.sh" "${target_dir}/update-agent.sh"
+        download_file "scripts/deploy/install-update-agent-service.sh" "${target_dir}/install-update-agent-service.sh"
+        download_file "scripts/deploy/manual-config-wizard.sh" "${target_dir}/manual-config-wizard.sh"
+        download_file "scripts/deploy/stack-layout.sh" "${target_dir}/stack-layout.sh"
+        download_file "scripts/deploy/verify-stack.sh" "${target_dir}/verify-stack.sh"
     fi
 
     cp "${target_dir}/.env.example" "${target_dir}/.env"
@@ -244,6 +320,12 @@ copy_or_download_bundle() {
     chmod +x "${target_dir}/repair-deploy.sh"
     chmod +x "${target_dir}/fresh-install.sh"
     chmod +x "${target_dir}/quick-deploy.sh"
+    chmod +x "${target_dir}/install-or-update.sh"
+    chmod +x "${target_dir}/update-agent.sh"
+    chmod +x "${target_dir}/install-update-agent-service.sh"
+    chmod +x "${target_dir}/manual-config-wizard.sh"
+    chmod +x "${target_dir}/stack-layout.sh"
+    chmod +x "${target_dir}/verify-stack.sh"
 }
 
 set_env_value() {
@@ -263,12 +345,29 @@ sync_env_from_shell() {
     local file="$1"
     local keys=(
         ADMIN_PASSWORD
+        STACK_NAME
+        APP_ROLE
+        SHARED_DOCKER_NETWORK
+        SHARED_DOCKER_NETWORK_EXTERNAL
+        MASTER_URL
+        WORKER_TOKEN
+        WORKER_NODE_ID
+        WORKER_HEARTBEAT_INTERVAL_MS
+        APP_IMAGE
+        MYSQL_IMAGE
+        REDIS_IMAGE
+        IPAD860_IMAGE
+        MYSQL_HOST
+        MYSQL_PORT
         MYSQL_ROOT_PASSWORD
         MYSQL_DATABASE
         MYSQL_USER
         MYSQL_PASSWORD
         MYSQL_POOL_LIMIT
+        REDIS_HOST
+        REDIS_PORT
         REDIS_PASSWORD
+        IPAD860_URL
         COOKIE_SECURE
         CORS_ORIGINS
         JWT_SECRET
@@ -382,7 +481,7 @@ append_unique_app_image_candidate() {
 
     [ -n "${candidate}" ] || return 0
 
-    for existing in "${APP_IMAGE_CANDIDATES[@]}"; do
+    for existing in "${APP_IMAGE_CANDIDATES[@]-}"; do
         if [ "${existing}" = "${candidate}" ]; then
             return 0
         fi
@@ -407,7 +506,7 @@ build_app_image_candidates() {
 select_local_app_image_candidate() {
     local candidate=""
 
-    for candidate in "${APP_IMAGE_CANDIDATES[@]}"; do
+    for candidate in "${APP_IMAGE_CANDIDATES[@]-}"; do
         if image_exists "${candidate}"; then
             printf '%s\n' "${candidate}"
             return 0
@@ -415,6 +514,17 @@ select_local_app_image_candidate() {
     done
 
     return 1
+}
+
+is_local_only_image_ref() {
+    case "$1" in
+        */*)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
 }
 
 use_selected_app_image() {
@@ -490,6 +600,7 @@ load_deploy_env() {
         # shellcheck disable=SC1090
         . "${file}"
         set +a
+        refresh_stack_layout
     fi
 }
 
@@ -518,7 +629,96 @@ pull_one_image() {
     return 1
 }
 
+ipad860_build_assets_available() {
+    local context="$1"
+    local required=(
+        "08sae.dat"
+        "rqtx.dat"
+        "lib/libv08.so"
+        "lib/libz.so"
+        "lib/key"
+        "conf"
+    )
+    local path=""
+
+    for path in "${required[@]}"; do
+        if [ ! -e "${context}/${path}" ]; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+source_checkout_ready() {
+    local root_dir="$1"
+    local component="${2:-app}"
+
+    case "${component}" in
+        app)
+            [ -f "${root_dir}/pnpm-workspace.yaml" ] \
+                && [ -f "${root_dir}/pnpm-lock.yaml" ] \
+                && [ -f "${root_dir}/package.json" ] \
+                && [ -f "${root_dir}/core/Dockerfile" ] \
+                && [ -f "${root_dir}/web/package.json" ]
+            ;;
+        ipad860)
+            [ -f "${root_dir}/services/ipad860/Dockerfile" ] \
+                && ipad860_build_assets_available "${root_dir}/services/ipad860"
+            ;;
+        stack)
+            [ -f "${root_dir}/pnpm-workspace.yaml" ] \
+                && [ -f "${root_dir}/pnpm-lock.yaml" ] \
+                && [ -f "${root_dir}/package.json" ] \
+                && [ -f "${root_dir}/core/Dockerfile" ] \
+                && [ -f "${root_dir}/web/package.json" ] \
+                && [ -f "${root_dir}/services/ipad860/Dockerfile" ] \
+                && ipad860_build_assets_available "${root_dir}/services/ipad860"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+copy_local_source_checkout() {
+    local source_root="$1"
+    local cache_dir="$2"
+    local component="${3:-app}"
+    local paths=()
+
+    case "${component}" in
+        app)
+            paths=(pnpm-workspace.yaml pnpm-lock.yaml package.json core web scripts/service)
+            ;;
+        ipad860)
+            paths=(services/ipad860)
+            ;;
+        stack)
+            paths=(pnpm-workspace.yaml pnpm-lock.yaml package.json core web scripts/service services/ipad860)
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    (
+        cd "${source_root}"
+        tar \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='deploy/offline' \
+            --exclude='logs' \
+            --exclude='core/data' \
+            -cf - "${paths[@]}"
+    ) | (
+        cd "${cache_dir}"
+        tar -xf -
+    )
+}
+
 prepare_source_checkout() {
+    local component="${1:-app}"
     local cache_dir="${SOURCE_CACHE_DIR}"
     local cache_parent
     cache_parent="$(dirname "${cache_dir}")"
@@ -526,52 +726,106 @@ prepare_source_checkout() {
     local first_entry=""
     local strip_args=()
 
-    if [ -f "${cache_dir}/pnpm-workspace.yaml" ] && [ -d "${cache_dir}/services/ipad860" ]; then
+    if source_checkout_ready "${cache_dir}" "${component}"; then
         return 0
     fi
 
-    print_warning "镜像仓库不可用，开始下载源码包用于本地构建..."
     run_root mkdir -p "${cache_parent}"
     if [ -n "${SUDO}" ]; then
         run_root chown -R "$(id -u):$(id -g)" "${cache_parent}"
     fi
 
-    curl -fsSL "${SOURCE_ARCHIVE_URL}" -o "${archive}"
     run_root rm -rf "${cache_dir}"
     run_root mkdir -p "${cache_dir}"
     if [ -n "${SUDO}" ]; then
         run_root chown -R "$(id -u):$(id -g)" "${cache_dir}"
     fi
-    first_entry="$(tar -tzf "${archive}" | head -n 1 || true)"
-    if [[ "${first_entry}" == */* ]]; then
-        strip_args=(--strip-components=1)
+
+    if [ "${component}" = "ipad860" ] && source_checkout_ready "${REPO_ROOT}" "${component}"; then
+        print_warning "镜像仓库不可用，改用本地源码工作区补齐 ipad860 构建资产..."
+        copy_local_source_checkout "${REPO_ROOT}" "${cache_dir}" "${component}"
+        return 0
     fi
-    tar -xzf "${archive}" "${strip_args[@]}" -C "${cache_dir}"
+
+    print_warning "镜像仓库不可用，开始下载源码包用于本地构建..."
+    if curl -fsSL "${SOURCE_ARCHIVE_URL}" -o "${archive}"; then
+        first_entry="$(tar -tzf "${archive}" | head -n 1 || true)"
+        if [[ "${first_entry}" == */* ]]; then
+            strip_args=(--strip-components=1)
+        fi
+        tar -xzf "${archive}" "${strip_args[@]}" -C "${cache_dir}"
+        if source_checkout_ready "${cache_dir}" "${component}"; then
+            return 0
+        fi
+    fi
+
+    if source_checkout_ready "${REPO_ROOT}" "${component}"; then
+        print_warning "源码包不可用或不完整，改用本地源码工作区进行构建..."
+        run_root rm -rf "${cache_dir}"
+        run_root mkdir -p "${cache_dir}"
+        if [ -n "${SUDO}" ]; then
+            run_root chown -R "$(id -u):$(id -g)" "${cache_dir}"
+        fi
+        copy_local_source_checkout "${REPO_ROOT}" "${cache_dir}" "${component}"
+        return 0
+    fi
+
+    if [ "${component}" = "ipad860" ]; then
+        print_error "GitHub 源码包不包含 ipad860 所需的大文件资产，且当前机器没有完整本地源码。"
+    else
+        print_error "无法准备主程序源码缓存，请检查 GitHub 网络连通性。"
+    fi
+    return 1
+}
+
+validate_ipad860_build_context() {
+    local context="$1"
+
+    mkdir -p "${context}/swagger"
+
+    if ipad860_build_assets_available "${context}"; then
+        return 0
+    fi
+
+    print_error "ipad860 源码构建缺少运行时资产，无法在当前环境可靠回退构建。"
+    print_error "GitHub 源码归档默认不包含 rqtx.dat / lib / swagger 等大文件。"
+    print_error "请优先 docker load 导入 smdk000/ipad860:latest，或在完整本地仓库中执行安装。"
+    return 1
 }
 
 build_image_from_source() {
     local image="$1"
+    local component=""
     local context=""
     local dockerfile=""
 
     case "${image}" in
         */qq-farm-bot-ui:*|qq-farm-bot-ui:*|smdk000/qq-farm-bot-ui:*)
+            component="app"
             context="${SOURCE_CACHE_DIR}"
             dockerfile="${SOURCE_CACHE_DIR}/core/Dockerfile"
-            ensure_official_image "node:20-alpine" || return 1
             ;;
         */ipad860:*|ipad860:*|smdk000/ipad860:*)
+            component="ipad860"
             context="${SOURCE_CACHE_DIR}/services/ipad860"
             dockerfile="${SOURCE_CACHE_DIR}/services/ipad860/Dockerfile"
-            ensure_official_image "golang:1.24-bookworm" || return 1
-            ensure_official_image "ubuntu:24.04" || return 1
             ;;
         *)
             return 1
             ;;
     esac
 
-    prepare_source_checkout
+    prepare_source_checkout "${component}"
+    case "${component}" in
+        app)
+            ensure_official_image "node:20-alpine" || return 1
+            ;;
+        ipad860)
+            validate_ipad860_build_context "${context}" || return 1
+            ensure_official_image "golang:1.24-bookworm" || return 1
+            ensure_official_image "ubuntu:24.04" || return 1
+            ;;
+    esac
     print_warning "镜像 ${image} 拉取失败，开始从源码构建..."
     "${DOCKER[@]}" build -t "${image}" -f "${dockerfile}" "${context}"
 }
@@ -602,6 +856,11 @@ pull_image_or_build() {
         return 0
     fi
 
+    if image_exists "${image}"; then
+        print_warning "官方镜像拉取失败，改用本地缓存: ${image}"
+        return 0
+    fi
+
     if build_image_from_source "${image}"; then
         return 0
     fi
@@ -615,11 +874,17 @@ resolve_app_image() {
 
     build_app_image_candidates "${requested_image}"
 
+    if is_local_only_image_ref "${requested_image}" && image_exists "${requested_image}"; then
+        print_info "检测到本地测试镜像，直接使用本地缓存: ${requested_image}"
+        use_selected_app_image "${requested_image}" "${requested_image}"
+        return 0
+    fi
+
     if is_truthy "${SKIP_DOCKER_PULL}"; then
         candidate="$(select_local_app_image_candidate || true)"
         if [ -z "${candidate}" ]; then
             print_error "已启用本地镜像模式，但没有找到可用主程序镜像缓存。"
-            print_error "已尝试的本地标签: ${APP_IMAGE_CANDIDATES[*]}"
+            print_error "已尝试的本地标签: ${APP_IMAGE_CANDIDATES[*]-}"
             return 1
         fi
 
@@ -628,7 +893,7 @@ resolve_app_image() {
         return 0
     fi
 
-    for candidate in "${APP_IMAGE_CANDIDATES[@]}"; do
+    for candidate in "${APP_IMAGE_CANDIDATES[@]-}"; do
         print_info "尝试拉取主程序镜像: ${candidate}"
         if pull_one_image "${candidate}"; then
             use_selected_app_image "${requested_image}" "${candidate}"
@@ -674,7 +939,7 @@ pull_required_images() {
         print_info "检测到 SKIP_DOCKER_PULL=${SKIP_DOCKER_PULL}，跳过镜像拉取，直接使用本地镜像。"
     fi
 
-    local requested_app_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.18}"
+    local requested_app_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.19}"
     local image=""
 
     resolve_app_image "${requested_app_image}" || return 1
@@ -728,6 +993,11 @@ mark_current_release() {
 }
 
 apply_admin_password_override() {
+    if is_worker_role; then
+        print_info "当前为 worker 角色，跳过管理员密码同步。"
+        return 0
+    fi
+
     if [ "${ADMIN_PASSWORD_EXPLICIT}" != "1" ] || [ -z "${ADMIN_PASSWORD_OVERRIDE}" ]; then
         return 0
     fi
@@ -831,16 +1101,18 @@ main() {
     pull_required_images
     "${DOCKER[@]}" compose up -d
 
-    wait_for_container "qq-farm-mysql" 240
-    wait_for_container "qq-farm-redis" 120
-    wait_for_container "qq-farm-ipad860" 180
+    wait_for_container "${MYSQL_CONTAINER_NAME}" 240
+    wait_for_container "${REDIS_CONTAINER_NAME}" 120
+    wait_for_container "${IPAD860_CONTAINER_NAME}" 180
     print_info "执行 MySQL 结构修复脚本..."
-    "${DEPLOY_DIR}/repair-mysql.sh" --deploy-dir "${DEPLOY_DIR}"
-    wait_for_container "qq-farm-bot" 240
+    bash "${DEPLOY_DIR}/repair-mysql.sh" --deploy-dir "${DEPLOY_DIR}"
+    wait_for_container "${APP_CONTAINER_NAME}" 240
     apply_admin_password_override
 
-    if command -v curl >/dev/null 2>&1; then
+    if ! is_worker_role && command -v curl >/dev/null 2>&1; then
         curl -fsS "http://127.0.0.1:${web_port}/api/ping" >/dev/null 2>&1 || print_warning "接口探活未通过，请稍后执行: curl http://127.0.0.1:${web_port}/api/ping"
+    elif is_worker_role; then
+        print_info "当前为 worker 角色，跳过 /api/ping 探活。"
     fi
 
     mark_current_release "${DEPLOY_DIR}"
@@ -851,12 +1123,19 @@ main() {
     print_success "部署完成。"
     echo "目录: ${DEPLOY_DIR}"
     echo "当前版本链接: ${CURRENT_LINK}"
+    echo "实例名称: ${STACK_NAME}"
+    echo "应用角色: $(current_app_role)"
     echo "访问地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):${web_port}"
+    echo "统一安装/更新入口: ${CURRENT_LINK}/install-or-update.sh"
     echo "部署包修复脚本: ${CURRENT_LINK}/repair-deploy.sh"
     echo "数据库修复脚本: ${CURRENT_LINK}/repair-mysql.sh"
+    echo "手动修复向导: ${CURRENT_LINK}/manual-config-wizard.sh"
+    echo "安装后核验脚本: ${CURRENT_LINK}/verify-stack.sh"
     echo "默认管理员: admin"
     echo "管理员密码: 见 ${DEPLOY_DIR}/.env 中的 ADMIN_PASSWORD"
     echo "后续仅更新主程序: ${CURRENT_LINK}/update-app.sh"
+    echo "后台更新代理: ${CURRENT_LINK}/update-agent.sh --once"
+    echo "安装代理常驻服务: ${CURRENT_LINK}/install-update-agent-service.sh"
     echo ""
 }
 

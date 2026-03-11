@@ -8,6 +8,7 @@
 
 ### 快速索引（精简版）
 
+- `v4.5.20 (2026-03-11)` 发布链路归一与本地 Release 产物打包：本地/CI 统一输出二进制与部署包，Docker 推送脚本收口，旧服兼容软链补齐。
 - `v4.5.19 (2026-03-11)` 部署统一入口与宿主机更新代理落地：统一安装/更新脚本、Release 资产补齐、旧服 current 链接迁移与自测闭环全部完成。
 - `v4.5.18 (2026-03-10)` 发布链路与验收闭环：版本号抬升、部署脚本/修库脚本继续收口，前后端测试、lint、构建与公告/文档检查通过。
 - `2026-03-09` 访客面板专用链路落地：新增独立接口、错误码分层、竞态保护与空账号状态清理；并完成一次链路复查与修复闭环。
@@ -18,6 +19,25 @@
 - `v4.5.6 (2026-03-08)` 用户状态与登录链路修复：`users.status` 语义拆分、QQ/微信登录续航增强、发布链路稳健性提升。
 
 > 说明：以上为“快速浏览摘要”；完整变更、验证命令与问题复盘请以下方详细记录为准。
+
+### 开发补记 - v4.5.20 发布链路归一与本地 Release 产物打包 (2026-03-11)
+
+#### ✅ 本轮发布收口
+- ✅ **版本口径已抬升到 `v4.5.20`**: `core/package.json`、`web/package.json`、Docker 模板、离线包脚本、部署文档与 GitHub Actions 默认版本已经同步更新，避免覆盖已存在的 `v4.5.19` 标签。
+- ✅ **本地与 CI 的 Release 打包逻辑已统一**: 新增 `scripts/release/build-release-assets.sh`，GitHub Release workflow 直接复用该脚本，避免再维护两套 release-assets 生成逻辑。
+- ✅ **Docker 推送入口已收口**: `scripts/docker/docker-build-multiarch.sh` 改为非交互式多架构推送脚本，默认同步 Docker Hub 与 GHCR；`scripts/docker/docker-sync.sh` 改为兼容包装入口。
+- ✅ **旧服 current 兼容软链已补齐**: `fresh-install.sh`、`update-app.sh`、`repair-deploy.sh`、`install-or-update.sh`、`repair-mysql.sh` 现在会同时识别并维护 `/opt/qq-farm-current` 与历史 `/opt/qq-farm-bot-current`。
+
+#### 📌 本轮发布说明
+- 📌 **根 README 仍只修改部署章节**: 本轮继续遵守“只动部署部分”的边界，同时把 `deploy/README.md`、`deploy/README.cn.md`、`docs/DEPLOYMENT_SOP.md` 与维护 SOP 的部署入口一起收口。
+- 📌 **本地二进制输出入口固定为 `build-release-assets.sh`**: 维护者本地发版时不再手工拼接 zip/tar 包，统一直接生成 Windows、Linux、macOS 产物和部署包。
+
+#### 🧪 本轮验收
+- ✅ `pnpm check:announcements`
+- ✅ `pnpm check:doc-links`
+- ✅ `node --test core/__tests__/system-update-manifest.test.js core/__tests__/system-update-jobs.test.js core/__tests__/system-update-runtime.test.js core/__tests__/admin-system-update-routes.test.js`
+- ✅ `bash scripts/release/build-release-assets.sh --version v4.5.20 --skip-offline-bundles`
+- ⚠️ 本机 Docker daemon 当前不可访问，`self-test-install.sh`、本地离线镜像包导出与本地 Docker 推送需由 GitHub Actions 或 Docker 恢复后继续执行。
 
 ### 开发补记 - v4.5.19 部署统一入口与宿主机更新代理 (2026-03-11)
 

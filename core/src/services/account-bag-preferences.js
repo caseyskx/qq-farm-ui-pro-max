@@ -7,6 +7,7 @@ const MAX_PURCHASE_MEMORY_ENTRIES = 200;
 const MAX_ACTIVITY_HISTORY_ENTRIES = 30;
 const MAX_ACTIVITY_DETAIL_ENTRIES = 8;
 const MAX_ACTIVITY_ITEM_IDS = 12;
+const MAX_PLANTABLE_SEED_SNAPSHOT_ENTRIES = 80;
 
 function clampInteger(value, fallback = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
     const num = Number.parseInt(value, 10);
@@ -99,6 +100,67 @@ function normalizeActivityHistory(input) {
         .filter((entry) => entry.ts > 0 && (entry.type || entry.title || entry.summary || entry.itemId > 0 || entry.goodsId > 0));
 }
 
+function normalizePlantableSeedSnapshotSeed(seed) {
+    const safeSeed = (seed && typeof seed === 'object') ? seed : {};
+    const seedId = clampInteger(safeSeed.seedId, 0, 0);
+    if (seedId <= 0) return null;
+    return {
+        seedId,
+        name: normalizeShortText(safeSeed.name, 120),
+        count: clampInteger(safeSeed.count, 0, 0, 999999),
+        usableCount: clampInteger(safeSeed.usableCount, 0, 0, 999999),
+        reservedCount: clampInteger(safeSeed.reservedCount, 0, 0, 999999),
+        requiredLevel: clampInteger(safeSeed.requiredLevel, 0, 0, 9999),
+        plantSize: clampInteger(safeSeed.plantSize, 1, 1, 9),
+        image: normalizeShortText(safeSeed.image, 2048),
+        unlocked: safeSeed.unlocked !== false,
+    };
+}
+
+function normalizePlantableSeedSnapshot(input) {
+    const source = (input && typeof input === 'object') ? input : {};
+    const seeds = Array.isArray(source.seeds)
+        ? source.seeds
+            .slice(0, MAX_PLANTABLE_SEED_SNAPSHOT_ENTRIES)
+            .map(normalizePlantableSeedSnapshotSeed)
+            .filter(Boolean)
+        : [];
+    return {
+        generatedAt: clampInteger(source.generatedAt, 0, 0, 9999999999999),
+        seeds,
+    };
+}
+
+function normalizeFertilizerResolverCacheEntry(entry, type) {
+    const safeEntry = (entry && typeof entry === 'object') ? entry : {};
+    const goodsId = clampInteger(safeEntry.goodsId, 0, 0);
+    if (goodsId <= 0) return null;
+    return {
+        goodsId,
+        type: type === 'normal' ? 'normal' : 'organic',
+        name: normalizeShortText(safeEntry.name, 120),
+        packHours: clampInteger(safeEntry.packHours, 0, 0, 9999),
+        priceItemId: clampInteger(safeEntry.priceItemId, 0, 0),
+        priceValue: clampInteger(safeEntry.priceValue, 0, 0, 999999999),
+        resolvedAt: clampInteger(safeEntry.resolvedAt, 0, 0, 9999999999999),
+    };
+}
+
+function normalizeMallResolverCache(input) {
+    const source = (input && typeof input === 'object') ? input : {};
+    const fertilizerGoodsByType = (source.fertilizerGoodsByType && typeof source.fertilizerGoodsByType === 'object')
+        ? source.fertilizerGoodsByType
+        : {};
+    return {
+        fertilizerGoodsByType: {
+            normal: normalizeFertilizerResolverCacheEntry(fertilizerGoodsByType.normal, 'normal'),
+            organic: normalizeFertilizerResolverCacheEntry(fertilizerGoodsByType.organic, 'organic'),
+        },
+        lastAlertAt: clampInteger(source.lastAlertAt, 0, 0, 9999999999999),
+        lastAlertReason: normalizeShortText(source.lastAlertReason, 160),
+    };
+}
+
 function parseJsonColumn(value, fallback) {
     if (value === null || value === undefined || value === '') return fallback;
     if (typeof value === 'object') return value;
@@ -113,6 +175,8 @@ function normalizeAccountBagPreferences(input = {}) {
     return {
         purchaseMemory: normalizePurchaseMemory(input.purchaseMemory),
         activityHistory: normalizeActivityHistory(input.activityHistory),
+        plantableSeedSnapshot: normalizePlantableSeedSnapshot(input.plantableSeedSnapshot),
+        mallResolverCache: normalizeMallResolverCache(input.mallResolverCache),
     };
 }
 
@@ -123,7 +187,7 @@ async function getAccountBagPreferences(accountId) {
 
     try {
         const [rows] = await pool.query(
-            `SELECT purchase_memory, activity_history
+            `SELECT purchase_memory, activity_history, plantable_seed_snapshot, mall_resolver_cache
              FROM account_bag_preferences
              WHERE account_id = ?
              LIMIT 1`,
@@ -134,6 +198,8 @@ async function getAccountBagPreferences(accountId) {
         return normalizeAccountBagPreferences({
             purchaseMemory: parseJsonColumn(row.purchase_memory, {}),
             activityHistory: parseJsonColumn(row.activity_history, []),
+            plantableSeedSnapshot: parseJsonColumn(row.plantable_seed_snapshot, {}),
+            mallResolverCache: parseJsonColumn(row.mall_resolver_cache, {}),
         });
     } catch (err) {
         logger.warn(`读取账号背包偏好失败 [${normalizedAccountId}]: ${err.message}`);
@@ -151,17 +217,21 @@ async function saveAccountBagPreferences(accountId, input = {}) {
     const nextPreferences = normalizeAccountBagPreferences(input);
     const [result] = await pool.query(
         `INSERT INTO account_bag_preferences (
-            account_id, purchase_memory, activity_history
+            account_id, purchase_memory, activity_history, plantable_seed_snapshot, mall_resolver_cache
         )
-        SELECT id, ?, ?
+        SELECT id, ?, ?, ?, ?
         FROM accounts
         WHERE id = ?
         ON DUPLICATE KEY UPDATE
             purchase_memory = VALUES(purchase_memory),
-            activity_history = VALUES(activity_history)`,
+            activity_history = VALUES(activity_history),
+            plantable_seed_snapshot = VALUES(plantable_seed_snapshot),
+            mall_resolver_cache = VALUES(mall_resolver_cache)`,
         [
             JSON.stringify(nextPreferences.purchaseMemory),
             JSON.stringify(nextPreferences.activityHistory),
+            JSON.stringify(nextPreferences.plantableSeedSnapshot),
+            JSON.stringify(nextPreferences.mallResolverCache),
             normalizedAccountId,
         ],
     );
@@ -178,6 +248,8 @@ module.exports = {
     MAX_ACTIVITY_HISTORY_ENTRIES,
     normalizePurchaseMemory,
     normalizeActivityHistory,
+    normalizePlantableSeedSnapshot,
+    normalizeMallResolverCache,
     normalizeAccountBagPreferences,
     getAccountBagPreferences,
     saveAccountBagPreferences,

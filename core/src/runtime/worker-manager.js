@@ -7,6 +7,15 @@ const { MiniProgramLoginSession } = require('../services/qrlogin');
 let systemLogBatch = [];
 let systemLogFlushHandle = null;
 
+function normalizeNumericQQUin(value) {
+    const text = String(value || '').trim();
+    return /^\d+$/.test(text) ? text : '';
+}
+
+function normalizeAvatarUrl(value) {
+    return String(value || '').trim();
+}
+
 function flushSystemLogBatch() {
     if (systemLogBatch.length === 0) return;
     const pool = getPool();
@@ -416,6 +425,17 @@ function createWorkerManager(options) {
 
             const connected = !!(panelStatus.connection && panelStatus.connection.connected);
             const liveStatus = (panelStatus.status && typeof panelStatus.status === 'object') ? panelStatus.status : {};
+            const liveUin = normalizeNumericQQUin(liveStatus.uin);
+            const liveAvatar = normalizeAvatarUrl(liveStatus.avatarUrl || liveStatus.avatar);
+            if (worker.account) {
+                if (liveUin) {
+                    worker.account.uin = liveUin;
+                    worker.account.qq = liveUin;
+                }
+                if (liveAvatar) {
+                    worker.account.avatar = liveAvatar;
+                }
+            }
             try {
                 const now = Date.now();
                 addOrUpdateAccount({
@@ -430,6 +450,8 @@ function createWorkerManager(options) {
                     coupon: Number(liveStatus.coupon) || 0,
                     uptime: Number(panelStatus.uptime) || 0,
                     lastStatusAt: now,
+                    ...(liveUin ? { uin: liveUin, qq: liveUin } : {}),
+                    ...(liveAvatar ? { avatar: liveAvatar } : {}),
                     ...(connected ? { lastOnlineAt: now } : {}),
                 });
             } catch { }

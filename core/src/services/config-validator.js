@@ -225,6 +225,10 @@ const AUTOMATION_SCHEMA = {
     email: { type: 'boolean', default: true, label: '邮箱' },
     fertilizer_gift: { type: 'boolean', default: false, label: '肥料礼包' },
     fertilizer_buy: { type: 'boolean', default: false, label: '自动购肥' },
+    fertilizer_buy_type: { type: 'string', enum: ['organic', 'normal', 'both'], default: 'organic', label: '购肥类型' },
+    fertilizer_buy_mode: { type: 'string', enum: ['threshold', 'unlimited'], default: 'unlimited', label: '购肥模式' },
+    fertilizer_buy_threshold_normal: { type: 'integer', min: 0, max: 9999, default: 24, label: '普通肥触发阈值(小时)' },
+    fertilizer_buy_threshold_organic: { type: 'integer', min: 0, max: 9999, default: 24, label: '有机肥触发阈值(小时)' },
     free_gifts: { type: 'boolean', default: true, label: '免费礼包' },
     share_reward: { type: 'boolean', default: true, label: '分享奖励' },
     vip_gift: { type: 'boolean', default: true, label: 'VIP 礼包' },
@@ -384,6 +388,34 @@ const REPORT_CONFIG_SCHEMA = {
 };
 
 const SETTINGS_SCHEMA = {
+    accountMode: {
+        type: 'string',
+        enum: ['main', 'alt', 'safe'],
+        default: 'main',
+        label: '账号模式',
+    },
+    harvestDelay: {
+        type: 'object',
+        label: '随机延迟',
+        properties: {
+            min: { type: 'integer', min: 0, max: 86400, default: 0, label: '随机延迟下限' },
+            max: { type: 'integer', min: 0, max: 86400, default: 0, label: '随机延迟上限' },
+        },
+    },
+    riskPromptEnabled: {
+        type: 'boolean',
+        default: true,
+        label: '风控提示',
+    },
+    modeScope: {
+        type: 'object',
+        label: '模式作用域',
+        properties: {
+            zoneScope: { type: 'string', enum: ['same_zone_only', 'all_zones'], default: 'same_zone_only', label: '区服范围' },
+            requiresGameFriend: { type: 'boolean', default: true, label: '要求游戏好友' },
+            fallbackBehavior: { type: 'string', enum: ['standalone', 'strict_block'], default: 'standalone', label: '回退行为' },
+        },
+    },
     automation: {
         type: 'object',
         label: '自动化配置',
@@ -416,15 +448,56 @@ const SETTINGS_SCHEMA = {
     },
     plantingStrategy: {
         type: 'string',
-        enum: ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit'],
+        enum: ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit', 'bag_priority'],
         default: 'preferred',
         label: '种植策略',
+    },
+    plantingFallbackStrategy: {
+        type: 'string',
+        enum: ['pause', 'preferred', 'level', 'cheapest'],
+        default: 'level',
+        label: '失配回退策略',
     },
     preferredSeedId: {
         type: 'integer',
         min: 0,
         default: 0,
         label: '偏好种子ID',
+    },
+    bagSeedPriority: {
+        type: 'array',
+        default: [],
+        label: '背包种子优先顺序',
+    },
+    bagSeedFallbackStrategy: {
+        type: 'string',
+        enum: ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit'],
+        default: 'level',
+        label: '背包种子第二优先策略',
+    },
+    inventoryPlanting: {
+        type: 'object',
+        label: '库存种植',
+        properties: {
+            mode: {
+                type: 'string',
+                enum: ['disabled', 'prefer_inventory', 'inventory_only'],
+                default: 'disabled',
+                label: '库存种植模式',
+            },
+            globalKeepCount: {
+                type: 'integer',
+                min: 0,
+                max: 999999,
+                default: 0,
+                label: '全局保留数量',
+            },
+            reserveRules: {
+                type: 'array',
+                default: [],
+                label: '库存保留规则',
+            },
+        },
     },
     workflowConfig: {
         type: 'object',

@@ -2,6 +2,7 @@
 
 ## 快速索引（精简版）
 
+- `v4.5.20 (2026-03-11)` 发布链路归一与本地 Release 产物打包：本地/CI 统一输出二进制与部署包，Docker 推送脚本收口，旧服 current 兼容软链补齐。
 - `v4.5.19 (2026-03-11)` 宿主机更新代理与部署统一入口：统一安装/更新入口、更新代理、发布资产和旧服 current 链接修复全部落地。
 - `v4.5.18 (2026-03-10)` 发布链路与持久化收口：视图偏好持久化、访客/管理链路补强、数据库与部署修复脚本同步升级。
 - `v4.5.0 (2026-03-07)` 微信生态与公告中台重构：微信好友拉取降级兼容、公告系统独立化、偷菜过滤与网络稳定性补强。
@@ -14,6 +15,16 @@
 - `v4.1.0 (2026-03-04)` 账号分级模式：主号/小号/风险规避模式上线，策略与控制面板能力补齐。
 
 > 说明：该索引用于快速浏览；详细变更说明、背景和技术细节请以下文各版本章节为准。
+
+## [v4.5.20] - 发布链路归一与本地 Release 产物打包 (2026-03-11)
+### 🚀 发布与部署链路
+- **本地 Release 产物脚本落地**: 新增 `scripts/release/build-release-assets.sh`，本地与 GitHub Release workflow 统一走同一套打包逻辑，可直接输出 Win / Linux / macOS 二进制、版本化部署包和离线包。
+- **Docker 推送脚本收口**: `scripts/docker/docker-build-multiarch.sh` 默认同步 Docker Hub 与 GHCR，`scripts/docker/docker-sync.sh` 改为兼容入口，避免继续维护旧版交互式推送逻辑。
+- **发布默认版本抬升到 `v4.5.20`**: `core/package.json`、`web/package.json`、Docker 模板、部署文档和 GitHub Actions 默认版本已统一更新，避免复用已有 `v4.5.19` 标签。
+
+### 🧱 旧服兼容与修复
+- **current 兼容软链补齐**: `fresh-install.sh`、`update-app.sh`、`repair-deploy.sh`、`install-or-update.sh`、`repair-mysql.sh` 现在会同时识别并维护 `/opt/qq-farm-current` 与历史 `/opt/qq-farm-bot-current`，降低旧服升级门槛。
+- **README 部署章节继续单点收口**: 根 README 仍只更新部署相关内容，同时同步 `deploy/README.md`、`deploy/README.cn.md` 与部署 SOP 的入口命令。
 
 ## [v4.5.19] - 宿主机更新代理与部署统一入口 (2026-03-11)
 ### 🚀 发布与部署链路

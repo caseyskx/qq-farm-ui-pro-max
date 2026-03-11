@@ -15,6 +15,7 @@ DEPLOY_DIR="${DEPLOY_DIR:-${DEPLOY_BASE_DIR}/${DATE_STAMP}/qq-farm-bot}"
 CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
 SOURCE_CACHE_DIR_INPUT="${SOURCE_CACHE_DIR:-}"
 CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
+LEGACY_CURRENT_LINK=""
 SOURCE_CACHE_DIR="${SOURCE_CACHE_DIR_INPUT:-${DEPLOY_BASE_DIR}/.qq-farm-build-src/${REPO_REF}}"
 SOURCE_CACHE_REFRESH="${SOURCE_CACHE_REFRESH:-auto}"
 OFFICIAL_DOCKERHUB_APP_IMAGE="${OFFICIAL_DOCKERHUB_APP_IMAGE:-smdk000/qq-farm-bot-ui}"
@@ -71,6 +72,7 @@ refresh_stack_layout() {
     if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
         CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
     fi
+    LEGACY_CURRENT_LINK="$(stack_legacy_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
 }
 
 mask_secret() {
@@ -997,7 +999,7 @@ pull_required_images() {
         print_info "检测到 SKIP_DOCKER_PULL=${SKIP_DOCKER_PULL}，跳过镜像拉取，直接使用本地镜像。"
     fi
 
-    local requested_app_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.19}"
+    local requested_app_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.20}"
     local image=""
 
     resolve_app_image "${requested_app_image}" || return 1
@@ -1048,6 +1050,9 @@ mark_current_release() {
     current_parent="$(dirname "${CURRENT_LINK}")"
     run_root mkdir -p "${current_parent}"
     run_root ln -sfn "${target_dir}" "${CURRENT_LINK}"
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && [ "${LEGACY_CURRENT_LINK}" != "${CURRENT_LINK}" ]; then
+        run_root ln -sfn "${target_dir}" "${LEGACY_CURRENT_LINK}"
+    fi
 }
 
 apply_admin_password_override() {
@@ -1181,6 +1186,9 @@ main() {
     print_success "部署完成。"
     echo "目录: ${DEPLOY_DIR}"
     echo "当前版本链接: ${CURRENT_LINK}"
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && [ "${LEGACY_CURRENT_LINK}" != "${CURRENT_LINK}" ]; then
+        echo "历史兼容链接: ${LEGACY_CURRENT_LINK}"
+    fi
     echo "实例名称: ${STACK_NAME}"
     echo "应用角色: $(current_app_role)"
     echo "访问地址: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):${web_port}"

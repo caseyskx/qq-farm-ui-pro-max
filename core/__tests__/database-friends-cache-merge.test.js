@@ -95,8 +95,227 @@ test('mergeFriendsCache preserves meaningful fields while adding visitor seeds',
 
         const friends = await getCachedFriends('acc-1');
         assert.deepEqual(friends, [
-            { gid: 1001, uin: '123456', name: '老朋友', avatarUrl: 'https://img/a.png' },
-            { gid: 1002, uin: '', name: 'GID:1002', avatarUrl: '' },
+            { gid: 1001, uin: '123456', openId: '', name: '老朋友', avatarUrl: 'https://img/a.png' },
+            { gid: 1002, uin: '', openId: '', name: 'GID:1002', avatarUrl: '' },
+        ]);
+    } finally {
+        delete require.cache[databaseModulePath];
+        restoreLogger();
+        restoreJwtService();
+        restoreCircuitBreaker();
+        restoreRedisCache();
+        restoreMysqlDb();
+    }
+});
+
+test('mergeFriendsCache drops fallback uin values that are actually gid echoes', async () => {
+    const kv = new Map();
+    const redis = {
+        async set(key, value) {
+            kv.set(String(key), String(value));
+        },
+        async get(key) {
+            return kv.get(String(key)) || null;
+        },
+        async keys(pattern) {
+            if (pattern !== 'account:*:friends_cache') return [];
+            return Array.from(kv.keys()).filter(key => /^account:.+:friends_cache$/.test(key));
+        },
+    };
+
+    const restoreMysqlDb = mockModule(mysqlDbModulePath, {
+        async initMysql() {},
+        async closeMysql() {},
+        getPool() {
+            return {
+                query: async () => [[]],
+                execute: async () => [[]],
+            };
+        },
+        isMysqlInitialized() {
+            return true;
+        },
+    });
+    const restoreRedisCache = mockModule(redisCacheModulePath, {
+        async initRedis() { return true; },
+        async closeRedis() {},
+        getRedisClient() { return redis; },
+    });
+    const restoreCircuitBreaker = mockModule(circuitBreakerModulePath, {
+        circuitBreaker: {
+            isAvailable() { return true; },
+            recordSuccess() {},
+            recordFailure() {},
+        },
+    });
+    const restoreJwtService = mockModule(jwtServiceModulePath, {
+        async initJwtSecretPersistence() {},
+    });
+    const restoreLogger = mockModule(loggerModulePath, createLoggerMock());
+
+    try {
+        delete require.cache[databaseModulePath];
+        const { updateFriendsCache, mergeFriendsCache, getCachedFriends } = require(databaseModulePath);
+
+        await updateFriendsCache('acc-2', [
+            { gid: 20004, uin: '20004', name: '空标识好友', avatarUrl: '' },
+        ]);
+        await mergeFriendsCache('acc-2', [
+            { gid: 20004, uin: '', name: '空标识好友', avatarUrl: '' },
+        ]);
+
+        const friends = await getCachedFriends('acc-2');
+        assert.deepEqual(friends, [
+            { gid: 20004, uin: '', openId: '', name: '空标识好友', avatarUrl: '' },
+        ]);
+    } finally {
+        delete require.cache[databaseModulePath];
+        restoreLogger();
+        restoreJwtService();
+        restoreCircuitBreaker();
+        restoreRedisCache();
+        restoreMysqlDb();
+    }
+});
+
+test('getCachedFriends normalizes legacy openId tokens that were historically stored in uin', async () => {
+    const kv = new Map();
+    const redis = {
+        async set(key, value) {
+            kv.set(String(key), String(value));
+        },
+        async get(key) {
+            return kv.get(String(key)) || null;
+        },
+        async keys(pattern) {
+            if (pattern !== 'account:*:friends_cache') return [];
+            return Array.from(kv.keys()).filter(key => /^account:.+:friends_cache$/.test(key));
+        },
+    };
+
+    const restoreMysqlDb = mockModule(mysqlDbModulePath, {
+        async initMysql() {},
+        async closeMysql() {},
+        getPool() {
+            return {
+                query: async () => [[]],
+                execute: async () => [[]],
+            };
+        },
+        isMysqlInitialized() {
+            return true;
+        },
+    });
+    const restoreRedisCache = mockModule(redisCacheModulePath, {
+        async initRedis() { return true; },
+        async closeRedis() {},
+        getRedisClient() { return redis; },
+    });
+    const restoreCircuitBreaker = mockModule(circuitBreakerModulePath, {
+        circuitBreaker: {
+            isAvailable() { return true; },
+            recordSuccess() {},
+            recordFailure() {},
+        },
+    });
+    const restoreJwtService = mockModule(jwtServiceModulePath, {
+        async initJwtSecretPersistence() {},
+    });
+    const restoreLogger = mockModule(loggerModulePath, createLoggerMock());
+
+    try {
+        kv.set('account:acc-legacy:friends_cache', JSON.stringify([
+            {
+                gid: 1093441253,
+                uin: '68AF60B1D1B712B9F41693B3FA378DE1',
+                name: '♡',
+                avatarUrl: 'https://thirdqq.qlogo.cn/qqapp/1112386029/68AF60B1D1B712B9F41693B3FA378DE1/100',
+            },
+        ]));
+
+        delete require.cache[databaseModulePath];
+        const { getCachedFriends } = require(databaseModulePath);
+
+        const friends = await getCachedFriends('acc-legacy');
+        assert.deepEqual(friends, [
+            {
+                gid: 1093441253,
+                uin: '',
+                openId: '68AF60B1D1B712B9F41693B3FA378DE1',
+                name: '♡',
+                avatarUrl: 'https://thirdqq.qlogo.cn/qqapp/1112386029/68AF60B1D1B712B9F41693B3FA378DE1/100',
+            },
+        ]);
+        assert.equal(
+            kv.get('account:acc-legacy:friends_cache'),
+            JSON.stringify(friends),
+        );
+    } finally {
+        delete require.cache[databaseModulePath];
+        restoreLogger();
+        restoreJwtService();
+        restoreCircuitBreaker();
+        restoreRedisCache();
+        restoreMysqlDb();
+    }
+});
+
+test('mergeFriendsCache preserves openId separately from QQ uin', async () => {
+    const kv = new Map();
+    const redis = {
+        async set(key, value) {
+            kv.set(String(key), String(value));
+        },
+        async get(key) {
+            return kv.get(String(key)) || null;
+        },
+        async keys(pattern) {
+            if (pattern !== 'account:*:friends_cache') return [];
+            return Array.from(kv.keys()).filter(key => /^account:.+:friends_cache$/.test(key));
+        },
+    };
+
+    const restoreMysqlDb = mockModule(mysqlDbModulePath, {
+        async initMysql() {},
+        async closeMysql() {},
+        getPool() {
+            return {
+                query: async () => [[]],
+                execute: async () => [[]],
+            };
+        },
+        isMysqlInitialized() {
+            return true;
+        },
+    });
+    const restoreRedisCache = mockModule(redisCacheModulePath, {
+        async initRedis() { return true; },
+        async closeRedis() {},
+        getRedisClient() { return redis; },
+    });
+    const restoreCircuitBreaker = mockModule(circuitBreakerModulePath, {
+        circuitBreaker: {
+            isAvailable() { return true; },
+            recordSuccess() {},
+            recordFailure() {},
+        },
+    });
+    const restoreJwtService = mockModule(jwtServiceModulePath, {
+        async initJwtSecretPersistence() {},
+    });
+    const restoreLogger = mockModule(loggerModulePath, createLoggerMock());
+
+    try {
+        delete require.cache[databaseModulePath];
+        const { updateFriendsCache, getCachedFriends } = require(databaseModulePath);
+
+        await updateFriendsCache('acc-3', [
+            { gid: 30003, uin: '', openId: 'wxid_friend_demo', name: '微信同玩好友', avatarUrl: 'https://img/openid.png' },
+        ]);
+
+        const friends = await getCachedFriends('acc-3');
+        assert.deepEqual(friends, [
+            { gid: 30003, uin: '', openId: 'wxid_friend_demo', name: '微信同玩好友', avatarUrl: 'https://img/openid.png' },
         ]);
     } finally {
         delete require.cache[databaseModulePath];
@@ -173,8 +392,8 @@ test('findReusableFriendsCache can reuse historical cache for the same QQ self g
         assert.deepEqual(reusable, {
             sourceAccountId: '1008',
             friends: [
-                { gid: 1087791399, uin: '', name: '悠然恍若隔世梦', avatarUrl: 'https://img/self.png' },
-                { gid: 1098611337, uin: '', name: '未来可期', avatarUrl: 'https://img/friend.png' },
+                { gid: 1087791399, uin: '', openId: '', name: '悠然恍若隔世梦', avatarUrl: 'https://img/self.png' },
+                { gid: 1098611337, uin: '', openId: '', name: '未来可期', avatarUrl: 'https://img/friend.png' },
             ],
         });
     } finally {
@@ -268,9 +487,9 @@ test('findReusableFriendsCache can reuse related account cache by same QQ nickna
         assert.deepEqual(reusable, {
             sourceAccountId: '1001',
             friends: [
-                { gid: 1093441253, uin: '', name: '♡', avatarUrl: 'https://img/a.png' },
-                { gid: 1172159984, uin: '', name: '我是大飞哥', avatarUrl: 'https://img/b.png' },
-                { gid: 1182182338, uin: '', name: '桀殇→辉', avatarUrl: 'https://img/c.png' },
+                { gid: 1093441253, uin: '', openId: '', name: '♡', avatarUrl: 'https://img/a.png' },
+                { gid: 1172159984, uin: '', openId: '', name: '我是大飞哥', avatarUrl: 'https://img/b.png' },
+                { gid: 1182182338, uin: '', openId: '', name: '桀殇→辉', avatarUrl: 'https://img/c.png' },
             ],
         });
     } finally {
@@ -346,6 +565,7 @@ test('findFriendInSharedCaches can resolve nickname from another account cache b
             friend: {
                 gid: 1172159984,
                 uin: '',
+                openId: '',
                 name: '我是大飞哥',
                 avatarUrl: 'https://img/friend.png',
             },

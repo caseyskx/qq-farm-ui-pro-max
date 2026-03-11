@@ -33,4 +33,24 @@ Object.defineProperty(state, 'friendScheduler', {
     get: getFriendScheduler,
 });
 
+function resetFriendState() {
+    if (friendScheduler) {
+        friendScheduler.clearAll();
+    }
+    state.isCheckingFriends = false;
+    state.friendLoopRunning = false;
+    state.externalSchedulerMode = false;
+    state.lastResetDate = '';
+    state.activeStakeouts.clear();
+    state.operationLimits.clear();
+    state.canGetHelpExp = true;
+    state.helpAutoDisabledByLimit = false;
+    state.filterStats.friendBlacklist = 0;
+    state.filterStats.friendWhitelist = 0;
+    state.filterStats.plantBlacklist = 0;
+    state.filterStats.plantWhitelist = 0;
+    state.filterStats.banned = 0;
+}
+
 module.exports = state;
+module.exports.resetFriendState = resetFriendState;

@@ -66,3 +66,56 @@ test('listAdminOperationLogs inlines sanitized limit and keeps filters parameter
         restoreMysql();
     }
 });
+
+test('createAdminOperationLog accepts runtime scope for hot reload audit entries', async () => {
+    const calls = [];
+    const restoreMysql = mockModule(mysqlDbModulePath, {
+        getPool() {
+            return {
+                async execute(sql, params) {
+                    calls.push({ sql, params });
+                    return [{ affectedRows: 1 }];
+                },
+            };
+        },
+    });
+
+    try {
+        delete require.cache[serviceModulePath];
+        const service = require(serviceModulePath);
+
+        const item = await service.createAdminOperationLog({
+            actorUsername: 'admin',
+            scope: 'runtime',
+            actionLabel: '热重载 农场模块',
+            status: 'success',
+            totalCount: 1,
+            successCount: 1,
+            failedCount: 0,
+            affectedNames: ['账号一号'],
+            detailLines: ['目标模块族：农场模块 (farm)'],
+        });
+
+        assert.equal(calls.length, 1);
+        assert.match(calls[0].sql, /INSERT INTO admin_operation_logs/);
+        assert.equal(calls[0].params[1], 'admin');
+        assert.equal(calls[0].params[2], 'runtime');
+        assert.equal(calls[0].params[3], '热重载 农场模块');
+        assert.deepEqual(item, {
+            clientId: null,
+            actorUsername: 'admin',
+            scope: 'runtime',
+            actionLabel: '热重载 农场模块',
+            status: 'success',
+            totalCount: 1,
+            successCount: 1,
+            failedCount: 0,
+            affectedNames: ['账号一号'],
+            failedNames: [],
+            detailLines: ['目标模块族：农场模块 (farm)'],
+        });
+    } finally {
+        delete require.cache[serviceModulePath];
+        restoreMysql();
+    }
+});

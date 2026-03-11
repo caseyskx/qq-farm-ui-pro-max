@@ -22,7 +22,7 @@ const CONFIG = {
     friendCheckIntervalMax: 10000,// 新逻辑：好友巡查间隔最大值(ms)
     adminPort: Number(process.env.ADMIN_PORT || 3000), // 管理面板 HTTP 端口
     adminPassword: process.env.ADMIN_PASSWORD || 'admin',
-    wxApiKey: process.env.WX_API_KEY || 'ZoBsM8RqTA326a02tWgQOmOb', // 微信小程序扫码API密钥
+    wxApiKey: process.env.WX_API_KEY || '', // 微信小程序扫码API密钥，发布仓库不保留默认密钥
     wxApiUrl: process.env.WX_API_URL || 'https://api.aineishe.com/api/wxnc', // 码雨云聚合API地址
     wxAppId: process.env.WX_APP_ID || 'wx5306c5978fdb76e4',     // QQ经典农场小程序AppID
 };

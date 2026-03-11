@@ -12,7 +12,8 @@ const { DEFAULT_UI_CONFIG, normalizeUIConfig } = require('../utils/ui-config');
 
 const STORE_FILE = getDataFile('store.json');
 const GLOBAL_CONFIG_SYSTEM_SETTING_KEY = SYSTEM_SETTING_KEYS.GLOBAL_CONFIG;
-const ALLOWED_PLANTING_STRATEGIES = ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit'];
+const ALLOWED_PLANTING_STRATEGIES = ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit', 'bag_priority'];
+const ALLOWED_BAG_SEED_FALLBACK_STRATEGIES = ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit'];
 const PUSHOO_CHANNELS = new Set([
     'webhook', 'qmsg', 'serverchan', 'pushplus', 'pushplushxtrip',
     'dingtalk', 'wecom', 'bark', 'gocqhttp', 'onebot', 'atri',
@@ -96,6 +97,8 @@ const ACCOUNT_MODE_PRESETS = Object.freeze({
 });
 const ALLOWED_PLANTING_FALLBACK_STRATEGIES = ['pause', 'preferred', 'level', 'cheapest'];
 const ALLOWED_INVENTORY_PLANTING_MODES = ['disabled', 'prefer_inventory', 'inventory_only'];
+const ALLOWED_FERTILIZER_BUY_TYPES = new Set(['organic', 'normal', 'both']);
+const ALLOWED_FERTILIZER_BUY_MODES = new Set(['threshold', 'unlimited']);
 const DEFAULT_INVENTORY_PLANTING = {
     mode: 'disabled',
     globalKeepCount: 0,
@@ -139,6 +142,10 @@ const DEFAULT_ACCOUNT_CONFIG = {
         fertilizer_gift: false,
         fertilizer_buy: false,
         fertilizer_buy_limit: 100,
+        fertilizer_buy_type: 'organic',
+        fertilizer_buy_mode: 'unlimited',
+        fertilizer_buy_threshold_normal: 24,
+        fertilizer_buy_threshold_organic: 24,
         free_gifts: true,
         share_reward: true,
         vip_gift: true,
@@ -158,6 +165,8 @@ const DEFAULT_ACCOUNT_CONFIG = {
     plantingStrategy: 'preferred',
     plantingFallbackStrategy: 'level',
     preferredSeedId: 0,
+    bagSeedPriority: [],
+    bagSeedFallbackStrategy: 'level',
     inventoryPlanting: { ...DEFAULT_INVENTORY_PLANTING },
     intervals: {
         farm: 30,
@@ -198,6 +207,7 @@ let accountFallbackConfig = {
     automation: { ...DEFAULT_ACCOUNT_CONFIG.automation },
     harvestDelay: { ...DEFAULT_ACCOUNT_CONFIG.harvestDelay },
     modeScope: { ...DEFAULT_ACCOUNT_CONFIG.modeScope },
+    bagSeedPriority: [...DEFAULT_ACCOUNT_CONFIG.bagSeedPriority],
     inventoryPlanting: { ...DEFAULT_ACCOUNT_CONFIG.inventoryPlanting, reserveRules: [] },
     intervals: { ...DEFAULT_ACCOUNT_CONFIG.intervals },
     friendQuietHours: { ...DEFAULT_ACCOUNT_CONFIG.friendQuietHours },
@@ -205,6 +215,7 @@ let accountFallbackConfig = {
 
 const globalConfig = {
     accountConfigs: {},
+    accountConfigIdentityArchive: {},
     defaultAccountConfig: cloneAccountConfig(DEFAULT_ACCOUNT_CONFIG),
     ui: { ...DEFAULT_UI_CONFIG },
     offlineReminder: { ...DEFAULT_OFFLINE_REMINDER },
@@ -378,6 +389,30 @@ function normalizePlantingFallbackStrategy(strategy, fallback = DEFAULT_ACCOUNT_
     return ALLOWED_PLANTING_FALLBACK_STRATEGIES.includes(normalized) ? normalized : fallback;
 }
 
+function normalizePlantingStrategy(strategy, fallback = DEFAULT_ACCOUNT_CONFIG.plantingStrategy) {
+    const normalized = String(strategy || '').trim();
+    return ALLOWED_PLANTING_STRATEGIES.includes(normalized) ? normalized : fallback;
+}
+
+function normalizeBagSeedFallbackStrategy(strategy, fallback = DEFAULT_ACCOUNT_CONFIG.bagSeedFallbackStrategy) {
+    const normalized = String(strategy || '').trim();
+    return ALLOWED_BAG_SEED_FALLBACK_STRATEGIES.includes(normalized) ? normalized : fallback;
+}
+
+function normalizeBagSeedPriority(priority, fallbackPriority = DEFAULT_ACCOUNT_CONFIG.bagSeedPriority) {
+    const source = Array.isArray(priority)
+        ? priority
+        : (Array.isArray(fallbackPriority) ? fallbackPriority : []);
+    const seen = new Set();
+    return source
+        .map((seedId) => Math.max(0, Number.parseInt(seedId, 10) || 0))
+        .filter((seedId) => {
+            if (seedId <= 0 || seen.has(seedId)) return false;
+            seen.add(seedId);
+            return true;
+        });
+}
+
 function normalizeAccountMode(mode, fallback = DEFAULT_ACCOUNT_CONFIG.accountMode) {
     const normalized = String(mode || '').trim().toLowerCase();
     return ACCOUNT_MODE_PRESETS[normalized] ? normalized : fallback;
@@ -498,6 +533,23 @@ function normalizeAutomationValue(key, value, fallback) {
         const next = Number.isFinite(parsed) ? parsed : Number.parseInt(fallback, 10);
         return Math.max(1, Math.min(9999, Number.isFinite(next) ? next : 100));
     }
+    if (key === 'fertilizer_buy_type') {
+        const normalized = String(value || '').trim().toLowerCase();
+        return ALLOWED_FERTILIZER_BUY_TYPES.has(normalized)
+            ? normalized
+            : String(fallback || DEFAULT_ACCOUNT_CONFIG.automation.fertilizer_buy_type);
+    }
+    if (key === 'fertilizer_buy_mode') {
+        const normalized = String(value || '').trim().toLowerCase();
+        return ALLOWED_FERTILIZER_BUY_MODES.has(normalized)
+            ? normalized
+            : String(fallback || DEFAULT_ACCOUNT_CONFIG.automation.fertilizer_buy_mode);
+    }
+    if (key === 'fertilizer_buy_threshold_normal' || key === 'fertilizer_buy_threshold_organic') {
+        const parsed = Number.parseInt(value, 10);
+        const next = Number.isFinite(parsed) ? parsed : Number.parseInt(fallback, 10);
+        return Math.max(0, Math.min(9999, Number.isFinite(next) ? next : 24));
+    }
     if (key === 'landUpgradeTarget') {
         const parsed = Number.parseInt(value, 10);
         const next = Number.isFinite(parsed) ? parsed : Number.parseInt(fallback, 10);
@@ -546,11 +598,11 @@ function cloneAccountConfig(base = DEFAULT_ACCOUNT_CONFIG) {
         intervals: { ...(base.intervals || DEFAULT_ACCOUNT_CONFIG.intervals) },
         friendQuietHours: { ...(base.friendQuietHours || DEFAULT_ACCOUNT_CONFIG.friendQuietHours) },
         friendBlacklist: rawBlacklist.map(Number).filter(n => Number.isFinite(n) && n > 0),
-        plantingStrategy: ALLOWED_PLANTING_STRATEGIES.includes(String(base.plantingStrategy || ''))
-            ? String(base.plantingStrategy)
-            : DEFAULT_ACCOUNT_CONFIG.plantingStrategy,
+        plantingStrategy: normalizePlantingStrategy(base.plantingStrategy),
         plantingFallbackStrategy: normalizePlantingFallbackStrategy(base.plantingFallbackStrategy),
         preferredSeedId: Math.max(0, Number.parseInt(base.preferredSeedId, 10) || 0),
+        bagSeedPriority: normalizeBagSeedPriority(base.bagSeedPriority),
+        bagSeedFallbackStrategy: normalizeBagSeedFallbackStrategy(base.bagSeedFallbackStrategy),
         inventoryPlanting: normalizeInventoryPlanting(base.inventoryPlanting, DEFAULT_INVENTORY_PLANTING),
         stealFilter,
         stealFriendFilter,
@@ -602,8 +654,8 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
         }
     }
 
-    if (src.plantingStrategy && ALLOWED_PLANTING_STRATEGIES.includes(src.plantingStrategy)) {
-        cfg.plantingStrategy = src.plantingStrategy;
+    if (src.plantingStrategy !== undefined) {
+        cfg.plantingStrategy = normalizePlantingStrategy(src.plantingStrategy, cfg.plantingStrategy);
     }
     if (src.plantingFallbackStrategy !== undefined) {
         cfg.plantingFallbackStrategy = normalizePlantingFallbackStrategy(src.plantingFallbackStrategy, cfg.plantingFallbackStrategy);
@@ -611,6 +663,14 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
 
     if (src.preferredSeedId !== undefined && src.preferredSeedId !== null) {
         cfg.preferredSeedId = Math.max(0, Number.parseInt(src.preferredSeedId, 10) || 0);
+    }
+    if (src.bagSeedPriority !== undefined) {
+        cfg.bagSeedPriority = normalizeBagSeedPriority(src.bagSeedPriority, cfg.bagSeedPriority);
+    } else {
+        cfg.bagSeedPriority = normalizeBagSeedPriority(cfg.bagSeedPriority, DEFAULT_ACCOUNT_CONFIG.bagSeedPriority);
+    }
+    if (src.bagSeedFallbackStrategy !== undefined) {
+        cfg.bagSeedFallbackStrategy = normalizeBagSeedFallbackStrategy(src.bagSeedFallbackStrategy, cfg.bagSeedFallbackStrategy);
     }
     if (src.inventoryPlanting && typeof src.inventoryPlanting === 'object') {
         cfg.inventoryPlanting = normalizeInventoryPlanting(src.inventoryPlanting, cfg.inventoryPlanting || DEFAULT_INVENTORY_PLANTING);
@@ -711,6 +771,7 @@ function setAccountConfigSnapshot(accountId, nextConfig, persist = true) {
         return cloneAccountConfig(accountFallbackConfig);
     }
     globalConfig.accountConfigs[id] = normalizeAccountConfig(nextConfig, accountFallbackConfig);
+    captureAccountConfigIdentitySnapshot(id, globalConfig.accountConfigs[id]);
     if (persist) saveGlobalConfig();
     return cloneAccountConfig(globalConfig.accountConfigs[id]);
 }
@@ -720,6 +781,7 @@ function removeAccountConfig(accountId) {
     const id = resolveAccountId(accountId);
     if (!id) return;
     if (globalConfig.accountConfigs[id]) {
+        captureAccountConfigIdentitySnapshot(id, globalConfig.accountConfigs[id]);
         delete globalConfig.accountConfigs[id];
         saveGlobalConfig();
     }
@@ -732,11 +794,17 @@ function ensureAccountConfig(accountId, options = {}) {
     if (globalConfig.accountConfigs[id]) {
         return cloneAccountConfig(globalConfig.accountConfigs[id]);
     }
-    globalConfig.accountConfigs[id] = normalizeAccountConfig(globalConfig.defaultAccountConfig, accountFallbackConfig);
-    // 新账号默认不施肥（不受历史 defaultAccountConfig 旧值影响）
-    if (globalConfig.accountConfigs[id] && globalConfig.accountConfigs[id].automation) {
-        globalConfig.accountConfigs[id].automation.fertilizer = 'none';
+    const archivedConfig = getArchivedAccountConfig(id);
+    if (archivedConfig) {
+        globalConfig.accountConfigs[id] = normalizeAccountConfig(archivedConfig, accountFallbackConfig);
+    } else {
+        globalConfig.accountConfigs[id] = normalizeAccountConfig(globalConfig.defaultAccountConfig, accountFallbackConfig);
+        // 新账号默认不施肥（不受历史 defaultAccountConfig 旧值影响）
+        if (globalConfig.accountConfigs[id] && globalConfig.accountConfigs[id].automation) {
+            globalConfig.accountConfigs[id].automation.fertilizer = 'none';
+        }
     }
+    captureAccountConfigIdentitySnapshot(id, globalConfig.accountConfigs[id]);
     if (options.persist !== false) saveGlobalConfig();
     return cloneAccountConfig(globalConfig.accountConfigs[id]);
 }
@@ -809,6 +877,8 @@ async function loadGlobalConfigFromDB() {
                 modeScope: adv.modeScope,
                 plantingStrategy: r.planting_strategy,
                 plantingFallbackStrategy: adv.plantingFallbackStrategy,
+                bagSeedPriority: adv.bagSeedPriority,
+                bagSeedFallbackStrategy: adv.bagSeedFallbackStrategy,
                 preferredSeedId: r.preferred_seed_id,
                 inventoryPlanting: adv.inventoryPlanting,
                 intervals: adv.intervals || {},
@@ -848,6 +918,8 @@ async function loadGlobalConfigFromDB() {
                 globalConfig.clusterConfig = normalizeClusterConfig({ ...globalConfig.clusterConfig, ...adv.clusterConfig }, globalConfig.clusterConfig);
             }
         }
+
+        repairAccountConfigsFromIdentityArchive();
 
         if (!hasPersistedGlobalConfig) {
             await setSystemSettings({
@@ -899,6 +971,12 @@ function applyLoadedGlobalConfig(stored = {}, options = {}) {
         globalConfig.accountConfigs = nextAccountConfigs;
     }
 
+    globalConfig.accountConfigIdentityArchive = normalizeAccountConfigIdentityArchive(
+        source.accountConfigIdentityArchive !== undefined
+            ? source.accountConfigIdentityArchive
+            : globalConfig.accountConfigIdentityArchive,
+    );
+
     globalConfig.ui = normalizeUIConfig(source.ui, globalConfig.ui || DEFAULT_UI_CONFIG);
     globalConfig.offlineReminder = normalizeOfflineReminder(source.offlineReminder !== undefined ? source.offlineReminder : globalConfig.offlineReminder);
     globalConfig.adminPasswordHash = source.adminPasswordHash !== undefined
@@ -916,8 +994,10 @@ function applyLoadedGlobalConfig(stored = {}, options = {}) {
 }
 
 function buildSystemGlobalConfigSnapshot() {
+    refreshAccountConfigIdentityArchiveFromCurrentAccounts();
     return {
         defaultAccountConfig: cloneAccountConfig(accountFallbackConfig),
+        accountConfigIdentityArchive: cloneAccountConfigIdentityArchive(),
         ui: getUI(),
         offlineReminder: getOfflineReminder(),
         adminPasswordHash: String(globalConfig.adminPasswordHash || ''),
@@ -1033,6 +1113,7 @@ function sanitizeGlobalConfigBeforeSave() {
         nextMap[sid] = normalizeAccountConfig(cfg, accountFallbackConfig);
     }
     globalConfig.accountConfigs = nextMap;
+    refreshAccountConfigIdentityArchiveFromCurrentAccounts();
 }
 
 // 保存全局配置 (加入 3000ms 防抖，避免狂刷数据库事务阻塞连接池)
@@ -1055,6 +1136,8 @@ async function saveGlobalConfigImmediate() {
                         modeScope: normalizeModeScope(cfg.modeScope, DEFAULT_MODE_SCOPE),
                         automation: cfg.automation || {},
                         plantingFallbackStrategy: normalizePlantingFallbackStrategy(cfg.plantingFallbackStrategy),
+                        bagSeedPriority: normalizeBagSeedPriority(cfg.bagSeedPriority, DEFAULT_ACCOUNT_CONFIG.bagSeedPriority),
+                        bagSeedFallbackStrategy: normalizeBagSeedFallbackStrategy(cfg.bagSeedFallbackStrategy),
                         inventoryPlanting: normalizeInventoryPlanting(cfg.inventoryPlanting, DEFAULT_INVENTORY_PLANTING),
                         intervals: cfg.intervals || {},
                         friendQuietHours: cfg.friendQuietHours || {},
@@ -1171,9 +1254,11 @@ function getConfigSnapshot(accountId) {
         riskPromptEnabled: cfg.riskPromptEnabled !== false,
         modeScope: normalizeModeScope(cfg.modeScope, DEFAULT_MODE_SCOPE),
         automation: { ...cfg.automation },
-        plantingStrategy: cfg.plantingStrategy,
+        plantingStrategy: normalizePlantingStrategy(cfg.plantingStrategy),
         plantingFallbackStrategy: cfg.plantingFallbackStrategy,
         preferredSeedId: cfg.preferredSeedId,
+        bagSeedPriority: normalizeBagSeedPriority(cfg.bagSeedPriority, DEFAULT_ACCOUNT_CONFIG.bagSeedPriority),
+        bagSeedFallbackStrategy: normalizeBagSeedFallbackStrategy(cfg.bagSeedFallbackStrategy),
         inventoryPlanting: normalizeInventoryPlanting(cfg.inventoryPlanting, DEFAULT_INVENTORY_PLANTING),
         intervals: { ...cfg.intervals },
         friendQuietHours: { ...cfg.friendQuietHours },
@@ -1225,8 +1310,8 @@ function applyConfigSnapshot(snapshot, options = {}) {
         }
     }
 
-    if (cfg.plantingStrategy && ALLOWED_PLANTING_STRATEGIES.includes(cfg.plantingStrategy)) {
-        next.plantingStrategy = cfg.plantingStrategy;
+    if (cfg.plantingStrategy !== undefined) {
+        next.plantingStrategy = normalizePlantingStrategy(cfg.plantingStrategy, next.plantingStrategy);
     }
     if (cfg.plantingFallbackStrategy !== undefined) {
         next.plantingFallbackStrategy = normalizePlantingFallbackStrategy(cfg.plantingFallbackStrategy, next.plantingFallbackStrategy);
@@ -1234,6 +1319,12 @@ function applyConfigSnapshot(snapshot, options = {}) {
 
     if (cfg.preferredSeedId !== undefined && cfg.preferredSeedId !== null) {
         next.preferredSeedId = Math.max(0, Number.parseInt(cfg.preferredSeedId, 10) || 0);
+    }
+    if (cfg.bagSeedPriority !== undefined) {
+        next.bagSeedPriority = normalizeBagSeedPriority(cfg.bagSeedPriority, next.bagSeedPriority);
+    }
+    if (cfg.bagSeedFallbackStrategy !== undefined) {
+        next.bagSeedFallbackStrategy = normalizeBagSeedFallbackStrategy(cfg.bagSeedFallbackStrategy, next.bagSeedFallbackStrategy);
     }
     if (cfg.inventoryPlanting && typeof cfg.inventoryPlanting === 'object') {
         next.inventoryPlanting = normalizeInventoryPlanting(cfg.inventoryPlanting, next.inventoryPlanting || DEFAULT_INVENTORY_PLANTING);
@@ -1635,14 +1726,25 @@ function normalizeAccountIdentityFields(raw) {
     };
 }
 
+function hasOwnField(source, key) {
+    return !!source && Object.prototype.hasOwnProperty.call(source, key);
+}
+
+function readFieldWithExplicitEmpty(source, key, fallbackValue) {
+    if (hasOwnField(source, key)) {
+        return source[key];
+    }
+    return fallbackValue;
+}
+
 function buildAccountAuthData(acc) {
     const existing = parseAccountAuthData(acc && acc.authData);
     const identity = normalizeAccountIdentityFields({
-        platform: (acc && acc.platform) || existing.platform || 'qq',
-        uin: (acc && acc.uin) || existing.uin || '',
-        qq: (acc && acc.qq) || existing.qq || '',
-        code: (acc && acc.code) || existing.code || '',
-        authTicket: (acc && acc.authTicket) || existing.authTicket || '',
+        platform: readFieldWithExplicitEmpty(acc, 'platform', existing.platform || 'qq'),
+        uin: readFieldWithExplicitEmpty(acc, 'uin', existing.uin || ''),
+        qq: readFieldWithExplicitEmpty(acc, 'qq', existing.qq || ''),
+        code: readFieldWithExplicitEmpty(acc, 'code', existing.code || ''),
+        authTicket: readFieldWithExplicitEmpty(acc, 'authTicket', existing.authTicket || ''),
     });
     const runtimeSource = {
         ...((existing && typeof existing.runtimeSnapshot === 'object') ? existing.runtimeSnapshot : {}),
@@ -1725,6 +1827,7 @@ async function loadAccountsFromDB() {
         }
         cachedAccountsData = normalizeAccountsData({ accounts: mapped, nextId: 1000 + mapped.length });
         _accountsLoadedAt = Date.now();
+        refreshAccountConfigIdentityArchiveFromCurrentAccounts();
         return cachedAccountsData;
     } catch (e) { logStoreError('加载账号数据失败', e); }
     return cachedAccountsData;
@@ -1735,6 +1838,7 @@ let _accountsLoadedAt = 0;
 let _accountsRefreshPromise = null;
 let _accountsMutationVersion = 0;
 const EMPTY_ACCOUNT_UIN_DB_PREFIX = '__ACCOUNT_ID__:';
+const ACCOUNT_CONFIG_IDENTITY_ARCHIVE_LIMIT = 500;
 
 function encodePersistedAccountUin(accountId, value) {
     const normalized = String(value || '').trim();
@@ -1761,6 +1865,156 @@ function cloneAccountsData(data) {
         nextId: normalized.nextId,
         accounts: normalized.accounts.map(acc => ({ ...acc })),
     };
+}
+
+function getAccountRecordById(accountId) {
+    const id = String(accountId || '').trim();
+    if (!id) return null;
+    const data = loadAccounts();
+    const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+    return accounts.find(acc => String((acc && acc.id) || '').trim() === id) || null;
+}
+
+function buildAccountConfigIdentityKey(input = {}) {
+    const platform = String(input.platform || '').trim().toLowerCase();
+    const uin = String(input.uin || input.qq || '').trim();
+    const username = String(input.username || '').trim();
+    if (!platform || !uin) return '';
+    return `${username || '__unowned__'}::${platform}::${uin}`;
+}
+
+function serializeAccountConfigForIdentityCompare(cfg) {
+    return JSON.stringify(normalizeAccountConfig(cfg, accountFallbackConfig));
+}
+
+function isDefaultLikeAccountConfig(cfg) {
+    return serializeAccountConfigForIdentityCompare(cfg) === serializeAccountConfigForIdentityCompare(accountFallbackConfig);
+}
+
+function choosePreferredIdentityConfig(currentCfg, candidateCfg) {
+    if (!currentCfg) {
+        return normalizeAccountConfig(candidateCfg, accountFallbackConfig);
+    }
+    if (!candidateCfg) {
+        return normalizeAccountConfig(currentCfg, accountFallbackConfig);
+    }
+
+    const normalizedCurrent = normalizeAccountConfig(currentCfg, accountFallbackConfig);
+    const normalizedCandidate = normalizeAccountConfig(candidateCfg, accountFallbackConfig);
+    const currentDefaultLike = isDefaultLikeAccountConfig(normalizedCurrent);
+    const candidateDefaultLike = isDefaultLikeAccountConfig(normalizedCandidate);
+
+    if (currentDefaultLike && !candidateDefaultLike) {
+        return normalizedCandidate;
+    }
+    if (!currentDefaultLike && candidateDefaultLike) {
+        return normalizedCurrent;
+    }
+    return normalizedCurrent;
+}
+
+function normalizeAccountConfigIdentityArchive(input) {
+    const source = (input && typeof input === 'object') ? input : {};
+    const normalized = {};
+    const entries = Object.entries(source);
+    const slicedEntries = entries.length > ACCOUNT_CONFIG_IDENTITY_ARCHIVE_LIMIT
+        ? entries.slice(entries.length - ACCOUNT_CONFIG_IDENTITY_ARCHIVE_LIMIT)
+        : entries;
+
+    for (const [rawKey, cfg] of slicedEntries) {
+        const key = String(rawKey || '').trim();
+        if (!key) continue;
+        normalized[key] = normalizeAccountConfig(cfg, accountFallbackConfig);
+    }
+
+    return normalized;
+}
+
+function cloneAccountConfigIdentityArchive() {
+    return Object.fromEntries(
+        Object.entries(normalizeAccountConfigIdentityArchive(globalConfig.accountConfigIdentityArchive))
+            .map(([key, cfg]) => [key, cloneAccountConfig(cfg)]),
+    );
+}
+
+function captureAccountConfigIdentitySnapshot(accountId, cfg, identitySource = null) {
+    const account = (identitySource && typeof identitySource === 'object')
+        ? identitySource
+        : getAccountRecordById(accountId);
+    const key = buildAccountConfigIdentityKey(account || {});
+    if (!key) return '';
+    const sourceConfig = cfg && typeof cfg === 'object'
+        ? cfg
+        : globalConfig.accountConfigs[String(accountId || '').trim()];
+    if (!sourceConfig) return '';
+    const nextConfig = choosePreferredIdentityConfig(
+        globalConfig.accountConfigIdentityArchive && globalConfig.accountConfigIdentityArchive[key],
+        sourceConfig,
+    );
+    globalConfig.accountConfigIdentityArchive = normalizeAccountConfigIdentityArchive({
+        ...(globalConfig.accountConfigIdentityArchive || {}),
+        [key]: nextConfig,
+    });
+    return key;
+}
+
+function getArchivedAccountConfig(accountId) {
+    const account = getAccountRecordById(accountId);
+    const key = buildAccountConfigIdentityKey(account || {});
+    if (!key) return null;
+    const archived = (globalConfig.accountConfigIdentityArchive && globalConfig.accountConfigIdentityArchive[key]) || null;
+    if (!archived) return null;
+    return normalizeAccountConfig(archived, accountFallbackConfig);
+}
+
+function refreshAccountConfigIdentityArchiveFromCurrentAccounts() {
+    const currentArchive = normalizeAccountConfigIdentityArchive(globalConfig.accountConfigIdentityArchive);
+    const data = loadAccounts();
+    const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+    const nextArchive = { ...currentArchive };
+
+    for (const account of accounts) {
+        const id = String((account && account.id) || '').trim();
+        if (!id || !globalConfig.accountConfigs[id]) continue;
+        const key = buildAccountConfigIdentityKey(account);
+        if (!key) continue;
+        nextArchive[key] = choosePreferredIdentityConfig(nextArchive[key], globalConfig.accountConfigs[id]);
+    }
+
+    globalConfig.accountConfigIdentityArchive = normalizeAccountConfigIdentityArchive(nextArchive);
+    return globalConfig.accountConfigIdentityArchive;
+}
+
+function repairAccountConfigsFromIdentityArchive() {
+    const archive = refreshAccountConfigIdentityArchiveFromCurrentAccounts();
+    const data = loadAccounts();
+    const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+    let changed = false;
+
+    for (const account of accounts) {
+        const id = String((account && account.id) || '').trim();
+        if (!id) continue;
+        const key = buildAccountConfigIdentityKey(account);
+        if (!key || !archive[key]) continue;
+
+        const currentCfg = globalConfig.accountConfigs[id];
+        const archivedCfg = archive[key];
+        if (!currentCfg) {
+            globalConfig.accountConfigs[id] = normalizeAccountConfig(archivedCfg, accountFallbackConfig);
+            changed = true;
+            continue;
+        }
+
+        if (isDefaultLikeAccountConfig(currentCfg) && !isDefaultLikeAccountConfig(archivedCfg)) {
+            globalConfig.accountConfigs[id] = normalizeAccountConfig(archivedCfg, accountFallbackConfig);
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        refreshAccountConfigIdentityArchiveFromCurrentAccounts();
+    }
+    return changed;
 }
 
 let _accountsSaveTimer = null;
@@ -2124,6 +2378,10 @@ async function markAccountLoginSuccess(accountId, options = {}) {
 
 function deleteAccount(id) {
     const data = normalizeAccountsData(loadAccounts());
+    const removedAccount = data.accounts.find(a => String(a.id) === String(id)) || null;
+    if (removedAccount && globalConfig.accountConfigs[String(id || '')]) {
+        captureAccountConfigIdentitySnapshot(id, globalConfig.accountConfigs[String(id || '')], removedAccount);
+    }
     data.accounts = data.accounts.filter(a => String(a.id) !== String(id));
     if (data.accounts.length === 0) {
         data.nextId = 1;
@@ -2293,6 +2551,7 @@ async function loadAllFromDB(options = {}) {
     await loadAccountsFromDB();
     if (options.refreshGlobalConfig !== false) {
         await initStoreRuntime();
+        repairAccountConfigsFromIdentityArchive();
     }
 }
 

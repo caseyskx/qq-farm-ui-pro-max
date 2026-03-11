@@ -41,10 +41,14 @@ function getNetworkScheduler() {
 const userState = {
     gid: 0,
     name: '',
+    platform: CONFIG.platform || 'qq',
     level: 0,
     gold: 0,
     exp: 0,
     coupon: 0, // 点券(ID:1002)
+    uin: '',
+    openId: '',
+    avatarUrl: '',
     suspendUntil: CONFIG.accountId ? store.getSuspendUntil(CONFIG.accountId) : 0, // Phase 3: 初始化时从本地存档抽取
 };
 
@@ -58,6 +62,80 @@ function clearWsErrorState() {
 }
 function hasOwn(obj, key) {
     return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function normalizeRuntimeText(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'bigint') return String(value);
+    return '';
+}
+
+function normalizeRuntimeQQUin(value) {
+    const text = normalizeRuntimeText(value);
+    return /^\d+$/.test(text) ? text : '';
+}
+
+function applyBasicInfoToUserState(basic) {
+    const src = (basic && typeof basic === 'object') ? basic : {};
+
+    if (hasOwn(src, 'gid')) {
+        const nextGid = toNum(src.gid);
+        if (Number.isFinite(nextGid) && nextGid > 0) {
+            userState.gid = nextGid;
+        }
+    }
+
+    const nextName = normalizeRuntimeText(src.name);
+    if (nextName) userState.name = nextName;
+
+    if (hasOwn(src, 'level')) {
+        const nextLevel = toNum(src.level);
+        if (Number.isFinite(nextLevel) && nextLevel >= 0) {
+            userState.level = nextLevel;
+        }
+    }
+
+    if (hasOwn(src, 'gold')) {
+        const nextGold = toNum(src.gold);
+        if (Number.isFinite(nextGold) && nextGold >= 0) {
+            userState.gold = nextGold;
+        }
+    }
+
+    if (hasOwn(src, 'exp')) {
+        const nextExp = toNum(src.exp);
+        if (Number.isFinite(nextExp) && nextExp >= 0) {
+            userState.exp = nextExp;
+        }
+    }
+
+    const nextOpenId = normalizeRuntimeText(src.open_id || src.openId || src.openid);
+    if (nextOpenId) {
+        userState.openId = nextOpenId;
+    }
+
+    const nextAvatarUrl = normalizeRuntimeText(src.avatar_url || src.avatarUrl || src.avatar);
+    if (nextAvatarUrl) {
+        userState.avatarUrl = nextAvatarUrl;
+    }
+
+    const nextUin = normalizeRuntimeQQUin(src.uin || src.qq || '') || normalizeRuntimeQQUin(nextOpenId);
+    if (nextUin) {
+        userState.uin = nextUin;
+    }
+
+    return {
+        gid: userState.gid,
+        name: userState.name,
+        level: userState.level,
+        gold: userState.gold,
+        exp: userState.exp,
+        uin: userState.uin,
+        openId: userState.openId,
+        avatarUrl: userState.avatarUrl,
+    };
 }
 
 // ============ 消息编解码 ============
@@ -465,26 +543,11 @@ function handleNotify(msg) {
                 const notify = types.BasicNotify.decode(eventBody);
                 if (notify.basic) {
                     const oldLevel = userState.level;
-                    if (hasOwn(notify.basic, 'level')) {
-                        const nextLevel = toNum(notify.basic.level);
-                        if (Number.isFinite(nextLevel) && nextLevel > 0) userState.level = nextLevel;
+                    applyBasicInfoToUserState(notify.basic);
+                    if (hasOwn(notify.basic, 'level') || hasOwn(notify.basic, 'exp')) {
+                        updateStatusLevel(userState.level, hasOwn(notify.basic, 'exp') ? userState.exp : undefined);
                     }
-                    let shouldUpdateGoldView = false;
                     if (hasOwn(notify.basic, 'gold')) {
-                        const nextGold = toNum(notify.basic.gold);
-                        if (Number.isFinite(nextGold) && nextGold >= 0) {
-                            userState.gold = nextGold;
-                            shouldUpdateGoldView = true;
-                        }
-                    }
-                    if (hasOwn(notify.basic, 'exp')) {
-                        const exp = toNum(notify.basic.exp);
-                        if (Number.isFinite(exp) && exp >= 0) {
-                            userState.exp = exp;
-                            updateStatusLevel(userState.level, exp);
-                        }
-                    }
-                    if (shouldUpdateGoldView) {
                         updateStatusGold(userState.gold);
                     }
                     if (userState.level !== oldLevel) {
@@ -586,11 +649,7 @@ function sendLogin(onLoginSuccess) {
             const reply = types.LoginReply.decode(bodyBytes);
             if (reply.basic) {
                 clearWsErrorState();
-                userState.gid = toNum(reply.basic.gid);
-                userState.name = reply.basic.name || '未知';
-                userState.level = toNum(reply.basic.level);
-                userState.gold = toNum(reply.basic.gold);
-                userState.exp = toNum(reply.basic.exp);
+                applyBasicInfoToUserState(reply.basic);
 
                 // 更新状态栏
                 updateStatusFromLogin({
@@ -629,6 +688,9 @@ function sendLogin(onLoginSuccess) {
                         nickname: userState.name,
                         level: userState.level,
                         gold: userState.gold,
+                        uin: userState.uin || '',
+                        openIdPresent: !!userState.openId,
+                        avatarUrlPresent: !!userState.avatarUrl,
                         serverTime: reply.time_now_millis ? toNum(reply.time_now_millis) : 0,
                     });
                 }

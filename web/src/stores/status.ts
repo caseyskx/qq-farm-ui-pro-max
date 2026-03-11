@@ -13,9 +13,18 @@ interface DailyGift {
   enabled?: boolean
   doneToday: boolean
   lastAt?: number
+  lastSuccessAt?: number
   completedCount?: number
   totalCount?: number
   tasks?: any[]
+  result?: string
+  reason?: string
+  message?: string
+  containerHours?: { normal?: number, organic?: number }
+  targetHours?: { normal?: number, organic?: number }
+  typeCounts?: { normal?: number, organic?: number }
+  missingTypes?: string[]
+  pausedNoGoldToday?: boolean
 }
 
 interface DailyGiftsResponse {

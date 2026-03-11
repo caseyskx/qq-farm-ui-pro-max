@@ -12,6 +12,7 @@ const DEFAULT_MODE_SCOPE = Object.freeze({
 
 const runtimeFriendSnapshots = new Map();
 let listenerBound = false;
+let runtimeFriendListener = null;
 
 function normalizeAccountMode(mode) {
     const raw = String(mode || '').trim().toLowerCase();
@@ -132,13 +133,32 @@ function describeModeScopeReason(reason) {
     }
 }
 
+function handleRuntimeFriendsUpdated(friends) {
+    updateRuntimeFriendsSnapshot(friends);
+}
+
 function bindRuntimeFriendListener() {
     if (listenerBound) return;
     if (!networkEvents || typeof networkEvents.on !== 'function') return;
-    networkEvents.on('friends_updated', (friends) => {
-        updateRuntimeFriendsSnapshot(friends);
-    });
+    runtimeFriendListener = handleRuntimeFriendsUpdated;
+    networkEvents.on('friends_updated', runtimeFriendListener);
     listenerBound = true;
+}
+
+function resetRuntimeAccountModePolicyState(options = {}) {
+    if (
+        listenerBound
+        && runtimeFriendListener
+        && networkEvents
+        && typeof networkEvents.off === 'function'
+    ) {
+        networkEvents.off('friends_updated', runtimeFriendListener);
+    }
+    runtimeFriendListener = null;
+    listenerBound = false;
+    if (options.clearSnapshots !== false) {
+        runtimeFriendSnapshots.clear();
+    }
 }
 
 function getRuntimeAccountModePolicy(accountId = '') {
@@ -257,5 +277,6 @@ module.exports = {
     describeModeScopeReason,
     getRuntimeAccountModePolicy,
     getRuntimeFriendsSnapshot,
+    resetRuntimeAccountModePolicyState,
     updateRuntimeFriendsSnapshot,
 };

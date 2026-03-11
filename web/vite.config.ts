@@ -61,6 +61,13 @@ function resolveBuildOutDir() {
   if (configuredOutDir)
     return relative(webRootDir, resolveConfiguredWebDistDir(configuredOutDir, projectRootDir, webRootDir))
 
+  const resolvedOutDir = resolveBuildWebDistDir(projectRootDir)
+  const relativeOutDir = relative(webRootDir, resolvedOutDir)
+  if (relativeOutDir === FALLBACK_WEB_DIST_DIRNAME) {
+    console.warn(`[vite] web/dist is not writable, building into web/${FALLBACK_WEB_DIST_DIRNAME}`)
+    return relativeOutDir
+  }
+
   const recoveryResult = archiveDefaultWebDistForRecovery({ projectRoot: projectRootDir })
   if (recoveryResult.recovered) {
     console.warn(`[vite] archived stale web/dist to ${recoveryResult.archiveDirRelative} and rebuilding web/dist`)
@@ -74,12 +81,6 @@ function resolveBuildOutDir() {
     console.warn(`[vite] failed to archive stale web/dist (${message}), checking fallback output directory`)
   }
 
-  const resolvedOutDir = resolveBuildWebDistDir(projectRootDir)
-  const relativeOutDir = relative(webRootDir, resolvedOutDir)
-  if (relativeOutDir !== FALLBACK_WEB_DIST_DIRNAME)
-    return relativeOutDir
-
-  console.warn(`[vite] web/dist is not writable, falling back to web/${FALLBACK_WEB_DIST_DIRNAME}`)
   return relativeOutDir
 }
 

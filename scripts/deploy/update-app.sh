@@ -11,6 +11,7 @@ DEPLOY_DIR="${DEPLOY_DIR:-$(pwd)}"
 DEPLOY_BASE_DIR="${DEPLOY_BASE_DIR:-/opt}"
 CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
 CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
+LEGACY_CURRENT_LINK=""
 REPO_SLUG="${REPO_SLUG:-smdk000/qq-farm-ui-pro-max}"
 REPO_REF="${REPO_REF:-main}"
 RAW_BASE_URL="${RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}}"
@@ -84,6 +85,7 @@ refresh_stack_layout() {
     if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
         CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
     fi
+    LEGACY_CURRENT_LINK="$(stack_legacy_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
 }
 
 mask_secret() {
@@ -189,6 +191,9 @@ mark_current_release() {
     current_parent="$(dirname "${CURRENT_LINK}")"
     mkdir -p "${current_parent}"
     ln -sfn "${DEPLOY_DIR}" "${CURRENT_LINK}"
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && [ "${LEGACY_CURRENT_LINK}" != "${CURRENT_LINK}" ]; then
+        ln -sfn "${DEPLOY_DIR}" "${LEGACY_CURRENT_LINK}"
+    fi
 }
 
 load_deploy_env() {
@@ -730,6 +735,13 @@ resolve_deploy_dir() {
         fi
     fi
 
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && { [ -L "${LEGACY_CURRENT_LINK}" ] || [ -d "${LEGACY_CURRENT_LINK}" ]; }; then
+        if [ -f "${LEGACY_CURRENT_LINK}/docker-compose.yml" ]; then
+            DEPLOY_DIR="${LEGACY_CURRENT_LINK}"
+            return 0
+        fi
+    fi
+
     local latest=""
     latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name "${STACK_DIR_NAME:-$(stack_dir_name "${STACK_NAME}")}" 2>/dev/null | sort | tail -n 1)"
     if [ -n "${latest}" ] && [ -f "${latest}/docker-compose.yml" ]; then
@@ -972,7 +984,7 @@ NODE
 }
 
 compose_pull_with_retry() {
-    local requested_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.19}"
+    local requested_image="${APP_IMAGE:-${OFFICIAL_DOCKERHUB_APP_IMAGE}:4.5.20}"
 
     if is_truthy "${SKIP_DOCKER_PULL}"; then
         print_info "检测到 SKIP_DOCKER_PULL=${SKIP_DOCKER_PULL}，跳过主程序镜像拉取，直接使用本地镜像。"
@@ -1040,6 +1052,10 @@ main() {
     echo ""
     print_success "主程序更新完成。"
     echo "部署目录: ${DEPLOY_DIR}"
+    echo "当前版本链接: ${CURRENT_LINK}"
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && [ "${LEGACY_CURRENT_LINK}" != "${CURRENT_LINK}" ]; then
+        echo "历史兼容链接: ${LEGACY_CURRENT_LINK}"
+    fi
     echo "应用角色: $(current_app_role)"
     echo "Compose 服务: ${COMPOSE_APP_SERVICE}"
     echo "容器名称: ${APP_CONTAINER_NAME}"

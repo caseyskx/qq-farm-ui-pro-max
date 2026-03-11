@@ -18,6 +18,7 @@ export interface Land {
 export const useFarmStore = defineStore('farm', () => {
   const lands = ref<Land[]>([])
   const seeds = ref<any[]>([])
+  const bagSeeds = ref<any[]>([])
   const summary = ref<any>({})
   const loading = ref(false)
 
@@ -40,13 +41,33 @@ export const useFarmStore = defineStore('farm', () => {
   }
 
   async function fetchSeeds(accountId: string) {
-    if (!accountId)
+    if (!accountId) {
+      seeds.value = []
       return
+    }
+    seeds.value = []
     const { data } = await api.get('/api/seeds', {
       headers: { 'x-account-id': accountId },
     })
     if (data && data.ok)
       seeds.value = data.data || []
+  }
+
+  async function fetchPlantableBagSeeds(accountId: string, options: { includeZeroUsable?: boolean, includeLocked?: boolean } = {}) {
+    if (!accountId) {
+      bagSeeds.value = []
+      return
+    }
+    bagSeeds.value = []
+    const { data } = await api.get('/api/bag/plantable-seeds', {
+      headers: { 'x-account-id': accountId },
+      params: {
+        includeZeroUsable: options.includeZeroUsable !== false ? 1 : 0,
+        includeLocked: options.includeLocked === true ? 1 : 0,
+      },
+    })
+    if (data && data.ok)
+      bagSeeds.value = data.data || []
   }
 
   async function operate(accountId: string, opType: string) {
@@ -58,5 +79,5 @@ export const useFarmStore = defineStore('farm', () => {
     await fetchLands(accountId)
   }
 
-  return { lands, summary, seeds, loading, fetchLands, fetchSeeds, operate }
+  return { lands, summary, seeds, bagSeeds, loading, fetchLands, fetchSeeds, fetchPlantableBagSeeds, operate }
 })

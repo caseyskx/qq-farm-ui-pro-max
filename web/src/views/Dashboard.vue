@@ -17,12 +17,14 @@ import { useAccountStore } from '@/stores/account'
 import { useBagStore } from '@/stores/bag'
 import { useSettingStore } from '@/stores/setting'
 import { useStatusStore } from '@/stores/status'
+import { useToastStore } from '@/stores/toast'
 import { localizeRuntimeText } from '@/utils/runtime-text'
 import { DEFAULT_DASHBOARD_VIEW_STATE, fetchViewPreferences, normalizeDashboardViewState, saveViewPreferences } from '@/utils/view-preferences'
 
 const statusStore = useStatusStore()
 const accountStore = useAccountStore()
 const bagStore = useBagStore()
+const toast = useToastStore()
 const {
   status,
   logs: statusLogs,
@@ -38,11 +40,34 @@ const lastBagFetchAt = ref(0)
 const schedulerPreview = ref<any>(null)
 const lastSchedulerFetchAt = ref(0)
 const showAllTasks = ref(false) // 是否显示全部任务（含基础设施任务）
+const runtimeReloadingTarget = ref('')
+const showRuntimeReloadConfirmModal = ref(false)
+const pendingRuntimeReloadTarget = ref<any>(null)
+const runtimeReloadHistoryFilter = ref('')
+const runtimeReloadHistoryResultFilter = ref('')
+const runtimeReloadHistorySourceFilter = ref('')
+const expandedRuntimeReloadHistoryKeys = ref<string[]>([])
 
 // ========== 农场操作预览（仅供今日统计使用） ==========
 const landsPreview = ref<any>(null)
 const lastLandsFetchAt = ref(0)
 const localMatureCountdowns = ref<Record<number, number>>({})
+
+function resetDashboardRuntimePreviewState() {
+  schedulerPreview.value = null
+  landsPreview.value = null
+  runtimeReloadingTarget.value = ''
+  showRuntimeReloadConfirmModal.value = false
+  pendingRuntimeReloadTarget.value = null
+  runtimeReloadHistoryFilter.value = ''
+  runtimeReloadHistoryResultFilter.value = ''
+  runtimeReloadHistorySourceFilter.value = ''
+  expandedRuntimeReloadHistoryKeys.value = []
+  lastSchedulerFetchAt.value = 0
+  lastLandsFetchAt.value = 0
+  localMatureCountdowns.value = {}
+  taskCountdowns.value = {}
+}
 
 const allLogs = computed(() => {
   // 后端已有序并且是在队尾 append，这里只需返回原始数组不须做高频的深拷贝及 sort，极大压低性能消耗解决卡顿
@@ -119,6 +144,19 @@ interface LogDetailChip {
   label: string
   value: string
   tone: LogDetailTone
+}
+
+interface RuntimeReloadTaskSnapshot {
+  name: string
+  kind: string
+  running: boolean
+}
+
+interface RuntimeReloadTaskChange {
+  name: string
+  before: RuntimeReloadTaskSnapshot
+  after: RuntimeReloadTaskSnapshot
+  summary: string
 }
 
 const inventoryModeLabelMap: Record<string, string> = {
@@ -452,12 +490,27 @@ async function refreshBag(force = false) {
 
 // 获取任务队列预览数据
 async function fetchSchedulerPreview(force = false) {
-  if (!currentAccountId.value)
+  if (!currentAccountId.value) {
+    schedulerPreview.value = null
+    runtimeReloadingTarget.value = ''
+    lastSchedulerFetchAt.value = 0
+    taskCountdowns.value = {}
     return
-  if (!currentAccount.value?.running)
+  }
+  if (!currentAccount.value?.running) {
+    schedulerPreview.value = null
+    runtimeReloadingTarget.value = ''
+    lastSchedulerFetchAt.value = 0
+    taskCountdowns.value = {}
     return
-  if (!status.value?.connection?.connected)
+  }
+  if (!status.value?.connection?.connected) {
+    schedulerPreview.value = null
+    runtimeReloadingTarget.value = ''
+    lastSchedulerFetchAt.value = 0
+    taskCountdowns.value = {}
     return
+  }
 
   const now = Date.now()
   if (!force && now - lastSchedulerFetchAt.value < 5000)
@@ -473,18 +526,74 @@ async function fetchSchedulerPreview(force = false) {
     }
   }
   catch {
-    // 静默失败
+    schedulerPreview.value = null
+  }
+}
+
+async function reloadRuntimeModule(target: string, options: Record<string, any> = {}) {
+  const normalizedTarget = String(target || '').trim()
+  if (!normalizedTarget || !currentAccountId.value)
+    return false
+
+  runtimeReloadingTarget.value = normalizedTarget
+  try {
+    const res = await api.post('/api/scheduler/reload', {
+      target: normalizedTarget,
+      options,
+    }, {
+      headers: { 'x-account-id': currentAccountId.value },
+    })
+    if (res.data?.ok) {
+      const modules = Array.isArray(res.data.data?.modules) ? res.data.data.modules : []
+      toast.success(
+        modules.length > 0
+          ? `已热重载 ${getRuntimeReloadTargetLabel(normalizedTarget)}，重建 ${modules.join(' / ')}`
+          : `已热重载 ${getRuntimeReloadTargetLabel(normalizedTarget)}`,
+      )
+      await Promise.all([
+        fetchSchedulerPreview(true),
+        fetchLandsPreview(true),
+        refreshBag(true),
+      ])
+      if (!realtimeConnected.value)
+        await statusStore.fetchStatus(currentAccountId.value)
+      return true
+    }
+    else {
+      toast.error(res.data?.error || `热重载 ${getRuntimeReloadTargetLabel(normalizedTarget)} 失败`)
+      return false
+    }
+  }
+  catch (error: any) {
+    const message = error?.response?.data?.error || error?.message || `热重载 ${getRuntimeReloadTargetLabel(normalizedTarget)} 失败`
+    toast.error(message)
+    return false
+  }
+  finally {
+    runtimeReloadingTarget.value = ''
   }
 }
 
 // 获取土地预览数据
 async function fetchLandsPreview(force = false) {
-  if (!currentAccountId.value)
+  if (!currentAccountId.value) {
+    landsPreview.value = null
+    lastLandsFetchAt.value = 0
+    localMatureCountdowns.value = {}
     return
-  if (!currentAccount.value?.running)
+  }
+  if (!currentAccount.value?.running) {
+    landsPreview.value = null
+    lastLandsFetchAt.value = 0
+    localMatureCountdowns.value = {}
     return
-  if (!status.value?.connection?.connected)
+  }
+  if (!status.value?.connection?.connected) {
+    landsPreview.value = null
+    lastLandsFetchAt.value = 0
+    localMatureCountdowns.value = {}
     return
+  }
 
   const now = Date.now()
   if (!force && now - lastLandsFetchAt.value < 5000)
@@ -508,7 +617,8 @@ async function fetchLandsPreview(force = false) {
     }
   }
   catch {
-    // 静默失败，不影响主流程
+    landsPreview.value = null
+    localMatureCountdowns.value = {}
   }
 }
 
@@ -635,12 +745,395 @@ const hiddenInfrastructureTaskCount = computed(() =>
   mergedSchedulerTasks.value.filter(task => INFRA_TASKS.has(task.name || '')).length,
 )
 const runningSchedulerTaskCount = computed(() => schedulerTasks.value.filter((task: any) => task.running).length)
+const runtimeReloadTargetLabelMap: Record<string, string> = {
+  farm: '农场',
+  friend: '好友',
+  task: '任务',
+  warehouse: '仓库',
+  business: '全部业务',
+}
+const runtimeReloadHistoryFilterOptions = computed(() => [
+  { label: '全部模块族', value: '' },
+  ...Object.entries(runtimeReloadTargetLabelMap).map(([value, label]) => ({ label, value })),
+])
+const runtimeReloadHistoryResultFilterOptions = computed(() => [
+  { label: '全部结果', value: '' },
+  { label: '成功', value: 'ok' },
+  { label: '失败', value: 'error' },
+])
+const reloadableRuntimeTargets = computed(() => {
+  const raw = schedulerPreview.value?.reloadTargets
+  return Array.isArray(raw) ? raw : []
+})
+const runtimeReloadHistoryEntries = computed(() => {
+  const raw = schedulerPreview.value?.reloadHistory
+  return Array.isArray(raw) ? raw : []
+})
+const runtimeReloadHistorySourceFilterOptions = computed(() => {
+  const options = [{ label: '全部来源', value: '' }]
+  const seen = new Set<string>()
+  for (const item of runtimeReloadHistoryEntries.value) {
+    const value = String(item?.source || '').trim()
+    if (!value || seen.has(value))
+      continue
+    seen.add(value)
+    options.push({
+      label: getRuntimeReloadSourceLabel(value),
+      value,
+    })
+  }
+  return options
+})
+const filteredRuntimeReloadHistoryEntries = computed(() => {
+  const normalizedFilter = String(runtimeReloadHistoryFilter.value || '').trim()
+  const resultFilter = String(runtimeReloadHistoryResultFilter.value || '').trim()
+  const sourceFilter = String(runtimeReloadHistorySourceFilter.value || '').trim()
+  return runtimeReloadHistoryEntries.value.filter((item: any) => {
+    if (normalizedFilter && String(item?.target || '').trim() !== normalizedFilter)
+      return false
+    if (resultFilter && String(item?.result || '').trim() !== resultFilter)
+      return false
+    if (sourceFilter && String(item?.source || '').trim() !== sourceFilter)
+      return false
+    return true
+  })
+})
+const runtimeReloadHistorySummary = computed(() => {
+  const items = filteredRuntimeReloadHistoryEntries.value
+  return {
+    total: items.length,
+    success: items.filter((item: any) => String(item?.result || '').trim() !== 'error').length,
+    failure: items.filter((item: any) => String(item?.result || '').trim() === 'error').length,
+  }
+})
+const runtimeReloadError = computed(() => String(schedulerPreview.value?.reloadError || '').trim())
+const runtimeReloadHasCooldownTarget = computed(() =>
+  reloadableRuntimeTargets.value.some((item: any) => Number(item?.cooldownRemainingMs || 0) > 0),
+)
+const latestRuntimeReloadReplay = computed(() => {
+  const historyItem = filteredRuntimeReloadHistoryEntries.value[0]
+  if (historyItem && typeof historyItem === 'object') {
+    const summary = {
+      target: String(historyItem.target || '').trim(),
+      modules: Array.isArray(historyItem.modules) ? [...historyItem.modules] : [],
+      forced: !!historyItem.forced,
+      result: String(historyItem.result || '').trim(),
+      source: String(historyItem.source || '').trim(),
+      startedAt: Math.max(0, Number(historyItem.startedAt) || 0),
+      finishedAt: Math.max(0, Number(historyItem.finishedAt) || 0),
+      durationMs: Math.max(0, Number(historyItem.durationMs) || 0),
+      beforeTaskCount: Math.max(0, Number(historyItem.beforeTaskCount) || 0),
+      beforeRunningTaskCount: Math.max(0, Number(historyItem.beforeRunningTaskCount) || 0),
+      afterTaskCount: Math.max(0, Number(historyItem.afterTaskCount) || 0),
+      afterRunningTaskCount: Math.max(0, Number(historyItem.afterRunningTaskCount) || 0),
+      unifiedSchedulerResumed: historyItem.unifiedSchedulerResumed === true,
+      error: String(historyItem.error || '').trim(),
+    }
+    return {
+      target: summary.target,
+      modules: [...summary.modules],
+      riskLevel: String(historyItem.riskLevel || 'low').trim() || 'low',
+      affectsUnifiedScheduler: historyItem.affectsUnifiedScheduler !== false,
+      lastReloadAt: summary.finishedAt,
+      lastReloadTarget: summary.target,
+      lastReloadSource: summary.source,
+      lastReloadResult: summary.result,
+      lastReloadDurationMs: summary.durationMs,
+      lastReloadSummary: summary,
+    }
+  }
+
+  if (
+    runtimeReloadHistoryEntries.value.length > 0
+    && (
+      !!String(runtimeReloadHistoryFilter.value || '').trim()
+      || !!String(runtimeReloadHistoryResultFilter.value || '').trim()
+      || !!String(runtimeReloadHistorySourceFilter.value || '').trim()
+    )
+  ) {
+    return null
+  }
+
+  const candidates = reloadableRuntimeTargets.value
+    .filter((item: any) => item?.lastReloadSummary && typeof item.lastReloadSummary === 'object')
+    .filter((item: any) => {
+      const summaryTarget = String(item?.lastReloadSummary?.target || item?.lastReloadTarget || '').trim()
+      const normalizedFilter = String(runtimeReloadHistoryFilter.value || '').trim()
+      if (normalizedFilter && normalizedFilter !== String(item?.target || '').trim())
+        return false
+      return !summaryTarget || summaryTarget === item.target
+    })
+    .sort((a: any, b: any) => {
+      const left = Number(a?.lastReloadSummary?.finishedAt || a?.lastReloadAt || 0)
+      const right = Number(b?.lastReloadSummary?.finishedAt || b?.lastReloadAt || 0)
+      return right - left
+    })
+
+  return candidates[0] || null
+})
+const runtimeReloadHistoryList = computed(() => {
+  if (filteredRuntimeReloadHistoryEntries.value.length <= 1)
+    return []
+  return filteredRuntimeReloadHistoryEntries.value.slice(1)
+})
 const dashboardLogFilterSummary = computed(() => [
   `模块 ${modules.find(option => option.value === filter.value.module)?.label || '所有模块'}`,
   `事件 ${events.find(option => option.value === filter.value.event)?.label || '所有事件'}`,
   filter.value.isWarn === 'warn' ? '仅告警' : filter.value.isWarn === 'info' ? '仅普通' : '全部日志',
   filter.value.keyword ? `关键词 ${filter.value.keyword}` : '无关键词过滤',
 ])
+
+function getRuntimeReloadTargetLabel(target: string) {
+  const normalized = String(target || '').trim()
+  return runtimeReloadTargetLabelMap[normalized] || normalized || '未知模块'
+}
+
+function getRuntimeReloadRiskLabel(level: string) {
+  if (level === 'high')
+    return '高影响'
+  if (level === 'medium')
+    return '中影响'
+  return '低影响'
+}
+
+function getRuntimeReloadRiskClass(level: string) {
+  if (level === 'high')
+    return 'dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--danger'
+  if (level === 'medium')
+    return 'dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--warning'
+  return 'dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--info'
+}
+
+function getRuntimeReloadReplayResultLabel(result: string) {
+  return result === 'error' ? '最近一次失败' : '最近一次成功'
+}
+
+function getRuntimeReloadReplayResultClass(result: string) {
+  if (result === 'error')
+    return 'dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--danger'
+  return 'dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--info'
+}
+
+function getRuntimeReloadSourceLabel(source: string) {
+  const normalized = String(source || '').trim()
+  if (normalized === 'dashboard_confirm')
+    return '控制台确认'
+  if (normalized === 'admin_api')
+    return '管理接口'
+  if (normalized === 'runtime_reload')
+    return '运行时接口'
+  return normalized || '未知来源'
+}
+
+function sanitizeRuntimeReloadExportFilePart(value: string) {
+  return String(value || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'all'
+}
+
+function exportRuntimeReloadHistory() {
+  const items = filteredRuntimeReloadHistoryEntries.value
+  if (!items.length) {
+    toast.error('当前筛选条件下没有可导出的热重载历史')
+    return
+  }
+  if (typeof window === 'undefined' || typeof document === 'undefined' || typeof URL === 'undefined') {
+    toast.error('当前环境不支持导出热重载历史')
+    return
+  }
+
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    accountId: currentAccountId.value || '',
+    filters: {
+      target: runtimeReloadHistoryFilter.value || '',
+      result: runtimeReloadHistoryResultFilter.value || '',
+      source: runtimeReloadHistorySourceFilter.value || '',
+    },
+    summary: runtimeReloadHistorySummary.value,
+    items,
+  }
+  const filename = [
+    'runtime-reload-history',
+    sanitizeRuntimeReloadExportFilePart(String(currentAccountId.value || 'account')),
+    sanitizeRuntimeReloadExportFilePart(String(runtimeReloadHistoryFilter.value || 'all-targets')),
+    sanitizeRuntimeReloadExportFilePart(String(runtimeReloadHistoryResultFilter.value || 'all-results')),
+    sanitizeRuntimeReloadExportFilePart(String(runtimeReloadHistorySourceFilter.value || 'all-sources')),
+    Date.now(),
+  ].join('-') + '.json'
+
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+    type: 'application/json;charset=utf-8',
+  })
+  const href = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = href
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.setTimeout(() => URL.revokeObjectURL(href), 0)
+  toast.success(`已导出 ${items.length} 条热重载历史`)
+}
+
+function getRuntimeReloadHistoryItemKey(item: any) {
+  return [
+    Number(item?.finishedAt || item?.startedAt || 0),
+    String(item?.target || '').trim(),
+    String(item?.source || '').trim(),
+    String(item?.result || '').trim(),
+  ].join(':')
+}
+
+function toggleRuntimeReloadHistoryDetail(item: any) {
+  const key = getRuntimeReloadHistoryItemKey(item)
+  if (!key)
+    return
+  if (expandedRuntimeReloadHistoryKeys.value.includes(key)) {
+    expandedRuntimeReloadHistoryKeys.value = expandedRuntimeReloadHistoryKeys.value.filter(itemKey => itemKey !== key)
+    return
+  }
+  expandedRuntimeReloadHistoryKeys.value = [...expandedRuntimeReloadHistoryKeys.value, key]
+}
+
+function isRuntimeReloadHistoryExpanded(item: any) {
+  return expandedRuntimeReloadHistoryKeys.value.includes(getRuntimeReloadHistoryItemKey(item))
+}
+
+function getRuntimeReloadTaskKindLabel(kind: string) {
+  return String(kind || '').trim() === 'interval' ? '循环' : '单次'
+}
+
+function normalizeRuntimeReloadHistoryTasks(raw: any): RuntimeReloadTaskSnapshot[] {
+  return Array.isArray(raw)
+    ? raw
+      .map((task: any) => ({
+        name: String(task?.name || '').trim(),
+        kind: String(task?.kind || 'timeout').trim() || 'timeout',
+        running: !!task?.running,
+      }))
+      .filter(task => !!task.name)
+    : []
+}
+
+function getRuntimeReloadHistoryTaskDiff(item: any) {
+  const beforeTasks = normalizeRuntimeReloadHistoryTasks(item?.beforeTasks)
+  const afterTasks = normalizeRuntimeReloadHistoryTasks(item?.afterTasks)
+  const beforeMap = new Map(beforeTasks.map(task => [task.name, task]))
+  const afterMap = new Map(afterTasks.map(task => [task.name, task]))
+  const added = afterTasks.filter(task => !beforeMap.has(task.name))
+  const removed = beforeTasks.filter(task => !afterMap.has(task.name))
+  const changed = afterTasks
+    .filter(task => beforeMap.has(task.name))
+    .map((task): RuntimeReloadTaskChange | null => {
+      const beforeTask = beforeMap.get(task.name)
+      if (!beforeTask)
+        return null
+      const deltas: string[] = []
+      if (beforeTask.kind !== task.kind)
+        deltas.push(`${getRuntimeReloadTaskKindLabel(beforeTask.kind)} -> ${getRuntimeReloadTaskKindLabel(task.kind)}`)
+      if (beforeTask.running !== task.running)
+        deltas.push(`${beforeTask.running ? '执行中' : '等待中'} -> ${task.running ? '执行中' : '等待中'}`)
+      if (!deltas.length)
+        return null
+      return {
+        name: task.name,
+        before: beforeTask,
+        after: task,
+        summary: deltas.join('，'),
+      }
+    })
+    .filter((task): task is RuntimeReloadTaskChange => task !== null)
+
+  return {
+    added,
+    removed,
+    changed,
+  }
+}
+
+watch(
+  [runtimeReloadHistoryFilter, runtimeReloadHistoryResultFilter, runtimeReloadHistorySourceFilter],
+  () => {
+    expandedRuntimeReloadHistoryKeys.value = []
+  },
+)
+
+function formatRuntimeReloadQueueDelta(beforeValue: unknown, afterValue: unknown) {
+  const before = Math.max(0, Number(beforeValue) || 0)
+  const after = Math.max(0, Number(afterValue) || 0)
+  return `${before} -> ${after}`
+}
+
+function formatRuntimeReloadDuration(value: unknown) {
+  const totalMs = Math.max(0, Number(value) || 0)
+  if (!totalMs)
+    return '0 秒'
+
+  const totalSec = Math.ceil(totalMs / 1000)
+  if (totalSec < 60)
+    return `${totalSec} 秒`
+
+  const minutes = Math.floor(totalSec / 60)
+  const seconds = totalSec % 60
+  return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分钟`
+}
+
+function formatRuntimeReloadTimestamp(value: unknown) {
+  const ts = Number(value) || 0
+  if (!ts)
+    return '暂无记录'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(ts)
+}
+
+function openRuntimeReloadConfirm(item: any) {
+  pendingRuntimeReloadTarget.value = item
+  showRuntimeReloadConfirmModal.value = true
+}
+
+function closeRuntimeReloadConfirm() {
+  if (runtimeReloadingTarget.value)
+    return
+  showRuntimeReloadConfirmModal.value = false
+  pendingRuntimeReloadTarget.value = null
+}
+
+async function confirmRuntimeReload() {
+  const item = pendingRuntimeReloadTarget.value
+  if (!item)
+    return
+
+  const success = await reloadRuntimeModule(item.target, {
+    force: !!item.inCooldown,
+    source: 'dashboard_confirm',
+  })
+  if (success)
+    closeRuntimeReloadConfirm()
+}
+
+// Keep template-only helpers visible to vue-tsc in this workspace.
+void [
+  getRuntimeReloadRiskLabel,
+  getRuntimeReloadRiskClass,
+  getRuntimeReloadReplayResultLabel,
+  getRuntimeReloadReplayResultClass,
+  getRuntimeReloadSourceLabel,
+  exportRuntimeReloadHistory,
+  getRuntimeReloadHistoryItemKey,
+  toggleRuntimeReloadHistoryDetail,
+  isRuntimeReloadHistoryExpanded,
+  getRuntimeReloadTaskKindLabel,
+  getRuntimeReloadHistoryTaskDiff,
+  formatRuntimeReloadQueueDelta,
+  formatRuntimeReloadDuration,
+  formatRuntimeReloadTimestamp,
+  confirmRuntimeReload,
+]
 
 // 任务元数据：中文名 + 操作步骤
 interface TaskMeta {
@@ -1154,6 +1647,7 @@ async function hydrateDashboardViewState() {
 
 // 【修复闪烁】监听 accountId 字符串值而非 currentAccount 对象引用
 watch(() => currentAccountId.value, () => {
+  resetDashboardRuntimePreviewState()
   statusStore.clearLogs() // 【修复串日志】重置时清空上个账号挂载在DOM内存中的遗留日志
   refresh()
 })
@@ -1163,6 +1657,9 @@ watch(() => status.value?.connection?.connected, (connected) => {
     refreshBag(true)
     fetchLandsPreview(true)
     fetchSchedulerPreview(true)
+  }
+  else {
+    resetDashboardRuntimePreviewState()
   }
 })
 
@@ -1598,11 +2095,11 @@ async function handleDashboardTrialRenew() {
       <div class="flex flex-col gap-4 md:min-w-0 md:w-[60%] md:overflow-hidden">
         <!-- 任务队列预览 -->
         <div class="glass-panel dashboard-task-panel flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg px-4 py-3 shadow">
-          <div class="dashboard-task-panel__header mb-1.5 shrink-0">
-            <div class="dashboard-task-panel__heading min-w-0">
-              <h3 class="dashboard-task-panel__title glass-text-main flex items-center gap-2 text-base font-medium">
-                <div class="i-carbon-task text-indigo-500" />
-                <span>任务队列预览</span>
+	          <div class="dashboard-task-panel__header mb-1.5 shrink-0">
+	            <div class="dashboard-task-panel__heading min-w-0">
+	              <h3 class="dashboard-task-panel__title glass-text-main flex items-center gap-2 text-base font-medium">
+	                <div class="i-carbon-task text-indigo-500" />
+	                <span>任务队列预览</span>
               </h3>
               <p class="dashboard-task-panel__desc hidden md:block">
                 紧凑展示当前账号的调度队列，优先把运行中和即将触发的任务排在前面。
@@ -1610,21 +2107,333 @@ async function handleDashboardTrialRenew() {
             </div>
             <div v-if="allSchedulerTaskCount" class="dashboard-task-meta ui-bulk-actions text-xs font-normal">
               <span class="dashboard-task-pill dashboard-task-pill--count">总任务 {{ allSchedulerTaskCount }}</span>
-              <span class="dashboard-task-pill dashboard-task-pill--running">运行中 {{ runningSchedulerTaskCount }}</span>
-              <button
-                v-if="hiddenInfrastructureTaskCount"
-                class="dashboard-toggle-btn rounded-full px-2 py-0.5 text-[10px] transition-colors"
-                :class="getShowAllTasksButtonClass()"
+	              <span class="dashboard-task-pill dashboard-task-pill--running">运行中 {{ runningSchedulerTaskCount }}</span>
+	              <button
+	                v-if="hiddenInfrastructureTaskCount"
+	                class="dashboard-toggle-btn rounded-full px-2 py-0.5 text-[10px] transition-colors"
+	                :class="getShowAllTasksButtonClass()"
                 @click="showAllTasks = !showAllTasks"
               >
                 {{ showAllTasks ? `收起内部 ${hiddenInfrastructureTaskCount}` : `已收起 ${hiddenInfrastructureTaskCount}` }}
-              </button>
-            </div>
-          </div>
+	              </button>
+	            </div>
+	          </div>
 
-          <div v-if="!schedulerPreview" class="glass-text-muted flex flex-1 items-center justify-center py-6 text-center text-sm">
-            <div v-if="!status?.connection?.connected">
-              账号未连接，无法获取任务队列
+	          <div v-if="reloadableRuntimeTargets.length || runtimeReloadError" class="dashboard-runtime-reload-row mb-3 shrink-0">
+	            <div class="dashboard-runtime-reload-row__label">
+	              <span class="dashboard-runtime-reload-row__title">运行时热重载</span>
+	              <span class="dashboard-runtime-reload-row__desc">保持当前连接，只重建业务模块族。</span>
+	            </div>
+	            <div v-if="reloadableRuntimeTargets.length" class="dashboard-runtime-reload-row__actions">
+	              <BaseButton
+	                v-for="item in reloadableRuntimeTargets"
+	                :key="item.target"
+	                variant="outline"
+	                size="sm"
+	                class="dashboard-runtime-reload-btn"
+	                :title="item.queueImpactSummary || item.description || ''"
+	                :loading="runtimeReloadingTarget === item.target"
+	                :loading-label="`${getRuntimeReloadTargetLabel(item.target)}重载中`"
+	                :disabled="!!runtimeReloadingTarget"
+	                @click="openRuntimeReloadConfirm(item)"
+	              >
+	                {{ getRuntimeReloadTargetLabel(item.target) }}<span v-if="item.inCooldown"> · 冷却中</span>
+	              </BaseButton>
+	            </div>
+	            <p v-else-if="runtimeReloadError" class="dashboard-runtime-reload-row__error">
+	              {{ runtimeReloadError }}
+	            </p>
+	            <p v-if="runtimeReloadHasCooldownTarget" class="dashboard-runtime-reload-row__hint">
+	              部分模块族刚完成热重载；再次执行时会先显示冷却提示，并要求显式确认。
+	            </p>
+	          </div>
+
+            <div v-if="latestRuntimeReloadReplay" class="dashboard-runtime-reload-replay mb-3 shrink-0">
+              <div class="dashboard-runtime-reload-replay__header">
+                <div class="dashboard-runtime-reload-replay__label">
+                  <span class="dashboard-runtime-reload-replay__title">最近一次热重载回放</span>
+                  <span class="dashboard-runtime-reload-replay__meta">
+                    {{ formatRuntimeReloadTimestamp(latestRuntimeReloadReplay.lastReloadSummary?.finishedAt || latestRuntimeReloadReplay.lastReloadAt) }}
+                    ·
+                    {{ getRuntimeReloadSourceLabel(latestRuntimeReloadReplay.lastReloadSummary?.source || latestRuntimeReloadReplay.lastReloadSource) }}
+                  </span>
+                </div>
+                <div class="dashboard-runtime-reload-replay__badges">
+                  <span :class="getRuntimeReloadRiskClass(latestRuntimeReloadReplay.riskLevel)">
+                    {{ getRuntimeReloadRiskLabel(latestRuntimeReloadReplay.riskLevel) }}
+                  </span>
+                  <span :class="getRuntimeReloadReplayResultClass(latestRuntimeReloadReplay.lastReloadSummary?.result || latestRuntimeReloadReplay.lastReloadResult)">
+                    {{ getRuntimeReloadReplayResultLabel(latestRuntimeReloadReplay.lastReloadSummary?.result || latestRuntimeReloadReplay.lastReloadResult) }}
+                  </span>
+                  <span
+                    v-if="latestRuntimeReloadReplay.lastReloadSummary?.forced"
+                    class="dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--neutral"
+                  >
+                    强制执行
+                  </span>
+                </div>
+              </div>
+
+              <dl class="dashboard-runtime-reload-replay__grid">
+                <div class="dashboard-runtime-reload-replay__item">
+                  <dt>目标模块族</dt>
+                  <dd>{{ getRuntimeReloadTargetLabel(latestRuntimeReloadReplay.lastReloadSummary?.target || latestRuntimeReloadReplay.target) }}</dd>
+                </div>
+                <div class="dashboard-runtime-reload-replay__item">
+                  <dt>耗时</dt>
+                  <dd>{{ formatRuntimeReloadDuration(latestRuntimeReloadReplay.lastReloadSummary?.durationMs || latestRuntimeReloadReplay.lastReloadDurationMs) }}</dd>
+                </div>
+                <div class="dashboard-runtime-reload-replay__item">
+                  <dt>统一调度</dt>
+                  <dd>
+                    {{
+                      latestRuntimeReloadReplay.affectsUnifiedScheduler
+                        ? (latestRuntimeReloadReplay.lastReloadSummary?.unifiedSchedulerResumed ? '已恢复' : '未恢复或无需恢复')
+                        : '未受影响'
+                    }}
+                  </dd>
+                </div>
+                <div class="dashboard-runtime-reload-replay__item">
+                  <dt>队列变化</dt>
+                  <dd>
+                    {{
+                      formatRuntimeReloadQueueDelta(
+                        latestRuntimeReloadReplay.lastReloadSummary?.beforeTaskCount,
+                        latestRuntimeReloadReplay.lastReloadSummary?.afterTaskCount,
+                      )
+                    }}
+                  </dd>
+                </div>
+                <div class="dashboard-runtime-reload-replay__item">
+                  <dt>运行中变化</dt>
+                  <dd>
+                    {{
+                      formatRuntimeReloadQueueDelta(
+                        latestRuntimeReloadReplay.lastReloadSummary?.beforeRunningTaskCount,
+                        latestRuntimeReloadReplay.lastReloadSummary?.afterRunningTaskCount,
+                      )
+                    }}
+                  </dd>
+                </div>
+                <div class="dashboard-runtime-reload-replay__item dashboard-runtime-reload-replay__item--full">
+                  <dt>重建模块</dt>
+                  <dd>{{ latestRuntimeReloadReplay.lastReloadSummary?.modules?.join(' / ') || latestRuntimeReloadReplay.modules?.join(' / ') || '-' }}</dd>
+                </div>
+              </dl>
+
+              <p
+                v-if="latestRuntimeReloadReplay.lastReloadSummary?.error"
+                class="dashboard-runtime-reload-replay__error"
+              >
+                最近一次返回错误：{{ latestRuntimeReloadReplay.lastReloadSummary.error }}
+              </p>
+            </div>
+
+            <div v-if="runtimeReloadHistoryEntries.length" class="dashboard-runtime-reload-history mb-3 shrink-0">
+              <div class="dashboard-runtime-reload-history__header">
+                <div class="dashboard-runtime-reload-history__label">
+                  <span class="dashboard-runtime-reload-history__title">近期热重载历史</span>
+                  <span class="dashboard-runtime-reload-history__meta">
+                    保留最近 {{ runtimeReloadHistoryEntries.length }} 次执行记录
+                    <span v-if="runtimeReloadHistoryFilter"> · {{ getRuntimeReloadTargetLabel(runtimeReloadHistoryFilter) }}</span>
+                    <span v-if="runtimeReloadHistoryResultFilter"> · {{ runtimeReloadHistoryResultFilter === 'error' ? '仅失败' : '仅成功' }}</span>
+                    <span v-if="runtimeReloadHistorySourceFilter"> · {{ getRuntimeReloadSourceLabel(runtimeReloadHistorySourceFilter) }}</span>
+                  </span>
+                </div>
+                <div class="dashboard-runtime-reload-history__controls">
+                  <BaseSelect
+                    v-model="runtimeReloadHistoryFilter"
+                    :options="runtimeReloadHistoryFilterOptions"
+                    class="dashboard-runtime-reload-history__filter"
+                  />
+                  <BaseSelect
+                    v-model="runtimeReloadHistoryResultFilter"
+                    :options="runtimeReloadHistoryResultFilterOptions"
+                    class="dashboard-runtime-reload-history__filter"
+                  />
+                  <BaseSelect
+                    v-model="runtimeReloadHistorySourceFilter"
+                    :options="runtimeReloadHistorySourceFilterOptions"
+                    class="dashboard-runtime-reload-history__filter"
+                  />
+                  <BaseButton
+                    variant="outline"
+                    size="sm"
+                    class="dashboard-runtime-reload-history__export"
+                    @click="exportRuntimeReloadHistory"
+                  >
+                    导出 JSON
+                  </BaseButton>
+                </div>
+              </div>
+
+              <div class="dashboard-runtime-reload-history__summary">
+                <span class="dashboard-runtime-reload-history__summary-chip">当前 {{ runtimeReloadHistorySummary.total }} 条</span>
+                <span class="dashboard-runtime-reload-history__summary-chip dashboard-runtime-reload-history__summary-chip--success">
+                  成功 {{ runtimeReloadHistorySummary.success }}
+                </span>
+                <span class="dashboard-runtime-reload-history__summary-chip dashboard-runtime-reload-history__summary-chip--danger">
+                  失败 {{ runtimeReloadHistorySummary.failure }}
+                </span>
+              </div>
+
+              <div class="dashboard-runtime-reload-history__list">
+                <article
+                  v-for="item in runtimeReloadHistoryList"
+                  :key="getRuntimeReloadHistoryItemKey(item)"
+                  class="dashboard-runtime-reload-history__item"
+                >
+                  <div class="dashboard-runtime-reload-history__top">
+                    <div class="dashboard-runtime-reload-history__item-label">
+                      <span class="dashboard-runtime-reload-history__item-title">
+                        {{ getRuntimeReloadTargetLabel(item.target) }}
+                      </span>
+                      <span class="dashboard-runtime-reload-history__item-meta">
+                        {{ formatRuntimeReloadTimestamp(item.finishedAt || item.startedAt) }} · {{ getRuntimeReloadSourceLabel(item.source) }}
+                      </span>
+                    </div>
+                    <div class="dashboard-runtime-reload-history__badges">
+                      <span :class="getRuntimeReloadReplayResultClass(item.result)">
+                        {{ getRuntimeReloadReplayResultLabel(item.result) }}
+                      </span>
+                      <span :class="getRuntimeReloadRiskClass(item.riskLevel)">
+                        {{ getRuntimeReloadRiskLabel(item.riskLevel) }}
+                      </span>
+                      <span
+                        v-if="item.forced"
+                        class="dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--neutral"
+                      >
+                        强制执行
+                      </span>
+                      <BaseButton
+                        variant="outline"
+                        size="sm"
+                        class="dashboard-runtime-reload-history__toggle"
+                        @click="toggleRuntimeReloadHistoryDetail(item)"
+                      >
+                        {{ isRuntimeReloadHistoryExpanded(item) ? '收起 diff' : '查看 diff' }}
+                      </BaseButton>
+                    </div>
+                  </div>
+
+                  <dl class="dashboard-runtime-reload-history__metrics">
+                    <div class="dashboard-runtime-reload-history__metric">
+                      <dt>耗时</dt>
+                      <dd>{{ formatRuntimeReloadDuration(item.durationMs) }}</dd>
+                    </div>
+                    <div class="dashboard-runtime-reload-history__metric">
+                      <dt>队列</dt>
+                      <dd>{{ formatRuntimeReloadQueueDelta(item.beforeTaskCount, item.afterTaskCount) }}</dd>
+                    </div>
+                    <div class="dashboard-runtime-reload-history__metric">
+                      <dt>运行中</dt>
+                      <dd>{{ formatRuntimeReloadQueueDelta(item.beforeRunningTaskCount, item.afterRunningTaskCount) }}</dd>
+                    </div>
+                    <div class="dashboard-runtime-reload-history__metric">
+                      <dt>统一调度</dt>
+                      <dd>
+                        {{
+                          item.affectsUnifiedScheduler
+                            ? (item.unifiedSchedulerResumed ? '已恢复' : '未恢复或无需恢复')
+                            : '未受影响'
+                        }}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <p class="dashboard-runtime-reload-history__modules">
+                    {{ item.modules?.join(' / ') || '-' }}
+                  </p>
+
+                  <p
+                    v-if="item.error"
+                    class="dashboard-runtime-reload-history__error"
+                  >
+                    {{ item.error }}
+                  </p>
+
+                  <div
+                    v-if="isRuntimeReloadHistoryExpanded(item)"
+                    class="dashboard-runtime-reload-history__diff"
+                  >
+                    <div class="dashboard-runtime-reload-history__diff-summary">
+                      <span class="dashboard-runtime-reload-history__diff-chip dashboard-runtime-reload-history__diff-chip--added">
+                        新增 {{ getRuntimeReloadHistoryTaskDiff(item).added.length }}
+                      </span>
+                      <span class="dashboard-runtime-reload-history__diff-chip dashboard-runtime-reload-history__diff-chip--removed">
+                        移除 {{ getRuntimeReloadHistoryTaskDiff(item).removed.length }}
+                      </span>
+                      <span class="dashboard-runtime-reload-history__diff-chip dashboard-runtime-reload-history__diff-chip--changed">
+                        状态变化 {{ getRuntimeReloadHistoryTaskDiff(item).changed.length }}
+                      </span>
+                    </div>
+
+                    <div
+                      v-if="getRuntimeReloadHistoryTaskDiff(item).added.length"
+                      class="dashboard-runtime-reload-history__diff-group"
+                    >
+                      <p class="dashboard-runtime-reload-history__diff-title">新增任务</p>
+                      <div class="dashboard-runtime-reload-history__task-list">
+                        <span
+                          v-for="task in getRuntimeReloadHistoryTaskDiff(item).added"
+                          :key="`added-${task.name}`"
+                          class="dashboard-runtime-reload-history__task-pill dashboard-runtime-reload-history__task-pill--added"
+                        >
+                          {{ task.name }} · {{ getRuntimeReloadTaskKindLabel(task.kind) }} · {{ task.running ? '执行中' : '等待中' }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="getRuntimeReloadHistoryTaskDiff(item).removed.length"
+                      class="dashboard-runtime-reload-history__diff-group"
+                    >
+                      <p class="dashboard-runtime-reload-history__diff-title">移除任务</p>
+                      <div class="dashboard-runtime-reload-history__task-list">
+                        <span
+                          v-for="task in getRuntimeReloadHistoryTaskDiff(item).removed"
+                          :key="`removed-${task.name}`"
+                          class="dashboard-runtime-reload-history__task-pill dashboard-runtime-reload-history__task-pill--removed"
+                        >
+                          {{ task.name }} · {{ getRuntimeReloadTaskKindLabel(task.kind) }} · {{ task.running ? '执行中' : '等待中' }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="getRuntimeReloadHistoryTaskDiff(item).changed.length"
+                      class="dashboard-runtime-reload-history__diff-group"
+                    >
+                      <p class="dashboard-runtime-reload-history__diff-title">状态变化</p>
+                      <div class="dashboard-runtime-reload-history__task-list">
+                        <span
+                          v-for="task in getRuntimeReloadHistoryTaskDiff(item).changed"
+                          :key="`changed-${task.name}`"
+                          class="dashboard-runtime-reload-history__task-pill dashboard-runtime-reload-history__task-pill--changed"
+                        >
+                          {{ task.name }} · {{ task.summary }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p
+                      v-if="!getRuntimeReloadHistoryTaskDiff(item).added.length && !getRuntimeReloadHistoryTaskDiff(item).removed.length && !getRuntimeReloadHistoryTaskDiff(item).changed.length"
+                      class="dashboard-runtime-reload-history__diff-empty"
+                    >
+                      任务名和运行状态没有可见变化，当前这次重载主要是模块实例与监听器重建。
+                    </p>
+                  </div>
+                </article>
+              </div>
+
+              <p v-if="!runtimeReloadHistoryList.length" class="dashboard-runtime-reload-history__empty">
+                当前筛选下没有更多历史记录；上方回放卡片展示的是最新一条。
+              </p>
+            </div>
+
+	          <div v-if="!schedulerPreview" class="glass-text-muted flex flex-1 items-center justify-center py-6 text-center text-sm">
+	            <div v-if="!status?.connection?.connected">
+	              账号未连接，无法获取任务队列
             </div>
             <div v-else>
               正在加载任务队列...
@@ -1729,6 +2538,70 @@ async function handleDashboardTrialRenew() {
     </div>
 
     <!-- 任务详情弹窗 -->
+    <ConfirmModal
+      :show="showRuntimeReloadConfirmModal"
+      :title="pendingRuntimeReloadTarget ? `确认热重载 ${getRuntimeReloadTargetLabel(pendingRuntimeReloadTarget.target)}` : '确认热重载'"
+      :confirm-text="pendingRuntimeReloadTarget?.inCooldown ? '仍要强制热重载' : '确认热重载'"
+      :type="pendingRuntimeReloadTarget?.inCooldown || pendingRuntimeReloadTarget?.riskLevel === 'high' ? 'danger' : 'primary'"
+      :loading="runtimeReloadingTarget === pendingRuntimeReloadTarget?.target"
+      @confirm="confirmRuntimeReload"
+      @cancel="closeRuntimeReloadConfirm"
+    >
+      <div v-if="pendingRuntimeReloadTarget" class="dashboard-runtime-reload-modal">
+        <div class="dashboard-runtime-reload-modal__badges">
+          <span :class="getRuntimeReloadRiskClass(pendingRuntimeReloadTarget.riskLevel)">
+            {{ getRuntimeReloadRiskLabel(pendingRuntimeReloadTarget.riskLevel) }}
+          </span>
+          <span class="dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--neutral">
+            {{ pendingRuntimeReloadTarget.affectsUnifiedScheduler ? '会暂停统一调度' : '仅重建模块定时器' }}
+          </span>
+          <span
+            v-if="pendingRuntimeReloadTarget.inCooldown"
+            class="dashboard-runtime-reload-modal__badge dashboard-runtime-reload-modal__badge--warning"
+          >
+            冷却剩余 {{ formatRuntimeReloadDuration(pendingRuntimeReloadTarget.cooldownRemainingMs) }}
+          </span>
+        </div>
+
+        <p class="dashboard-runtime-reload-modal__desc">
+          {{ pendingRuntimeReloadTarget.description }}
+        </p>
+        <p class="dashboard-runtime-reload-modal__risk">
+          {{ pendingRuntimeReloadTarget.riskSummary || '会重建当前模块族的监听、定时器与运行时状态。' }}
+        </p>
+
+        <dl class="dashboard-runtime-reload-modal__grid">
+          <div class="dashboard-runtime-reload-modal__item">
+            <dt>重建模块</dt>
+            <dd>{{ pendingRuntimeReloadTarget.modules?.join(' / ') || '-' }}</dd>
+          </div>
+          <div class="dashboard-runtime-reload-modal__item">
+            <dt>影响分组</dt>
+            <dd>{{ pendingRuntimeReloadTarget.affectedTaskGroups?.join(' / ') || '未标记' }}</dd>
+          </div>
+          <div class="dashboard-runtime-reload-modal__item dashboard-runtime-reload-modal__item--full">
+            <dt>队列影响</dt>
+            <dd>{{ pendingRuntimeReloadTarget.queueImpactSummary || '暂无额外说明' }}</dd>
+          </div>
+          <div class="dashboard-runtime-reload-modal__item">
+            <dt>上次热重载</dt>
+            <dd>{{ formatRuntimeReloadTimestamp(pendingRuntimeReloadTarget.lastReloadAt) }}</dd>
+          </div>
+          <div class="dashboard-runtime-reload-modal__item">
+            <dt>上次来源</dt>
+            <dd>{{ pendingRuntimeReloadTarget.lastReloadSource || '暂无记录' }}</dd>
+          </div>
+        </dl>
+
+        <p
+          v-if="pendingRuntimeReloadTarget.inCooldown"
+          class="dashboard-runtime-reload-modal__warning"
+        >
+          该模块族最近刚执行过热重载。继续确认会以强制模式执行，跳过冷却保护。
+        </p>
+      </div>
+    </ConfirmModal>
+
     <ConfirmModal
       :show="showTaskDetailModal"
       :title="selectedTask ? getTaskDisplayName(selectedTask.name) : '任务详情'"
@@ -1898,6 +2771,467 @@ async function handleDashboardTrialRenew() {
 .dashboard-log-chip-row,
 .dashboard-task-meta {
   min-width: 0;
+}
+
+.dashboard-runtime-reload-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.82rem 0.9rem;
+  border: 1px dashed color-mix(in srgb, var(--ui-brand-500) 24%, var(--ui-border-subtle) 76%);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-brand-500) 6%, var(--ui-bg-surface) 94%);
+}
+
+.dashboard-runtime-reload-row__label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.dashboard-runtime-reload-row__title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ui-text-1);
+}
+
+.dashboard-runtime-reload-row__desc {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dashboard-runtime-reload-btn {
+  min-width: 5.2rem;
+}
+
+.dashboard-runtime-reload-row__error {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--ui-status-warning) 72%, var(--ui-text-1) 28%);
+}
+
+.dashboard-runtime-reload-row__hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ui-text-3);
+}
+
+.dashboard-runtime-reload-replay {
+  display: grid;
+  gap: 0.82rem;
+  padding: 0.88rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle) 82%, transparent);
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--ui-status-info) 8%, transparent), transparent 55%),
+    color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent);
+}
+
+.dashboard-runtime-reload-replay__header {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.dashboard-runtime-reload-replay__label {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.dashboard-runtime-reload-replay__title {
+  font-size: 0.8rem;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--ui-text-1);
+}
+
+.dashboard-runtime-reload-replay__meta {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-replay__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dashboard-runtime-reload-replay__grid {
+  display: grid;
+  gap: 0.72rem;
+  margin: 0;
+}
+
+.dashboard-runtime-reload-replay__item {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dashboard-runtime-reload-replay__item dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ui-text-3);
+}
+
+.dashboard-runtime-reload-replay__item dd {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--ui-text-1);
+}
+
+.dashboard-runtime-reload-replay__error {
+  margin: 0;
+  border: 1px dashed color-mix(in srgb, var(--ui-status-danger) 28%, transparent);
+  border-radius: 0.9rem;
+  padding: 0.72rem 0.84rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--ui-status-danger) 82%, var(--ui-text-1) 18%);
+  background: color-mix(in srgb, var(--ui-status-danger) 7%, transparent);
+}
+
+.dashboard-runtime-reload-history {
+  display: grid;
+  gap: 0.78rem;
+}
+
+.dashboard-runtime-reload-history__header,
+.dashboard-runtime-reload-history__label {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.dashboard-runtime-reload-history__filter {
+  min-width: 8.6rem;
+}
+
+.dashboard-runtime-reload-history__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dashboard-runtime-reload-history__export {
+  min-width: 6.2rem;
+}
+
+.dashboard-runtime-reload-history__title {
+  font-size: 0.8rem;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--ui-text-1);
+}
+
+.dashboard-runtime-reload-history__meta {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ui-text-3);
+}
+
+.dashboard-runtime-reload-history__list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.dashboard-runtime-reload-history__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.dashboard-runtime-reload-history__summary-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  padding: 0.22rem 0.64rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 84%, transparent);
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-history__summary-chip--success {
+  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1) 22%);
+}
+
+.dashboard-runtime-reload-history__summary-chip--danger {
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1) 22%);
+}
+
+.dashboard-runtime-reload-history__empty {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--ui-text-3);
+}
+
+.dashboard-runtime-reload-history__item {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.82rem 0.88rem;
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle) 82%, transparent);
+  border-radius: 0.95rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 78%, transparent);
+}
+
+.dashboard-runtime-reload-history__top {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.dashboard-runtime-reload-history__item-label {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.dashboard-runtime-reload-history__item-title {
+  font-size: 0.78rem;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--ui-text-1);
+}
+
+.dashboard-runtime-reload-history__item-meta {
+  font-size: 0.71rem;
+  line-height: 1.35;
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-history__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.dashboard-runtime-reload-history__toggle {
+  min-width: 5.3rem;
+}
+
+.dashboard-runtime-reload-history__metrics {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.dashboard-runtime-reload-history__metric {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.dashboard-runtime-reload-history__metric dt {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ui-text-3);
+}
+
+.dashboard-runtime-reload-history__metric dd {
+  margin: 0;
+  font-size: 0.79rem;
+  line-height: 1.45;
+  color: var(--ui-text-1);
+}
+
+.dashboard-runtime-reload-history__modules {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-history__error {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--ui-status-danger) 82%, var(--ui-text-1) 18%);
+}
+
+.dashboard-runtime-reload-history__diff {
+  display: grid;
+  gap: 0.62rem;
+  padding-top: 0.1rem;
+  border-top: 1px dashed color-mix(in srgb, var(--ui-border-subtle) 78%, transparent);
+}
+
+.dashboard-runtime-reload-history__diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.dashboard-runtime-reload-history__diff-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  padding: 0.22rem 0.64rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.71rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dashboard-runtime-reload-history__diff-chip--added,
+.dashboard-runtime-reload-history__task-pill--added {
+  background: color-mix(in srgb, var(--ui-status-success) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-success) 78%, var(--ui-text-1) 22%);
+}
+
+.dashboard-runtime-reload-history__diff-chip--removed,
+.dashboard-runtime-reload-history__task-pill--removed {
+  background: color-mix(in srgb, var(--ui-status-danger) 10%, transparent);
+  color: color-mix(in srgb, var(--ui-status-danger) 78%, var(--ui-text-1) 22%);
+}
+
+.dashboard-runtime-reload-history__diff-chip--changed,
+.dashboard-runtime-reload-history__task-pill--changed {
+  background: color-mix(in srgb, var(--ui-status-warning) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-warning) 78%, var(--ui-text-1) 22%);
+}
+
+.dashboard-runtime-reload-history__diff-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dashboard-runtime-reload-history__diff-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-history__task-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.dashboard-runtime-reload-history__task-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.72rem;
+  padding: 0.28rem 0.68rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.dashboard-runtime-reload-history__diff-empty {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--ui-text-3);
+}
+
+.dashboard-runtime-reload-modal {
+  display: grid;
+  gap: 0.9rem;
+  text-align: left;
+}
+
+.dashboard-runtime-reload-modal__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dashboard-runtime-reload-modal__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.7rem;
+  padding: 0.28rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.73rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dashboard-runtime-reload-modal__badge--info {
+  background: color-mix(in srgb, var(--ui-status-info) 13%, transparent);
+  color: color-mix(in srgb, var(--ui-status-info) 82%, var(--ui-text-1) 18%);
+}
+
+.dashboard-runtime-reload-modal__badge--warning {
+  background: color-mix(in srgb, var(--ui-status-warning) 14%, transparent);
+  color: color-mix(in srgb, var(--ui-status-warning) 82%, var(--ui-text-1) 18%);
+}
+
+.dashboard-runtime-reload-modal__badge--danger {
+  background: color-mix(in srgb, var(--ui-status-danger) 14%, transparent);
+  color: color-mix(in srgb, var(--ui-status-danger) 82%, var(--ui-text-1) 18%);
+}
+
+.dashboard-runtime-reload-modal__badge--neutral {
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 86%, transparent);
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-modal__desc,
+.dashboard-runtime-reload-modal__risk,
+.dashboard-runtime-reload-modal__warning {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.dashboard-runtime-reload-modal__desc {
+  color: var(--ui-text-1);
+}
+
+.dashboard-runtime-reload-modal__risk {
+  color: var(--ui-text-2);
+}
+
+.dashboard-runtime-reload-modal__warning {
+  border: 1px dashed color-mix(in srgb, var(--ui-status-warning) 26%, transparent);
+  border-radius: 1rem;
+  padding: 0.72rem 0.84rem;
+  color: color-mix(in srgb, var(--ui-status-warning) 82%, var(--ui-text-1) 18%);
+  background: color-mix(in srgb, var(--ui-status-warning) 8%, transparent);
+}
+
+.dashboard-runtime-reload-modal__grid {
+  display: grid;
+  gap: 0.72rem;
+  margin: 0;
+}
+
+.dashboard-runtime-reload-modal__item {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.dashboard-runtime-reload-modal__item dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ui-text-3);
+}
+
+.dashboard-runtime-reload-modal__item dd {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--ui-text-1);
 }
 
 .dashboard-task-meta {
@@ -2261,6 +3595,67 @@ async function handleDashboardTrialRenew() {
 
   .dashboard-task-card__summary {
     flex: 1 1 auto;
+  }
+
+  .dashboard-runtime-reload-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .dashboard-runtime-reload-row__label {
+    flex: 1 1 auto;
+  }
+
+  .dashboard-runtime-reload-row__actions {
+    justify-content: flex-end;
+  }
+
+  .dashboard-runtime-reload-replay__header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .dashboard-runtime-reload-replay__badges {
+    justify-content: flex-end;
+  }
+
+  .dashboard-runtime-reload-replay__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dashboard-runtime-reload-replay__item--full {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-runtime-reload-history__top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+
+  .dashboard-runtime-reload-history__badges {
+    justify-content: flex-end;
+  }
+
+  .dashboard-runtime-reload-history__metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .dashboard-runtime-reload-history__header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .dashboard-runtime-reload-history__controls {
+    justify-content: flex-end;
+  }
+
+  .dashboard-runtime-reload-modal__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-runtime-reload-modal__item--full {
+    grid-column: 1 / -1;
   }
 
   .dashboard-task-card__side {

@@ -32,6 +32,12 @@ const verboseLoadLogsEnabled = String(process.env.FARM_VERBOSE_GAME_CONFIG_LOADS
 let configsLoaded = false;
 let gameConfigLogger = null;
 
+function normalizeSeedDisplayName(value) {
+    return String(value || '')
+        .replace(/种子$/u, '')
+        .trim();
+}
+
 function getGameConfigLogger() {
     if (gameConfigLogger) {
         return gameConfigLogger;
@@ -379,7 +385,14 @@ function getLevelExpProgress(level, totalExp) {
  */
 function getPlantById(plantId) {
     ensureConfigsLoaded();
-    return plantMap.get(plantId);
+    const numericPlantId = Number(plantId) || 0;
+    const directPlant = plantMap.get(numericPlantId);
+    if (directPlant) return directPlant;
+
+    const derivedSeedId = deriveSeedIdFromPlantId(numericPlantId);
+    if (!derivedSeedId) return undefined;
+
+    return buildFallbackPlantConfig(derivedSeedId, numericPlantId) || undefined;
 }
 
 /**
@@ -388,7 +401,10 @@ function getPlantById(plantId) {
  */
 function getPlantBySeedId(seedId) {
     ensureConfigsLoaded();
-    return seedToPlant.get(seedId);
+    const numericSeedId = Number(seedId) || 0;
+    const directPlant = seedToPlant.get(numericSeedId);
+    if (directPlant) return directPlant;
+    return buildFallbackPlantConfig(numericSeedId) || undefined;
 }
 
 /**
@@ -397,8 +413,8 @@ function getPlantBySeedId(seedId) {
  */
 function getPlantName(plantId) {
     ensureConfigsLoaded();
-    const plant = plantMap.get(plantId);
-    return plant ? plant.name : `植物${plantId}`;
+    const plant = getPlantById(plantId);
+    return plant && plant.name ? plant.name : `植物${plantId}`;
 }
 
 /**
@@ -407,8 +423,18 @@ function getPlantName(plantId) {
  */
 function getPlantNameBySeedId(seedId) {
     ensureConfigsLoaded();
-    const plant = seedToPlant.get(seedId);
-    return plant ? plant.name : `种子${seedId}`;
+    const numericSeedId = Number(seedId) || 0;
+    const plant = seedToPlant.get(numericSeedId);
+    if (plant && plant.name) return plant.name;
+
+    const item = seedItemMap.get(numericSeedId) || itemInfoMap.get(numericSeedId);
+    const effectDesc = normalizeSeedDisplayName(item && item.effectDesc);
+    if (effectDesc) return effectDesc;
+
+    const itemName = normalizeSeedDisplayName(item && item.name);
+    if (itemName) return itemName;
+
+    return `种子${seedId}`;
 }
 
 /**
@@ -478,18 +504,47 @@ function getPlantByFruitId(fruitId) {
  */
 function getAllSeeds() {
     ensureConfigsLoaded();
-    return Array.from(seedToPlant.values()).map(p => ({
-        seedId: p.seed_id,
-        name: p.name,
-        requiredLevel: Number(p.land_level_need) || 0,
-        price: getSeedPrice(p.seed_id),
-        image: getSeedImageBySeedId(p.seed_id),
-    }));
+    const seedIds = new Set([
+        ...Array.from(seedToPlant.keys()),
+        ...Array.from(seedItemMap.keys()),
+    ]);
+
+    return Array.from(seedIds)
+        .filter(seedId => Number(seedId) > 0)
+        .map((seedId) => {
+            const plant = seedToPlant.get(seedId);
+            const item = seedItemMap.get(seedId) || itemInfoMap.get(seedId);
+            return {
+                seedId,
+                name: getPlantNameBySeedId(seedId),
+                requiredLevel: Number((plant && plant.land_level_need) || (item && item.level) || 0),
+                price: getSeedPrice(seedId),
+                image: getSeedImageBySeedId(seedId),
+            };
+        })
+        .sort((a, b) => {
+            const levelDiff = (Number(a.requiredLevel) || 0) - (Number(b.requiredLevel) || 0);
+            if (levelDiff !== 0) return levelDiff;
+            return (Number(a.seedId) || 0) - (Number(b.seedId) || 0);
+        });
 }
 
 function getSeedImageBySeedId(seedId) {
     ensureConfigsLoaded();
-    return seedImageMap.get(Number(seedId) || 0) || '';
+    const numericSeedId = Number(seedId) || 0;
+    if (numericSeedId <= 0) return '';
+
+    const directImage = seedImageMap.get(numericSeedId);
+    if (directImage) return directImage;
+
+    const item = seedItemMap.get(numericSeedId) || itemInfoMap.get(numericSeedId);
+    const assetName = item && item.asset_name ? String(item.asset_name).trim() : '';
+    if (assetName) {
+        const assetImage = seedAssetImageMap.get(assetName);
+        if (assetImage) return assetImage;
+    }
+
+    return '';
 }
 
 function getItemImageById(itemId) {
@@ -568,6 +623,40 @@ function getFruitPrice(fruitId) {
 function getAllPlants() {
     ensureConfigsLoaded();
     return Array.from(plantMap.values());
+}
+
+function deriveSeedIdFromPlantId(plantId) {
+    const numericPlantId = Number(plantId) || 0;
+    if (numericPlantId <= 0) return 0;
+
+    const derivedSeedId = numericPlantId - 1000000;
+    if (derivedSeedId > 0 && (seedItemMap.has(derivedSeedId) || seedToPlant.has(derivedSeedId))) {
+        return derivedSeedId;
+    }
+    return 0;
+}
+
+function buildFallbackPlantConfig(seedId, plantId = 0) {
+    const numericSeedId = Number(seedId) || 0;
+    if (numericSeedId <= 0) return null;
+
+    const item = seedItemMap.get(numericSeedId) || itemInfoMap.get(numericSeedId);
+    if (!item) return null;
+
+    return {
+        id: Number(plantId) || (numericSeedId + 1000000),
+        name: getPlantNameBySeedId(numericSeedId),
+        seed_id: numericSeedId,
+        land_level_need: Number(item.level) || 0,
+        seasons: 1,
+        grow_phases: '',
+        exp: 0,
+        size: 1,
+        fruit: {
+            id: 0,
+            count: 0,
+        },
+    };
 }
 
 module.exports = {

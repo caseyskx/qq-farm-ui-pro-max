@@ -232,6 +232,8 @@ function registerAccountSettingsRoutes({
                     plantingFallbackStrategy: fullSnapshot.plantingFallbackStrategy || 'level',
                     preferredSeed,
                     preferredSeedId: preferredSeed,
+                    bagSeedPriority: Array.isArray(fullSnapshot.bagSeedPriority) ? fullSnapshot.bagSeedPriority : [],
+                    bagSeedFallbackStrategy: fullSnapshot.bagSeedFallbackStrategy || 'level',
                     inventoryPlanting: fullSnapshot.inventoryPlanting || DEFAULT_INVENTORY_PLANTING,
                     friendQuietHours,
                     automation,

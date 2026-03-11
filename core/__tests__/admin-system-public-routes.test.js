@@ -4,12 +4,15 @@ const assert = require('node:assert/strict');
 const { registerSystemPublicRoutes, registerNotificationsRoute } = require('../src/controllers/admin/system-public-routes');
 
 function createFakeApp() {
-    const routes = { get: new Map() };
+    const routes = { get: new Map(), post: new Map() };
     return {
         routes,
         app: {
             get(path, ...handlers) {
                 routes.get.set(path, handlers);
+            },
+            post(path, ...handlers) {
+                routes.post.set(path, handlers);
             },
         },
     };
@@ -30,9 +33,9 @@ function createResponse() {
     };
 }
 
-function getHandler(routes, path) {
-    const handlers = routes.get.get(path);
-    assert.ok(handlers, `missing route: GET ${path}`);
+function getHandler(routes, path, method = 'get') {
+    const handlers = routes[method].get(path);
+    assert.ok(handlers, `missing route: ${String(method).toUpperCase()} ${path}`);
     assert.equal(handlers.length, 1);
     assert.equal(typeof handlers[0], 'function');
     return handlers[0];
@@ -72,6 +75,7 @@ function createDeps(overrides = {}) {
         getAccId: async () => 'acc-1',
         getProvider: () => ({}),
         getSchedulerRegistrySnapshot: () => ({ schedulerCount: 1 }),
+        adminOperationLogService: null,
         handleApiError: (res, err) => res.status(500).json({ ok: false, error: err.message }),
         parseUpdateLog: () => [],
         readLatestQqFriendDiagnostics: () => null,
@@ -306,8 +310,208 @@ test('scheduler route falls back to runtime snapshot when worker status is unava
             runtime: { schedulerCount: 2 },
             worker: null,
             workerError: '当前运行环境不支持调度器状态查询',
+            reloadTargets: [],
+            reloadHistory: [],
+            reloadError: '当前运行环境不支持热重载查询',
         },
     });
+});
+
+test('scheduler route returns provider scheduler status with reload targets', async () => {
+    const { app, routes } = createFakeApp();
+    const deps = createDeps({
+        app,
+        getProvider: () => ({
+            getSchedulerStatus: async () => ({
+                accountId: 'acc-1',
+                runtime: { schedulerCount: 1 },
+                worker: { schedulerCount: 3 },
+                workerError: '',
+                reloadTargets: [{ target: 'farm', modules: ['farm', 'friend'] }],
+                reloadHistory: [{ target: 'farm', result: 'ok', durationMs: 500 }],
+                reloadError: '',
+            }),
+        }),
+    });
+
+    registerSystemPublicRoutes(deps);
+    const handler = getHandler(routes, '/api/scheduler');
+    const res = createResponse();
+
+    await handler({}, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, {
+        ok: true,
+        data: {
+            accountId: 'acc-1',
+            runtime: { schedulerCount: 1 },
+            worker: { schedulerCount: 3 },
+            workerError: '',
+            reloadTargets: [{ target: 'farm', modules: ['farm', 'friend'] }],
+            reloadHistory: [{ target: 'farm', result: 'ok', durationMs: 500 }],
+            reloadError: '',
+        },
+    });
+});
+
+test('scheduler reload route validates target and forwards request to provider', async () => {
+    const { app, routes } = createFakeApp();
+    const reloadCalls = [];
+    const accountLogs = [];
+    const auditLogs = [];
+    const deps = createDeps({
+        app,
+        getAccountsSnapshot: async () => ({ accounts: [{ id: 'acc-1', name: '账号一号' }] }),
+        getProvider: () => ({
+            reloadRuntimeModule: async (accountId, target, options) => {
+                reloadCalls.push({ accountId, target, options });
+                return { target, modules: ['farm', 'friend'] };
+            },
+            addAccountLog: (...args) => {
+                accountLogs.push(args);
+            },
+        }),
+        adminOperationLogService: {
+            createAdminOperationLog: async (payload) => {
+                auditLogs.push(payload);
+                return payload;
+            },
+        },
+    });
+
+    registerSystemPublicRoutes(deps);
+    const handler = getHandler(routes, '/api/scheduler/reload', 'post');
+    const res = createResponse();
+
+    await handler({ body: { target: 'farm', options: { reason: 'manual' } }, currentUser: { username: 'admin', role: 'admin' } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(reloadCalls, [{
+        accountId: 'acc-1',
+        target: 'farm',
+        options: {
+            reason: 'manual',
+            source: 'admin_api',
+        },
+    }]);
+    assert.deepEqual(accountLogs, [[
+        'runtime_reload',
+        '管理员 admin 热重载 账号一号 的农场模块，重建 farm / friend',
+        'acc-1',
+        '账号一号',
+        {
+            actorUsername: 'admin',
+            actorRole: 'admin',
+            target: 'farm',
+            targetLabel: '农场模块',
+            modules: ['farm', 'friend'],
+            source: 'admin_api',
+            result: 'ok',
+            reason: '',
+        },
+    ]]);
+    assert.deepEqual(auditLogs, [{
+        actorUsername: 'admin',
+        scope: 'runtime',
+        actionLabel: '热重载 农场模块',
+        status: 'success',
+        totalCount: 1,
+        successCount: 1,
+        failedCount: 0,
+        affectedNames: ['账号一号'],
+        failedNames: [],
+        detailLines: [
+            '账号：账号一号',
+            '目标模块族：农场模块 (farm)',
+            '重建模块：farm、friend',
+            '来源：admin_api',
+        ],
+    }]);
+    assert.deepEqual(res.body, {
+        ok: true,
+        data: { target: 'farm', modules: ['farm', 'friend'] },
+    });
+});
+
+test('scheduler reload route rejects empty target', async () => {
+    const { app, routes } = createFakeApp();
+    const deps = createDeps({ app });
+
+    registerSystemPublicRoutes(deps);
+    const handler = getHandler(routes, '/api/scheduler/reload', 'post');
+    const res = createResponse();
+
+    await handler({ body: {} }, res);
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.body, { ok: false, error: '缺少热重载目标' });
+});
+
+test('scheduler reload route records failure audit before returning error', async () => {
+    const { app, routes } = createFakeApp();
+    const accountLogs = [];
+    const auditLogs = [];
+    const deps = createDeps({
+        app,
+        getAccountsSnapshot: async () => ({ accounts: [{ id: 'acc-1', name: '账号一号' }] }),
+        getProvider: () => ({
+            reloadRuntimeModule: async () => {
+                throw new Error('worker exploded');
+            },
+            addAccountLog: (...args) => {
+                accountLogs.push(args);
+            },
+        }),
+        adminOperationLogService: {
+            createAdminOperationLog: async (payload) => {
+                auditLogs.push(payload);
+                return payload;
+            },
+        },
+    });
+
+    registerSystemPublicRoutes(deps);
+    const handler = getHandler(routes, '/api/scheduler/reload', 'post');
+    const res = createResponse();
+
+    await handler({ body: { target: 'business' }, currentUser: { username: 'admin', role: 'admin' } }, res);
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(accountLogs, [[
+        'runtime_reload_failed',
+        '管理员 admin 热重载 账号一号 的全部业务模块失败: worker exploded',
+        'acc-1',
+        '账号一号',
+        {
+            actorUsername: 'admin',
+            actorRole: 'admin',
+            target: 'business',
+            targetLabel: '全部业务模块',
+            modules: [],
+            source: 'admin_api',
+            result: 'error',
+            reason: 'worker exploded',
+        },
+    ]]);
+    assert.deepEqual(auditLogs, [{
+        actorUsername: 'admin',
+        scope: 'runtime',
+        actionLabel: '热重载 全部业务模块',
+        status: 'error',
+        totalCount: 1,
+        successCount: 0,
+        failedCount: 1,
+        affectedNames: ['账号一号'],
+        failedNames: ['账号一号'],
+        detailLines: [
+            '账号：账号一号',
+            '目标模块族：全部业务模块 (business)',
+            '来源：admin_api',
+            '失败原因：worker exploded',
+        ],
+    }]);
+    assert.deepEqual(res.body, { ok: false, error: 'worker exploded' });
 });
 
 test('qq friend diagnostics route blocks non-admin users', async () => {

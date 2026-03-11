@@ -15,6 +15,10 @@ export interface AutomationConfig {
   fertilizer?: string
   fertilizer_buy?: boolean
   fertilizer_buy_limit?: number
+  fertilizer_buy_type?: 'organic' | 'normal' | 'both'
+  fertilizer_buy_mode?: 'threshold' | 'unlimited'
+  fertilizer_buy_threshold_normal?: number
+  fertilizer_buy_threshold_organic?: number
   fertilizer_60s_anti_steal?: boolean
   fertilizer_smart_phase?: boolean
   fastHarvest?: boolean
@@ -407,6 +411,8 @@ export interface SettingsState {
   plantingStrategy: string
   plantingFallbackStrategy: string
   preferredSeedId: number
+  bagSeedPriority: number[]
+  bagSeedFallbackStrategy: string
   inventoryPlanting: InventoryPlantingConfig
   intervals: IntervalsConfig
   friendQuietHours: FriendQuietHoursConfig
@@ -426,6 +432,20 @@ export interface SettingsState {
 }
 
 export const useSettingStore = defineStore('setting', () => {
+  const normalizeBagSeedPriority = (value: unknown): number[] => {
+    if (!Array.isArray(value))
+      return []
+    const seen = new Set<number>()
+    return value
+      .map(item => Math.max(0, Number.parseInt(String(item), 10) || 0))
+      .filter((seedId) => {
+        if (seedId <= 0 || seen.has(seedId))
+          return false
+        seen.add(seedId)
+        return true
+      })
+  }
+
   const createDefaultReportLogStats = (): ReportLogStats => ({
     total: 0,
     successCount: 0,
@@ -447,6 +467,8 @@ export const useSettingStore = defineStore('setting', () => {
     plantingStrategy: 'preferred',
     plantingFallbackStrategy: 'level',
     preferredSeedId: 0,
+    bagSeedPriority: [],
+    bagSeedFallbackStrategy: 'level',
     inventoryPlanting: {
       mode: 'disabled',
       globalKeepCount: 0,
@@ -573,6 +595,8 @@ export const useSettingStore = defineStore('setting', () => {
         settings.value.plantingStrategy = d.plantingStrategy || d.strategy || 'preferred'
         settings.value.plantingFallbackStrategy = d.plantingFallbackStrategy || 'level'
         settings.value.preferredSeedId = d.preferredSeedId || d.preferredSeed || 0
+        settings.value.bagSeedPriority = normalizeBagSeedPriority(d.bagSeedPriority)
+        settings.value.bagSeedFallbackStrategy = d.bagSeedFallbackStrategy || 'level'
         settings.value.inventoryPlanting = d.inventoryPlanting || {
           mode: 'disabled',
           globalKeepCount: 0,
@@ -638,6 +662,8 @@ export const useSettingStore = defineStore('setting', () => {
         plantingStrategy: newSettings.plantingStrategy,
         plantingFallbackStrategy: newSettings.plantingFallbackStrategy,
         preferredSeedId: newSettings.preferredSeedId,
+        bagSeedPriority: normalizeBagSeedPriority(newSettings.bagSeedPriority),
+        bagSeedFallbackStrategy: newSettings.bagSeedFallbackStrategy,
         inventoryPlanting: newSettings.inventoryPlanting,
         intervals: newSettings.intervals,
         friendQuietHours: newSettings.friendQuietHours,

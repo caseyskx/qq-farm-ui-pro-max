@@ -8,27 +8,33 @@ const { getLevelExpProgress } = require('../config/gameConfig');
 const { getAutomation, getPreferredSeed, getConfigSnapshot, applyConfigSnapshot } = require('../models/store');
 const { checkAndClaimEmails } = require('../services/email');
 const { getEmailDailyState } = require('../services/email');
-const { checkFarm, startFarmCheckLoop, stopFarmCheckLoop, refreshFarmCheckLoop, getLandsDetail, getAvailableSeeds, runFarmOperation } = require('../services/farm');
-const { checkAndAcceptApplications, checkFriends, startFriendCheckLoop, stopFriendCheckLoop, refreshFriendCheckLoop, getFriendsList, getFriendLandsDetail, doFriendOperation, doFriendBatchOperation } = require('../services/friend');
 const { processInviteCodes } = require('../services/invite');
-const { autoBuyOrganicFertilizer, buyFreeGifts, getFreeGiftDailyState, getMallGoodsCatalog, getMallCatalog, purchaseMallGoods, claimMonthCardRewardByGoodsId } = require('../services/mall');
-const { performDailyMonthCardGift, getMonthCardDailyState } = require('../services/monthcard');
-const { performDailyOpenServerGift, getOpenServerDailyState } = require('../services/openserver');
-const { performDailyVipGift, getVipDailyState } = require('../services/qqvip');
+const { autoBuyFertilizer, getFertilizerBuyDailyState, getFreeGiftDailyState, getMallGoodsCatalog, getMallCatalog, purchaseMallGoods, claimMonthCardRewardByGoodsId } = require('../services/mall');
+const { getMonthCardDailyState } = require('../services/monthcard');
+const { getOpenServerDailyState } = require('../services/openserver');
+const { getVipDailyState } = require('../services/qqvip');
 const { createScheduler, getSchedulerRegistrySnapshot } = require('../services/scheduler');
-const { performDailyShare, getShareDailyState } = require('../services/share');
-const { setInitialValues, resetSessionGains, recordOperation } = require('../services/stats');
+const { getShareDailyState } = require('../services/share');
+const { setInitialValues, resetSessionGains } = require('../services/stats');
 const { initStatusBar, setStatusPlatform, statusData } = require('../services/status');
 const { setRecordGoldExpHook } = require('../services/status');
-const { cleanupTaskSystem, checkAndClaimTasks, getTaskClaimDailyState, getTaskDailyStateLikeApp, getGrowthTaskStateLikeApp } = require('../services/task');
-const { getRuntimeAccountModePolicy, getRuntimeFriendsSnapshot, updateRuntimeFriendsSnapshot } = require('../services/account-mode-policy');
 const { getInteractRecords } = require('../services/interact');
 const { getShopCatalog, buyShopGoods } = require('../services/shop');
-const { sellAllFruits, getBag, getBagItems, getSellPreview, sellByPolicy, sellSelectedItems, openFertilizerGiftPacksSilently } = require('../services/warehouse');
 const { connect, cleanup, getWs, getUserState, networkEvents } = require('../utils/network');
 const { loadProto } = require('../utils/proto');
 const { setLogHook, log, toNum } = require('../utils/utils');
 const { getCachedFriends, mergeFriendsCache, findReusableFriendsCache } = require('../services/database');
+const { createRuntimeEventBus } = require('../runtime/runtime-event-bus');
+const {
+    createRuntimeModuleDefinitions,
+    buildRuntimeModuleReloadView,
+    DEFAULT_RUNTIME_RELOAD_COOLDOWN_MS,
+    getRuntimeModuleReloadPlan,
+    listReloadableRuntimeModules,
+    listRuntimeModuleReloadPlans,
+} = require('../runtime/runtime-module-catalog');
+const { createRuntimeModuleManager } = require('../runtime/runtime-module-manager');
+const { createRuntimeNetworkEventBridge } = require('../runtime/runtime-network-event-bridge');
 const {
     computeNextRunAt,
     resolveRuntimeIntervals,
@@ -37,6 +43,26 @@ const EMAIL_CALL_TIMEOUT_MS = 8000;
 
 if (parentPort && workerData && workerData.accountId && !process.env.FARM_ACCOUNT_ID) {
     process.env.FARM_ACCOUNT_ID = String(workerData.accountId);
+}
+
+function getFarmService() {
+    return require('../services/farm');
+}
+
+function getFriendService() {
+    return require('../services/friend');
+}
+
+function getTaskService() {
+    return require('../services/task');
+}
+
+function getWarehouseService() {
+    return require('../services/warehouse');
+}
+
+function getAccountModePolicyService() {
+    return require('../services/account-mode-policy');
 }
 
 function sendToMaster(payload) {
@@ -153,12 +179,10 @@ let nextHelpRunAt = 0;
 let nextStealRunAt = 0;
 let lastStatusHash = '';
 let lastStatusSentAt = 0;
-let onSellGain = null;
-let onFarmHarvested = null;
-let harvestSellRunning = false;
-let onWsError = null;
-let wsErrorHandledAt = 0;
 let workerScheduler = null;
+const runtimeReloadActivity = new Map();
+const runtimeReloadHistory = [];
+const MAX_RUNTIME_RELOAD_HISTORY = 8;
 
 function getWorkerScheduler() {
     if (!workerScheduler) {
@@ -166,71 +190,191 @@ function getWorkerScheduler() {
     }
     return workerScheduler;
 }
-const DAILY_ROUTINE_AUTOMATION_KEYS = Object.freeze([
-    'email',
-    'free_gifts',
-    'share_reward',
-    'vip_gift',
-    'month_card',
-    'open_server_gift',
-]);
 
-function hasEnabledDailyRoutine(auto) {
-    const a = (auto && typeof auto === 'object') ? auto : {};
-    return DAILY_ROUTINE_AUTOMATION_KEYS.some((key) => !!a[key]);
-}
-
-function hasNewDailyRoutineEnabled(prevAuto, nextAuto) {
-    const prev = (prevAuto && typeof prevAuto === 'object') ? prevAuto : {};
-    const next = (nextAuto && typeof nextAuto === 'object') ? nextAuto : {};
-    return DAILY_ROUTINE_AUTOMATION_KEYS.some((key) => !prev[key] && !!next[key]);
-}
-
-function getDelayUntilNextDailyRoutineMs() {
-    const now = new Date();
-    const next = new Date(now);
-    // 稍微偏移 1 秒，避免本地零点边界上的重复/过早触发。
-    next.setHours(24, 0, 1, 0);
-    return Math.max(1000, next.getTime() - now.getTime());
-}
-
-async function runDailyRoutines(force = false) {
-    if (!loginReady) return;
-    const auto = getAutomation();
-    try {
-        if (auto.email) await runEmailClaimSafely(force, 'daily_routine');
-        if (auto.share_reward) await performDailyShare(force);
-        if (auto.month_card) await performDailyMonthCardGift(force);
-        if (auto.open_server_gift) await performDailyOpenServerGift(force);
-        if (auto.free_gifts) await buyFreeGifts(force);
-        if (auto.vip_gift) await performDailyVipGift(force);
-    } catch (e) {
-        log('系统', `每日任务调度失败: ${e.message}`, { module: 'system', event: 'daily_routine', result: 'error' });
+function getWorkerSchedulerSnapshotForReloadPreview() {
+    if (!workerScheduler || typeof workerScheduler.getSnapshot !== 'function') {
+        return { taskCount: 0, tasks: [] };
     }
+    return workerScheduler.getSnapshot() || { taskCount: 0, tasks: [] };
 }
 
-function stopDailyRoutineTimer() {
-    getWorkerScheduler().clear('daily_routine_interval');
+function buildRuntimeReloadPreviewState() {
+    const activityByTarget = {};
+    for (const [target, activity] of runtimeReloadActivity.entries()) {
+        activityByTarget[target] = { ...activity };
+    }
+    return {
+        now: Date.now(),
+        loginReady,
+        unifiedSchedulerRunning,
+        workerSchedulerSnapshot: getWorkerSchedulerSnapshotForReloadPreview(),
+        activityByTarget,
+    };
 }
 
-function scheduleNextDailyRoutineRun() {
-    stopDailyRoutineTimer();
-    if (!loginReady || !hasEnabledDailyRoutine(getAutomation())) return;
-    getWorkerScheduler().setTimeoutTask('daily_routine_interval', getDelayUntilNextDailyRoutineMs(), () => {
-        runDailyRoutines(true).catch(() => null).finally(() => {
-            scheduleNextDailyRoutineRun();
+function getReloadableRuntimeModuleTargets() {
+    return listReloadableRuntimeModules(buildRuntimeReloadPreviewState());
+}
+
+function getRuntimeReloadTargetPreview(targetName = '') {
+    return buildRuntimeModuleReloadView(targetName, buildRuntimeReloadPreviewState());
+}
+
+function summarizeRuntimeReloadQueueSnapshot(snapshot) {
+    const normalizedSnapshot = snapshot && typeof snapshot === 'object'
+        ? snapshot
+        : {};
+    const tasks = Array.isArray(normalizedSnapshot.tasks) ? normalizedSnapshot.tasks : [];
+    return {
+        taskCount: Math.max(0, Number(normalizedSnapshot.taskCount) || tasks.length),
+        runningTaskCount: tasks.filter(task => task && task.running).length,
+    };
+}
+
+function normalizeRuntimeReloadTaskDiffSnapshot(snapshot) {
+    const normalizedSnapshot = snapshot && typeof snapshot === 'object'
+        ? snapshot
+        : {};
+    const tasks = Array.isArray(normalizedSnapshot.tasks) ? normalizedSnapshot.tasks : [];
+    return tasks
+        .map((task) => ({
+            name: String(task && task.name || '').trim(),
+            kind: String(task && task.kind || 'timeout').trim() || 'timeout',
+            running: !!(task && task.running),
+        }))
+        .filter(task => !!task.name)
+        .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function createRuntimeReloadSummary(targetName, plan, options = {}, beforeSnapshot = {}, afterSnapshot = {}, meta = {}) {
+    const startedAt = Math.max(0, Number(meta.startedAt) || Date.now());
+    const finishedAt = Math.max(startedAt, Number(meta.finishedAt) || Date.now());
+    const beforeState = summarizeRuntimeReloadQueueSnapshot(beforeSnapshot);
+    const afterState = summarizeRuntimeReloadQueueSnapshot(afterSnapshot);
+    return {
+        target: String(targetName || '').trim(),
+        modules: Array.isArray(plan && plan.modules) ? [...plan.modules] : [],
+        forced: options.force === true,
+        result: String(meta.result || 'ok').trim() || 'ok',
+        source: String(meta.source || options.source || 'runtime_reload').trim(),
+        startedAt,
+        finishedAt,
+        durationMs: Math.max(0, finishedAt - startedAt),
+        beforeTaskCount: beforeState.taskCount,
+        beforeRunningTaskCount: beforeState.runningTaskCount,
+        afterTaskCount: afterState.taskCount,
+        afterRunningTaskCount: afterState.runningTaskCount,
+        beforeTasks: normalizeRuntimeReloadTaskDiffSnapshot(beforeSnapshot),
+        afterTasks: normalizeRuntimeReloadTaskDiffSnapshot(afterSnapshot),
+        unifiedSchedulerResumed: meta.unifiedSchedulerResumed === true,
+        error: String(meta.error || '').trim(),
+    };
+}
+
+function formatRuntimeReloadCooldownMessage(preflight) {
+    const seconds = Math.max(1, Math.ceil(Number(preflight && preflight.cooldownRemainingMs) / 1000));
+    return `热重载冷却中，请等待 ${seconds} 秒后再试，或明确强制执行`;
+}
+
+function recordRuntimeReloadActivity(targetName, plan, meta = {}) {
+    const now = Math.max(0, Number(meta.reloadedAt) || Date.now());
+    const lastReloadSummary = meta.lastReloadSummary && typeof meta.lastReloadSummary === 'object'
+        ? { ...meta.lastReloadSummary }
+        : null;
+    const affectedPlans = listRuntimeModuleReloadPlans().filter(candidate =>
+        Array.isArray(candidate.modules)
+        && candidate.modules.some(moduleName => plan.modules.includes(moduleName))
+    );
+    for (const candidate of affectedPlans) {
+        runtimeReloadActivity.set(candidate.target, {
+            lastReloadAt: now,
+            lastReloadResult: String(meta.result || 'ok').trim() || 'ok',
+            lastReloadSource: String(meta.source || '').trim(),
+            lastReloadTarget: String(targetName || '').trim(),
+            cooldownMs: Math.max(0, Number(candidate.cooldownMs) || DEFAULT_RUNTIME_RELOAD_COOLDOWN_MS),
+            lastReloadSummary,
         });
-    });
-}
-
-function startDailyRoutineTimer(options = {}) {
-    scheduleNextDailyRoutineRun();
-    if (options.runImmediately === false) return;
-    // 登录后先补跑一次，避免当天错过礼包。
-    if (loginReady && hasEnabledDailyRoutine(getAutomation())) {
-        runDailyRoutines(true).catch(() => null);
     }
 }
+
+function appendRuntimeReloadHistory(plan, summary = {}) {
+    const finishedAt = Math.max(0, Number(summary.finishedAt) || Date.now());
+    const entry = {
+        id: `${finishedAt}:${String(summary.target || plan.target || '').trim()}:${String(summary.source || '').trim() || 'runtime_reload'}:${String(summary.result || 'ok').trim() || 'ok'}`,
+        target: String(summary.target || plan.target || '').trim(),
+        modules: Array.isArray(summary.modules) ? [...summary.modules] : [...(plan.modules || [])],
+        forced: summary.forced === true,
+        result: String(summary.result || 'ok').trim() || 'ok',
+        source: String(summary.source || 'runtime_reload').trim() || 'runtime_reload',
+        startedAt: Math.max(0, Number(summary.startedAt) || 0),
+        finishedAt,
+        durationMs: Math.max(0, Number(summary.durationMs) || 0),
+        beforeTaskCount: Math.max(0, Number(summary.beforeTaskCount) || 0),
+        beforeRunningTaskCount: Math.max(0, Number(summary.beforeRunningTaskCount) || 0),
+        afterTaskCount: Math.max(0, Number(summary.afterTaskCount) || 0),
+        afterRunningTaskCount: Math.max(0, Number(summary.afterRunningTaskCount) || 0),
+        beforeTasks: Array.isArray(summary.beforeTasks) ? summary.beforeTasks.map(task => ({
+            name: String(task && task.name || '').trim(),
+            kind: String(task && task.kind || 'timeout').trim() || 'timeout',
+            running: !!(task && task.running),
+        })).filter(task => !!task.name) : [],
+        afterTasks: Array.isArray(summary.afterTasks) ? summary.afterTasks.map(task => ({
+            name: String(task && task.name || '').trim(),
+            kind: String(task && task.kind || 'timeout').trim() || 'timeout',
+            running: !!(task && task.running),
+        })).filter(task => !!task.name) : [],
+        unifiedSchedulerResumed: summary.unifiedSchedulerResumed === true,
+        error: String(summary.error || '').trim(),
+        riskLevel: String(plan.riskLevel || 'low').trim() || 'low',
+        affectedTaskGroups: Array.isArray(plan.affectedTaskGroups) ? [...plan.affectedTaskGroups] : [],
+        affectsUnifiedScheduler: plan.affectsUnifiedScheduler !== false,
+        description: String(plan.description || '').trim(),
+    };
+    runtimeReloadHistory.unshift(entry);
+    if (runtimeReloadHistory.length > MAX_RUNTIME_RELOAD_HISTORY) {
+        runtimeReloadHistory.length = MAX_RUNTIME_RELOAD_HISTORY;
+    }
+    return { ...entry, modules: [...entry.modules], affectedTaskGroups: [...entry.affectedTaskGroups] };
+}
+
+function getRuntimeReloadHistoryEntries() {
+    return runtimeReloadHistory.map(entry => ({
+        ...entry,
+        modules: Array.isArray(entry.modules) ? [...entry.modules] : [],
+        beforeTasks: Array.isArray(entry.beforeTasks) ? entry.beforeTasks.map(task => ({ ...task })) : [],
+        afterTasks: Array.isArray(entry.afterTasks) ? entry.afterTasks.map(task => ({ ...task })) : [],
+        affectedTaskGroups: Array.isArray(entry.affectedTaskGroups) ? [...entry.affectedTaskGroups] : [],
+    }));
+}
+const BUSINESS_RUNTIME_MODULES = Object.freeze([
+    'farm',
+    'friend',
+    'task',
+    'warehouse',
+]);
+const runtimeEventBus = createRuntimeEventBus();
+const runtimeModuleManager = createRuntimeModuleManager({
+    runtimeBus: runtimeEventBus,
+});
+const runtimeContext = {
+    runtimeBus: runtimeEventBus,
+    sendToMaster,
+    log,
+    getAutomation,
+    getUserState,
+    getWorkerScheduler,
+    isLoginReady: () => loginReady,
+    isRunning: () => isRunning,
+    requestStop: (payload = {}) => stopBot(payload),
+    softDisconnectCurrentSession,
+};
+for (const moduleDefinition of createRuntimeModuleDefinitions(runtimeContext)) {
+    runtimeModuleManager.register(moduleDefinition);
+}
+const runtimeNetworkEventBridge = createRuntimeNetworkEventBridge({
+    networkEvents,
+    runtimeBus: runtimeEventBus,
+});
 
 function applyIntervalsToRuntime(intervals) {
     const runtimeIntervals = resolveRuntimeIntervals(intervals);
@@ -296,11 +440,14 @@ async function runFarmTick(auto) {
         CONFIG.farmCheckIntervalMax || CONFIG.farmCheckInterval || 2000
     );
     try {
-        if (auto.farm) await checkFarm();
-        if (auto.task) await checkAndClaimTasks();
+        const farmService = getFarmService();
+        const taskService = getTaskService();
+        const warehouseService = getWarehouseService();
+        if (auto.farm) await farmService.checkFarm();
+        if (auto.task) await taskService.checkAndClaimTasks();
         if (auto.email) await runEmailClaimSafely(false, 'farm_tick');
-        if (auto.fertilizer_gift) await openFertilizerGiftPacksSilently();
-        if (auto.fertilizer_buy) await autoBuyOrganicFertilizer();
+        if (auto.fertilizer_gift) await warehouseService.openFertilizerGiftPacksSilently();
+        if (auto.fertilizer_buy) await autoBuyFertilizer();
     } catch (e) {
         log('系统', `农场调度执行失败: ${e.message}`, { module: 'system', event: 'farm_tick', result: 'error' });
     } finally {
@@ -318,7 +465,7 @@ async function runFriendTick(auto) {
         CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
     );
     try {
-        if (auto.friend_auto_accept) await checkAndAcceptApplications();
+        if (auto.friend_auto_accept) await getFriendService().checkAndAcceptApplications();
     } catch (e) {
         log('系统', `好友申请调度执行失败: ${e.message}`, { module: 'system', event: 'friend_applications_tick', result: 'error' });
     } finally {
@@ -336,7 +483,7 @@ async function runHelpTick(auto) {
         CONFIG.helpCheckIntervalMax || CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
     );
     try {
-        if (auto.friend_help || auto.friend_bad) await checkFriends('help');
+        if (auto.friend_help || auto.friend_bad) await getFriendService().checkFriends('help');
     } catch (e) {
         log('系统', `帮忙调度执行失败: ${e.message}`, { module: 'system', event: 'help_tick', result: 'error' });
     } finally {
@@ -354,7 +501,7 @@ async function runStealTick(auto) {
         CONFIG.stealCheckIntervalMax || CONFIG.friendCheckIntervalMax || CONFIG.friendCheckInterval || 10000
     );
     try {
-        if (auto.friend_steal) await checkFriends('steal');
+        if (auto.friend_steal) await getFriendService().checkFriends('steal');
     } catch (e) {
         log('系统', `偷菜调度执行失败: ${e.message}`, { module: 'system', event: 'steal_tick', result: 'error' });
     } finally {
@@ -433,30 +580,16 @@ function applyRuntimeConfig(snapshot, syncNow = false) {
     }
 
     if (loginReady) {
-        refreshFarmCheckLoop(200);
-        refreshFriendCheckLoop(200);
         resetUnifiedSchedule();
         scheduleUnifiedNextTick();
-
-        // 保存设置后若“自动处理日常”开启，则立即执行一次
-        const hasAutomationPayload = !!(snapshot && snapshot.automation && typeof snapshot.automation === 'object');
-        if (hasAutomationPayload) {
-            const nextAuto = getAutomation();
-            const wasEnabled = hasEnabledDailyRoutine(prevAuto);
-            const nowEnabled = hasEnabledDailyRoutine(nextAuto);
-            if (!wasEnabled && nowEnabled) {
-                startDailyRoutineTimer({ runImmediately: false });
-            } else if (wasEnabled && !nowEnabled) {
-                stopDailyRoutineTimer();
-            }
-            if (hasNewDailyRoutineEnabled(prevAuto, nextAuto)) {
-                // 保存设置时 /api/automation 可能触发多次 config_sync，这里做防抖且仅在新增日常开关时触发
-                getWorkerScheduler().setTimeoutTask('daily_routine_immediate', 400, () => {
-                    runDailyRoutines(true).catch(() => null);
-                });
-            }
-        }
     }
+
+    runtimeModuleManager.applyConfig({
+        snapshot: snapshot || {},
+        prevAutomation: prevAuto,
+        loginReady,
+        appliedConfigRevision,
+    });
 
     if (syncNow) syncStatus();
 }
@@ -518,100 +651,20 @@ async function startBot(config) {
 
     initStatusBar();
     setStatusPlatform(CONFIG.platform);
-
-    if (onWsError) {
-        networkEvents.off('ws_error', onWsError);
-        onWsError = null;
-    }
-    onWsError = (payload) => {
-        if ((Number(payload?.code) || 0) !== 400) return;
-        const now = Date.now();
-        if (now - wsErrorHandledAt < 4000) return;
-        wsErrorHandledAt = now;
-        log('系统', '连接被拒绝，可能需要更新 Code');
-        sendToMaster({
-            type: 'ws_error',
-            code: 400,
-            message: payload?.message || '',
-        });
-        if (isRunning) {
-            getWorkerScheduler().setTimeoutTask('ws_error_cleanup', 1000, () => {
-                if (isRunning) {
-                    stopFarmCheckLoop();
-                    stopFriendCheckLoop();
-                    cleanup();
-                }
-            });
-        }
-    };
-    networkEvents.on('ws_error', onWsError);
-
-    networkEvents.on('kickout', onKickout);
-    networkEvents.on('ban', (payload) => {
-        const reason = payload?.reason || '1002003';
-        sendToMaster({ type: 'account_banned', reason });
+    runtimeNetworkEventBridge.attach();
+    runtimeModuleManager.start('session-control', {
+        source: 'start_bot',
     });
 
     const onLoginSuccess = async () => {
         loginReady = true;
-        if (onSellGain) {
-            networkEvents.off('sell', onSellGain);
-        }
-        onSellGain = (deltaGold) => {
-            const delta = Number(deltaGold || 0);
-            if (!Number.isFinite(delta) || delta <= 0) return;
-            recordOperation('sell', 1);
-        };
-        networkEvents.on('sell', onSellGain);
-
-        if (onFarmHarvested) {
-            networkEvents.off('farmHarvested', onFarmHarvested);
-        }
-        onFarmHarvested = async () => {
-            if (harvestSellRunning) return;
-            if (!getAutomation().sell) return;
-            harvestSellRunning = true;
-            try {
-                await sellAllFruits();
-            } catch (e) {
-                log('仓库', `收获后自动出售失败: ${e.message}`, { module: 'warehouse', event: 'sell_after_harvest', result: 'error' });
-            } finally {
-                harvestSellRunning = false;
-            }
-        };
-        networkEvents.on('farmHarvested', onFarmHarvested);
-
-        // ==== 缓存好友名单 ====
-        networkEvents.on('friends_updated', (friendsData) => {
-            try {
-                const state = getUserState();
-                const resolveFriendIdentifier = (friend) => {
-                    const openId = String(friend && friend.open_id || '').trim();
-                    if (openId) return openId;
-                    const uin = String(friend && friend.uin || '').trim();
-                    if (uin) return uin;
-                    const gid = toNum(friend && friend.gid);
-                    return gid > 0 ? String(gid) : '';
-                };
-                const list = (friendsData || [])
-                    .filter(f => toNum(f.gid) !== state.gid && f.name !== '小小农夫' && f.remark !== '小小农夫')
-                    .map(f => ({
-                        gid: toNum(f.gid),
-                        uin: resolveFriendIdentifier(f),
-                        name: f.remark || f.name || `GID:${toNum(f.gid)}`,
-                        avatarUrl: String(f.avatar_url || '').trim(),
-                    }));
-                if (list.length > 0) {
-                    sendToMaster({ type: 'sync_friends_cache', data: list });
-                }
-            } catch { }
-        });
-        // ====================
+        const warehouseService = getWarehouseService();
+        const accountModePolicyService = getAccountModePolicyService();
 
         // 登录后主动拉一次背包，初始化点券(ID:1002)数量
         try {
-            const bagReply = await getBag();
-            const items = getBagItems(bagReply);
+            const bagReply = await warehouseService.getBag();
+            const items = warehouseService.getBagItems(bagReply);
             let coupon = 0;
             for (const it of (items || [])) {
                 if (toNum(it && it.id) === 1002) {
@@ -631,7 +684,7 @@ async function startBot(config) {
 
         // 冷启动预热：优先使用最近一次缓存的好友快照，缩短 requiresGameFriend 的未知窗口
         try {
-            if (CONFIG.accountId && !getRuntimeFriendsSnapshot(CONFIG.accountId)) {
+            if (CONFIG.accountId && !accountModePolicyService.getRuntimeFriendsSnapshot(CONFIG.accountId)) {
                 let cachedFriends = await getCachedFriends(CONFIG.accountId);
                 let reusedSourceAccountId = '';
                 if ((!Array.isArray(cachedFriends) || cachedFriends.length === 0) && latest.gid > 0) {
@@ -649,7 +702,7 @@ async function startBot(config) {
                     }
                 }
                 if (Array.isArray(cachedFriends) && cachedFriends.length > 0) {
-                    updateRuntimeFriendsSnapshot(cachedFriends, CONFIG.accountId);
+                    accountModePolicyService.updateRuntimeFriendsSnapshot(cachedFriends, CONFIG.accountId);
                     const reused = !!reusedSourceAccountId;
                     log('好友', reused
                         ? `已复用历史好友缓存快照 ${cachedFriends.length} 人 (来源账号 ${reusedSourceAccountId})`
@@ -673,14 +726,13 @@ async function startBot(config) {
 
         // 登录成功后启动各模块
         await processInviteCodes();
-        if (getAutomation().fertilizer_gift) {
-            await openFertilizerGiftPacksSilently().catch(() => 0);
-        }
-        startFarmCheckLoop({ externalScheduler: true });
-        startFriendCheckLoop({ externalScheduler: true });
+        runtimeModuleManager.startMany(BUSINESS_RUNTIME_MODULES, {
+            source: 'login_success',
+        });
         startUnifiedScheduler();
-        // 每日礼包/任务改为跨日调度，不在农场轮询内执行
-        startDailyRoutineTimer();
+        runtimeEventBus.emit('lifecycle:login_ready', {
+            accountId: CONFIG.accountId || process.env.FARM_ACCOUNT_ID || '',
+        });
 
         // 立即发送一次状态
         syncStatus();
@@ -697,23 +749,10 @@ async function stopBot() {
     isRunning = false;
     loginReady = false;
     stopUnifiedScheduler();
-    networkEvents.off('kickout', onKickout);
-    if (onWsError) {
-        networkEvents.off('ws_error', onWsError);
-        onWsError = null;
-    }
-    if (onSellGain) {
-        networkEvents.off('sell', onSellGain);
-        onSellGain = null;
-    }
-    if (onFarmHarvested) {
-        networkEvents.off('farmHarvested', onFarmHarvested);
-        onFarmHarvested = null;
-    }
-    stopFarmCheckLoop();
-    stopFriendCheckLoop();
-    stopDailyRoutineTimer();
-    cleanupTaskSystem();
+    runtimeModuleManager.stopAll({
+        source: 'stop_bot',
+    });
+    runtimeNetworkEventBridge.detach();
     if (workerScheduler) {
         workerScheduler.clearAll();
     }
@@ -723,13 +762,143 @@ async function stopBot() {
     exitWorker(0);
 }
 
-function onKickout(payload) {
-    const reason = payload && payload.reason ? payload.reason : '未知';
-    log('系统', `检测到踢下线，准备自动停止账号。原因: ${reason}`);
-    sendToMaster({ type: 'account_kicked', reason });
-    getWorkerScheduler().setTimeoutTask('kickout_stop', 200, () => {
-        stopBot().catch(() => exitWorker(0));
+function softDisconnectCurrentSession() {
+    loginReady = false;
+    stopUnifiedScheduler();
+    runtimeModuleManager.stopMany(BUSINESS_RUNTIME_MODULES, {
+        source: 'soft_disconnect',
     });
+    cleanup();
+}
+
+function reloadRuntimeModuleTarget(targetName, options = {}) {
+    const normalizedTarget = String(targetName || '').trim();
+    const plan = getRuntimeModuleReloadPlan(normalizedTarget);
+    if (!plan) {
+        throw new Error(`不支持的 runtime 模块热重载目标: ${normalizedTarget || '<empty>'}`);
+    }
+    const preflight = getRuntimeReloadTargetPreview(normalizedTarget);
+    if (preflight && preflight.inCooldown && options.force !== true) {
+        const cooldownError = new Error(formatRuntimeReloadCooldownMessage(preflight));
+        cooldownError.code = 'RUNTIME_RELOAD_COOLDOWN';
+        cooldownError.details = {
+            target: normalizedTarget,
+            cooldownRemainingMs: preflight.cooldownRemainingMs,
+            cooldownMs: preflight.cooldownMs,
+        };
+        throw cooldownError;
+    }
+
+    const affectsBusinessModules = plan.modules.some(name => BUSINESS_RUNTIME_MODULES.includes(name));
+    const shouldResumeUnifiedScheduler = affectsBusinessModules && unifiedSchedulerRunning;
+    const startedAt = Date.now();
+    const beforeSnapshot = getWorkerSchedulerSnapshotForReloadPreview();
+    if (shouldResumeUnifiedScheduler) {
+        stopUnifiedScheduler();
+    }
+
+    let reloadDetails;
+    let reloadError = null;
+    try {
+        reloadDetails = runtimeModuleManager.reloadMany(plan.modules, {
+            ...options,
+            cacheKeys: plan.cacheKeys,
+            source: options.source || 'runtime_reload',
+            reason: options.reason || `runtime_reload:${normalizedTarget}`,
+            target: normalizedTarget,
+        });
+    } catch (error) {
+        reloadError = error;
+    } finally {
+        if (shouldResumeUnifiedScheduler && isRunning && loginReady) {
+            startUnifiedScheduler();
+        }
+    }
+    if (reloadError) {
+        const finishedAt = Date.now();
+        const failureSummary = createRuntimeReloadSummary(
+            normalizedTarget,
+            plan,
+            options,
+            beforeSnapshot,
+            getWorkerSchedulerSnapshotForReloadPreview(),
+            {
+                source: options.source || 'runtime_reload',
+                result: 'error',
+                startedAt,
+                finishedAt,
+                unifiedSchedulerResumed: shouldResumeUnifiedScheduler && unifiedSchedulerRunning === true,
+                error: reloadError && reloadError.message ? reloadError.message : String(reloadError || '未知错误'),
+            },
+        );
+        appendRuntimeReloadHistory(plan, failureSummary);
+        log('系统', `运行时模块热重载失败: ${normalizedTarget}`, {
+            module: 'system',
+            event: 'runtime_reload',
+            result: 'error',
+            target: normalizedTarget,
+            modules: [...plan.modules],
+            durationMs: failureSummary.durationMs,
+            forced: options.force === true,
+            error: failureSummary.error,
+        });
+        throw reloadError;
+    }
+
+    const finishedAt = Date.now();
+    const afterSnapshot = getWorkerSchedulerSnapshotForReloadPreview();
+    const reloadSummary = createRuntimeReloadSummary(
+        normalizedTarget,
+        plan,
+        options,
+        beforeSnapshot,
+        afterSnapshot,
+        {
+            source: options.source || 'runtime_reload',
+            result: 'ok',
+            startedAt,
+            finishedAt,
+            unifiedSchedulerResumed: shouldResumeUnifiedScheduler && unifiedSchedulerRunning === true,
+        },
+    );
+    const historyEntry = appendRuntimeReloadHistory(plan, reloadSummary);
+    recordRuntimeReloadActivity(normalizedTarget, plan, {
+        source: options.source || 'runtime_reload',
+        result: 'ok',
+        reloadedAt: finishedAt,
+        lastReloadSummary: reloadSummary,
+    });
+
+    const payload = {
+        target: normalizedTarget,
+        modules: [...plan.modules],
+        restartedModules: reloadDetails.restartedNames || [],
+        cacheKeys: reloadDetails.cacheKeys || [],
+        description: plan.description || '',
+        loginReady,
+        unifiedSchedulerResumed: shouldResumeUnifiedScheduler && isRunning && loginReady,
+        forced: options.force === true,
+        reloadedAt: finishedAt,
+        cooldownMs: Math.max(0, Number(plan.cooldownMs) || DEFAULT_RUNTIME_RELOAD_COOLDOWN_MS),
+        durationMs: reloadSummary.durationMs,
+        summary: reloadSummary,
+        history: historyEntry,
+    };
+
+    log('系统', `运行时模块已热重载: ${normalizedTarget} -> ${payload.modules.join(', ')}`, {
+        module: 'system',
+        event: 'runtime_reload',
+        result: 'ok',
+        target: normalizedTarget,
+        modules: payload.modules,
+        restartedModules: payload.restartedModules,
+        cacheCount: payload.cacheKeys.length,
+        durationMs: payload.durationMs,
+        forced: payload.forced,
+    });
+    runtimeEventBus.emit('lifecycle:runtime_module_reloaded', payload);
+    syncStatus();
+    return payload;
 }
 
 // 处理来自 Admin 面板的直接调用请求 (如: 购买种子、开关设置等)
@@ -739,33 +908,39 @@ async function handleApiCall(msg) {
     let error = null;
 
     try {
+        const farmService = getFarmService();
+        const friendService = getFriendService();
+        const warehouseService = getWarehouseService();
         switch (method) {
             case 'getLands':
-                result = await getLandsDetail();
+                result = await farmService.getLandsDetail();
                 break;
             case 'getFriends':
-                result = await getFriendsList();
+                result = await friendService.getFriendsList();
                 break;
             case 'getFriendLands':
-                result = await getFriendLandsDetail(args[0]);
+                result = await friendService.getFriendLandsDetail(args[0]);
                 break;
             case 'getInteractRecords':
                 result = await getInteractRecords(args[0]);
                 break;
             case 'doFriendOp':
-                result = await doFriendOperation(args[0], args[1]);
+                result = await friendService.doFriendOperation(args[0], args[1]);
                 break;
             case 'doFriendBatchOp':
-                result = await doFriendBatchOperation(args[0], args[1], args[2] || {});
+                result = await friendService.doFriendBatchOperation(args[0], args[1], args[2] || {});
                 break;
             case 'getSeeds':
-                result = await getAvailableSeeds();
+                result = await farmService.getAvailableSeeds();
                 break;
             case 'getBag':
-                result = await require('../services/warehouse').getBagDetail();
+                result = await warehouseService.getBagDetail();
+                break;
+            case 'getPlantableBagSeeds':
+                result = await warehouseService.getPlantableBagSeeds(args[0] || {});
                 break;
             case 'useBagItem':
-                result = await require('../services/warehouse').useItem(args[0], args[1] || 1, args[2] || []);
+                result = await warehouseService.useItem(args[0], args[1] || 1, args[2] || []);
                 break;
             case 'getMallGoods':
                 result = await getMallGoodsCatalog(args[0]);
@@ -786,13 +961,13 @@ async function handleApiCall(msg) {
                 result = await buyShopGoods(args[0], args[1], args[2]);
                 break;
             case 'getSellPreview':
-                result = await getSellPreview(args[0]);
+                result = await warehouseService.getSellPreview(args[0]);
                 break;
             case 'sellByPolicy':
-                result = await sellByPolicy(args[0], args[1] || { manual: true });
+                result = await warehouseService.sellByPolicy(args[0], args[1] || { manual: true });
                 break;
             case 'sellSelected':
-                result = await sellSelectedItems(args[0], args[1] || {});
+                result = await warehouseService.sellSelectedItems(args[0], args[1] || {});
                 break;
             case 'setAutomation': {
                 const payload = args && args[0] ? args[0] : {};
@@ -801,7 +976,7 @@ async function handleApiCall(msg) {
                 break;
             }
             case 'doFarmOp':
-                result = await runFarmOperation(args[0]); // opType
+                result = await farmService.runFarmOperation(args[0]); // opType
                 break;
             case 'getAnalytics': {
                 const { getPlantRankings } = require('../services/analytics');
@@ -813,6 +988,15 @@ async function handleApiCall(msg) {
                 break;
             case 'getSchedulers':
                 result = getSchedulerRegistrySnapshot();
+                break;
+            case 'reloadRuntimeModule':
+                result = reloadRuntimeModuleTarget(args[0], args[1] || {});
+                break;
+            case 'getReloadableRuntimeModules':
+                result = getReloadableRuntimeModuleTargets();
+                break;
+            case 'getRuntimeReloadHistory':
+                result = getRuntimeReloadHistoryEntries();
                 break;
             default:
                 error = '未知调用方法';
@@ -829,13 +1013,17 @@ async function handleApiCall(msg) {
 
 async function getDailyGiftOverview() {
     const auto = getAutomation() || {};
-    const task = getTaskDailyStateLikeApp
-        ? await getTaskDailyStateLikeApp()
-        : (getTaskClaimDailyState ? getTaskClaimDailyState() : { doneToday: false, lastClaimAt: 0 });
-    const growthTask = getGrowthTaskStateLikeApp
-        ? await getGrowthTaskStateLikeApp()
+    const taskService = getTaskService();
+    const task = typeof taskService.getTaskDailyStateLikeApp === 'function'
+        ? await taskService.getTaskDailyStateLikeApp()
+        : (typeof taskService.getTaskClaimDailyState === 'function'
+            ? taskService.getTaskClaimDailyState()
+            : { doneToday: false, lastClaimAt: 0 });
+    const growthTask = typeof taskService.getGrowthTaskStateLikeApp === 'function'
+        ? await taskService.getGrowthTaskStateLikeApp()
         : { doneToday: false, completedCount: 0, totalCount: 0, tasks: [] };
     const email = getEmailDailyState ? getEmailDailyState() : { doneToday: false, lastCheckAt: 0 };
+    const fertilizerBuy = getFertilizerBuyDailyState ? getFertilizerBuyDailyState() : { doneToday: false, lastSuccessAt: 0, lastDecisionAt: 0, result: '', reason: '', message: '', count: 0, typeCounts: { normal: 0, organic: 0 }, containerHours: { normal: 0, organic: 0 }, targetHours: { normal: 0, organic: 0 }, limit: 0, missingTypes: [] };
     const free = getFreeGiftDailyState ? getFreeGiftDailyState() : { doneToday: false, lastClaimAt: 0 };
     const share = getShareDailyState ? getShareDailyState() : { doneToday: false, lastClaimAt: 0 };
     const vip = getVipDailyState ? getVipDailyState() : { doneToday: false, lastClaimAt: 0 };
@@ -863,6 +1051,24 @@ async function getDailyGiftOverview() {
                 totalCount: Number(task.totalCount || 3),
             },
             { key: 'email_rewards', label: '邮箱奖励', enabled: !!auto.email, doneToday: !!email.doneToday, lastAt: Number(email.lastCheckAt || 0) },
+            {
+                key: 'fertilizer_buy',
+                label: '自动购肥',
+                enabled: !!auto.fertilizer_buy,
+                doneToday: !!fertilizerBuy.doneToday,
+                lastAt: Number(fertilizerBuy.lastDecisionAt || fertilizerBuy.lastSuccessAt || 0),
+                lastSuccessAt: Number(fertilizerBuy.lastSuccessAt || 0),
+                result: fertilizerBuy.result || '',
+                reason: fertilizerBuy.reason || '',
+                message: fertilizerBuy.message || '',
+                completedCount: Number(fertilizerBuy.count || 0),
+                totalCount: Number(fertilizerBuy.limit || 0),
+                containerHours: fertilizerBuy.containerHours || { normal: 0, organic: 0 },
+                targetHours: fertilizerBuy.targetHours || { normal: 0, organic: 0 },
+                typeCounts: fertilizerBuy.typeCounts || { normal: 0, organic: 0 },
+                missingTypes: Array.isArray(fertilizerBuy.missingTypes) ? fertilizerBuy.missingTypes : [],
+                pausedNoGoldToday: !!fertilizerBuy.pausedNoGoldToday,
+            },
             { key: 'mall_free_gifts', label: '商城免费礼包', enabled: !!auto.free_gifts, doneToday: !!free.doneToday, lastAt: Number(free.lastClaimAt || 0) },
             { key: 'daily_share', label: '分享礼包', enabled: !!auto.share_reward, doneToday: !!share.doneToday, lastAt: Number(share.lastClaimAt || 0) },
             {
@@ -931,7 +1137,7 @@ function syncStatus() {
     fullStats.preferredSeed = getPreferredSeed();
     fullStats.levelProgress = expProgress;
     fullStats.configRevision = appliedConfigRevision;
-    const modePolicy = getRuntimeAccountModePolicy();
+    const modePolicy = getAccountModePolicyService().getRuntimeAccountModePolicy();
     fullStats.accountMode = modePolicy.accountMode || 'main';
     fullStats.effectiveMode = modePolicy.effectiveMode || fullStats.accountMode;
     fullStats.modeScope = modePolicy.modeScope || {};

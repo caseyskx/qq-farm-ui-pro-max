@@ -1,24 +1,22 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
-import api from '@/api'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import BaseSwitch from '@/components/ui/BaseSwitch.vue'
 import { useAccountStore } from '@/stores/account'
-import { useFarmStore } from '@/stores/farm'
 import { useFriendStore } from '@/stores/friend'
 import { useSettingStore } from '@/stores/setting'
+import type { CropAtlasEntry } from '@/utils/crop-atlas'
+import { loadCropAtlasEntries, normalizeCropSelectionIds } from '@/utils/crop-atlas'
 import { localizeRuntimeText } from '@/utils/runtime-text'
 
 const accountStore = useAccountStore()
-const farmStore = useFarmStore()
 const friendStore = useFriendStore()
 const settingStore = useSettingStore()
 
 const { currentAccountId, accounts } = storeToRefs(accountStore)
-const { seeds } = storeToRefs(farmStore)
 const { friends: liveFriends, cachedFriends, loading: friendsLoading } = storeToRefs(friendStore)
 const { settings, loading: settingsLoading } = storeToRefs(settingStore)
 
@@ -54,11 +52,15 @@ function getFriendDisplayName(friend: any) {
 }
 
 function getFriendSecondaryLabel(friend: any) {
+  const gid = String(getFriendSelectionId(friend) || '')
   const uin = String(friend?.uin || '').trim()
-  if (uin)
+  if (uin && /^\d+$/.test(uin) && uin !== gid)
     return `QQ ${uin}`
-  const gid = getFriendSelectionId(friend)
-  return gid > 0 ? `GID ${gid}` : '--'
+  const openId = String(friend?.openId || friend?.open_id || '').trim()
+  if (openId && openId !== gid)
+    return `标识 ${openId}`
+  const numericGid = getFriendSelectionId(friend)
+  return numericGid > 0 ? `GID ${numericGid}` : '--'
 }
 
 const resolvedFriends = computed(() => {
@@ -89,7 +91,10 @@ function getFriendAvatar(friend: any) {
     return direct
   const gid = String(getFriendSelectionId(friend) || '')
   const idCandidate = String(friend?.id || '').trim()
-  const uin = String(friend?.uin || '').trim() || (idCandidate && idCandidate !== gid ? idCandidate : '')
+  const rawUin = String(friend?.uin || '').trim()
+  const uin = rawUin && /^\d+$/.test(rawUin) && rawUin !== gid
+    ? rawUin
+    : (idCandidate && /^\d+$/.test(idCandidate) && idCandidate !== gid ? idCandidate : '')
   if (uin)
     return `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=100`
   return ''
@@ -146,18 +151,24 @@ const localSettings = ref({
   } as Record<string, any>,
 })
 
+const cropEntries = ref<CropAtlasEntry[]>([])
+
 // === UI State ===
 const activeTab = ref<'friends' | 'plants'>('friends')
 const searchQuery = ref('')
 const selectedAccount = ref<string>(currentAccountId.value || '')
+const selectedAccountRecord = computed(() =>
+  accounts.value.find(a => String(a?.id || a?.uin || '') === String(selectedAccount.value || '')),
+)
+const showFriendsLoading = computed(() => friendsLoading.value && resolvedFriends.value.length === 0)
 const footerSelectionSummary = computed(() => activeTab.value === 'friends'
   ? `当前名单 ${localSettings.value.automation.stealFriendFilterIds.length}/${resolvedFriends.value.length || 0}`
-  : `当前作物 ${localSettings.value.automation.stealFilterPlantIds.length}/${seeds.value?.length || 0}`)
+  : `当前作物 ${localSettings.value.automation.stealFilterPlantIds.length}/${cropEntries.value.length || 0}`)
 
 function syncLocalSettings() {
   if (settings.value && settings.value.automation) {
     const s = settings.value.automation as any
-    // 后端返回的 plantIds/friendIds 为字符串，需转为数字以便与 seed.seedId 等正确匹配
+    // 后端返回的 plantIds/friendIds 为字符串，先统一转为数字
     localSettings.value.automation = {
       stealFilterEnabled: s.stealFilterEnabled ?? false,
       stealFilterMode: s.stealFilterMode ?? 'blacklist',
@@ -170,45 +181,57 @@ function syncLocalSettings() {
   }
 }
 
-const cropAnalytics = ref<Record<string, any>>({})
-
 async function loadData() {
-  if (selectedAccount.value) {
-    if (currentAccountId.value !== selectedAccount.value) {
-      accountStore.setCurrentAccount({ id: selectedAccount.value } as any)
-    }
-    avatarErrorKeys.value.clear()
-    plantImageErrorKeys.value.clear()
-    plantImageFallbackIndex.value = {}
-    cropAnalytics.value = {}
-    liveFriends.value = []
-    cachedFriends.value = []
-    await settingStore.fetchSettings(selectedAccount.value)
+  const accountId = String(selectedAccount.value || '').trim()
+  if (!accountId)
+    return
+
+  if (currentAccountId.value !== accountId) {
+    await accountStore.setCurrentAccount({ id: accountId } as any)
+  }
+
+  avatarErrorKeys.value.clear()
+  plantImageErrorKeys.value.clear()
+  plantImageFallbackIndex.value = {}
+  cropEntries.value = []
+  liveFriends.value = []
+  cachedFriends.value = []
+
+  try {
+    await settingStore.fetchSettings(accountId)
     syncLocalSettings()
+  }
+  catch (error) {
+    console.error('获取偷菜设置失败:', error)
+  }
 
-    // 加载全部种子和好友(使用本地缓存避免风控)
-    await farmStore.fetchSeeds(selectedAccount.value)
-    await friendStore.fetchCachedFriends(selectedAccount.value)
+  try {
+    await friendStore.fetchCachedFriends(accountId)
     if (!cachedFriends.value.length) {
-      await friendStore.fetchFriends(selectedAccount.value)
+      await friendStore.fetchFriends(accountId)
     }
+    else if (selectedAccountRecord.value?.running) {
+      // 在线账号优先展示缓存，再后台补一轮实时好友，修正昵称/头像/openId
+      void friendStore.fetchFriends(accountId)
+    }
+  }
+  catch (error) {
+    console.error('获取好友列表失败:', error)
+  }
 
-    try {
-      const res = await api.get('/api/analytics', {
-        headers: { 'x-account-id': selectedAccount.value },
-        params: { sort: 'level' },
-      })
-      if (res.data && res.data.ok) {
-        const map: Record<string, any> = {}
-        for (const item of res.data.data) {
-          map[item.seedId] = item
-        }
-        cropAnalytics.value = map
-      }
-    }
-    catch (e) {
-      console.error('获取作物分析数据失败:', e)
-    }
+  try {
+    const atlasEntries = await loadCropAtlasEntries({
+      accountId,
+      sort: 'level',
+    })
+    cropEntries.value = atlasEntries
+    localSettings.value.automation.stealFilterPlantIds = normalizeCropSelectionIds(
+      localSettings.value.automation.stealFilterPlantIds,
+      atlasEntries,
+    )
+  }
+  catch (error) {
+    console.error('获取作物分析数据失败:', error)
   }
 }
 
@@ -240,47 +263,54 @@ watch(() => currentAccountId.value, (newId) => {
 // === Plants Logic ===
 
 const filteredPlants = computed(() => {
-  if (!seeds.value)
+  if (!cropEntries.value.length)
     return []
-  let res = [...seeds.value]
+  let res = [...cropEntries.value]
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
-    res = res.filter(s => s.name.toLowerCase().includes(q))
+    res = res.filter(crop => String(crop?.name || '').toLowerCase().includes(q))
   }
   return res
 })
 
-function isPlantSelected(seedId: number) {
-  return localSettings.value.automation.stealFilterPlantIds.includes(seedId)
+function getPlantSelectionId(crop: CropAtlasEntry) {
+  return Number(crop?.plantId || 0)
 }
 
-function togglePlant(seedId: number) {
+function isPlantSelected(crop: CropAtlasEntry) {
+  return localSettings.value.automation.stealFilterPlantIds.includes(getPlantSelectionId(crop))
+}
+
+function togglePlant(crop: CropAtlasEntry) {
+  const plantId = getPlantSelectionId(crop)
+  if (!plantId)
+    return
   const arr = localSettings.value.automation.stealFilterPlantIds
-  const idx = arr.indexOf(seedId)
+  const idx = arr.indexOf(plantId)
   if (idx > -1) {
     arr.splice(idx, 1)
   }
   else {
-    arr.push(seedId)
+    arr.push(plantId)
   }
 }
 
 // 批量设置植物选中状态
 function selectAllPlants() {
   const currentSet = new Set(localSettings.value.automation.stealFilterPlantIds)
-  filteredPlants.value.forEach(s => currentSet.add(s.seedId))
+  filteredPlants.value.forEach(crop => currentSet.add(getPlantSelectionId(crop)))
   localSettings.value.automation.stealFilterPlantIds = Array.from(currentSet)
 }
 
 function clearAllPlants() {
   const currentSet = new Set(localSettings.value.automation.stealFilterPlantIds)
-  filteredPlants.value.forEach(s => currentSet.delete(s.seedId))
+  filteredPlants.value.forEach(crop => currentSet.delete(getPlantSelectionId(crop)))
   localSettings.value.automation.stealFilterPlantIds = Array.from(currentSet)
 }
 
 function invertAllPlants() {
   const currentArr = localSettings.value.automation.stealFilterPlantIds
-  const filteredIds = filteredPlants.value.map(s => s.seedId)
+  const filteredIds = filteredPlants.value.map(crop => getPlantSelectionId(crop))
   const newArr = currentArr.filter((id: number) => !filteredIds.includes(id))
   filteredIds.forEach((id: number) => {
     if (!currentArr.includes(id))
@@ -348,32 +378,30 @@ function invertAllFriends() {
   localSettings.value.automation.stealFriendFilterIds = newArr
 }
 
-function getPlantImageCandidates(seed: any) {
-  const seedId = Number(seed?.seedId || 0)
+function getPlantImageCandidates(crop: CropAtlasEntry) {
+  const seedId = Number(crop?.seedId || 0)
   return [
-    getSafeImageUrl(seed?.seedImage || ''),
-    getSafeImageUrl(seed?.image || ''),
-    getSafeImageUrl(cropAnalytics.value[seedId]?.image || ''),
+    getSafeImageUrl(crop?.image || ''),
     seedId > 0 ? `https://qzonestyle.gtimg.cn/qzone/sngapp/app/appstore/app_100371286/crop/${seedId}.png` : '',
   ].filter((item, index, list) => !!item && list.indexOf(item) === index)
 }
 
-function getPlantImage(seed: any) {
-  const seedId = Number(seed?.seedId || 0)
+function getPlantImage(crop: CropAtlasEntry) {
+  const seedId = Number(crop?.seedId || 0)
   const fallbackIndex = plantImageFallbackIndex.value[seedId] || 0
-  return getPlantImageCandidates(seed)[fallbackIndex] || ''
+  return getPlantImageCandidates(crop)[fallbackIndex] || ''
 }
 
-function canShowPlantImage(seed: any) {
-  const seedId = Number(seed?.seedId || 0)
-  return !!getPlantImage(seed) && !plantImageErrorKeys.value.has(seedId)
+function canShowPlantImage(crop: CropAtlasEntry) {
+  const seedId = Number(crop?.seedId || 0)
+  return !!getPlantImage(crop) && !plantImageErrorKeys.value.has(seedId)
 }
 
-function handlePlantImageError(seed: any, event: Event) {
-  const seedId = Number(seed?.seedId || 0)
+function handlePlantImageError(crop: CropAtlasEntry, event: Event) {
+  const seedId = Number(crop?.seedId || 0)
   if (!seedId)
     return
-  const candidates = getPlantImageCandidates(seed)
+  const candidates = getPlantImageCandidates(crop)
   const currentIndex = plantImageFallbackIndex.value[seedId] || 0
   if (currentIndex < candidates.length - 1) {
     plantImageFallbackIndex.value = {
@@ -514,7 +542,7 @@ void getPlantCheckClasses
             :class="getStealTabClasses(activeTab === 'plants')"
             @click="activeTab = 'plants'; searchQuery = ''"
           >
-            🌾 作物偷菜过滤 ({{ localSettings.automation.stealFilterPlantIds.length }}/{{ seeds.length }})
+            🌾 作物偷菜过滤 ({{ localSettings.automation.stealFilterPlantIds.length }}/{{ cropEntries.length }})
           </button>
         </div>
 
@@ -629,7 +657,7 @@ void getPlantCheckClasses
       <div class="steal-list-shell glass-panel min-h-[360px] p-4">
         <!-- Friends Grid -->
         <div v-if="activeTab === 'friends'" class="grid grid-cols-1 gap-3 lg:grid-cols-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div v-if="friendsLoading" class="glass-text-muted col-span-full flex flex-col items-center justify-center py-20">
+          <div v-if="showFriendsLoading" class="glass-text-muted col-span-full flex flex-col items-center justify-center py-20">
             <div class="i-svg-spinners-ring-resize mb-3 text-4xl text-primary-500" />
             <p>正在加载好友列表...</p>
           </div>
@@ -681,7 +709,7 @@ void getPlantCheckClasses
 
         <!-- Plants Grid (Rich View) -->
         <div v-if="activeTab === 'plants'" class="grid grid-cols-1 gap-3 lg:grid-cols-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div v-if="!seeds || seeds.length === 0" class="glass-text-muted col-span-full flex flex-col items-center justify-center py-20">
+          <div v-if="cropEntries.length === 0" class="glass-text-muted col-span-full flex flex-col items-center justify-center py-20">
             <div class="i-carbon-search mx-auto mb-3 text-5xl opacity-30" />
             <p class="text-lg">
               没有加载到作物数据
@@ -695,32 +723,32 @@ void getPlantCheckClasses
           </div>
 
           <div
-            v-for="seed in filteredPlants"
-            :key="seed.seedId"
+            v-for="crop in filteredPlants"
+            :key="crop.plantId"
             class="group flex cursor-pointer select-none items-start justify-between border rounded-xl p-3.5 transition-all"
-            :class="getPlantCardClasses(isPlantSelected(seed.seedId))"
-            @click="togglePlant(seed.seedId)"
+            :class="getPlantCardClasses(isPlantSelected(crop))"
+            @click="togglePlant(crop)"
           >
             <div class="min-w-0 flex flex-1 items-start gap-3">
               <div class="steal-plant-thumb relative h-12 w-12 flex shrink-0 items-center justify-center overflow-hidden rounded-lg p-1 shadow-sm">
                 <img
-                  v-if="canShowPlantImage(seed)"
-                  :src="getPlantImage(seed)"
+                  v-if="canShowPlantImage(crop)"
+                  :src="getPlantImage(crop)"
                   class="z-10 max-h-full max-w-full object-contain drop-shadow-sm"
                   loading="lazy"
                   referrerpolicy="no-referrer"
-                  @error="handlePlantImageError(seed, $event)"
+                  @error="handlePlantImageError(crop, $event)"
                 >
                 <div class="steal-plant-thumb-icon i-carbon-sprout absolute inset-0 z-0 flex items-center justify-center text-2xl" />
               </div>
               <div class="min-w-0 flex flex-1 flex-col">
                 <div class="min-w-0 w-full flex items-center justify-between pr-1">
                   <div class="min-w-0 flex items-center gap-1.5">
-                    <span class="glass-text-main truncate text-[15px] font-extrabold" :title="seed.name">
-                      {{ seed.name }}
+                    <span class="glass-text-main truncate text-[15px] font-extrabold" :title="crop.name">
+                      {{ crop.name }}
                     </span>
                     <span class="steal-level-pill ui-meta-chip--neutral shrink-0 rounded px-1.5 py-0.5 text-xs font-bold">
-                      Lv {{ cropAnalytics[seed.seedId]?.level || seed.requiredLevel }}
+                      Lv {{ crop.level || '-' }}
                     </span>
                   </div>
                 </div>
@@ -728,15 +756,15 @@ void getPlantCheckClasses
                 <div class="mt-1.5 space-y-1.5">
                   <div class="flex items-center gap-1.5 text-xs">
                     <div class="steal-metric-pill ui-meta-chip--info whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
-                      时经: <span class="font-bold">{{ cropAnalytics[seed.seedId]?.expPerHour ?? '-' }}</span>
+                      时经: <span class="font-bold">{{ crop.expPerHour ?? '-' }}</span>
                     </div>
                     <div class="steal-metric-pill ui-meta-chip--warning whitespace-nowrap rounded-sm px-1.5 py-0.5 font-medium">
-                      时润: <span class="font-bold">{{ cropAnalytics[seed.seedId]?.profitPerHour ?? '-' }}</span>
+                      时润: <span class="font-bold">{{ crop.profitPerHour ?? '-' }}</span>
                     </div>
                   </div>
                   <div class="flex items-center gap-1.5 text-[11px] opacity-70">
                     <div class="steal-metric-text-info font-medium">
-                      普时经: <span class="font-bold">{{ cropAnalytics[seed.seedId]?.normalFertilizerExpPerHour ?? '-' }}</span>
+                      普时经: <span class="font-bold">{{ crop.normalFertilizerExpPerHour ?? '-' }}</span>
                     </div>
                   </div>
                 </div>
@@ -745,9 +773,9 @@ void getPlantCheckClasses
 
             <div
               class="ml-2 mt-1 h-[22px] w-[22px] flex shrink-0 items-center justify-center border rounded transition-colors"
-              :class="getPlantCheckClasses(isPlantSelected(seed.seedId))"
+              :class="getPlantCheckClasses(isPlantSelected(crop))"
             >
-              <div v-if="isPlantSelected(seed.seedId)" class="i-carbon-checkmark text-sm" />
+              <div v-if="isPlantSelected(crop)" class="i-carbon-checkmark text-sm" />
             </div>
           </div>
         </div>

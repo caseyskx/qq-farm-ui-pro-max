@@ -16,12 +16,112 @@ function registerSystemPublicRoutes({
     getAccId,
     getProvider,
     getSchedulerRegistrySnapshot,
+    adminOperationLogService,
     handleApiError,
     readLatestQqFriendDiagnostics,
 }) {
     const diagnosticsReader = typeof readLatestQqFriendDiagnostics === 'function'
         ? readLatestQqFriendDiagnostics
         : readLatestQqFriendDiagnosticsDefault;
+    const RUNTIME_RELOAD_TARGET_LABELS = Object.freeze({
+        farm: '农场模块',
+        friend: '好友模块',
+        task: '任务模块',
+        warehouse: '仓库模块',
+        business: '全部业务模块',
+    });
+
+    function getRuntimeReloadTargetLabel(target) {
+        const normalized = String(target || '').trim();
+        return RUNTIME_RELOAD_TARGET_LABELS[normalized] || normalized || '未知模块';
+    }
+
+    async function resolveRuntimeReloadAccountLabel(accountId) {
+        const normalizedAccountId = String(accountId || '').trim();
+        if (!normalizedAccountId) {
+            return '';
+        }
+
+        try {
+            const snapshot = await getAccountsSnapshot();
+            const accounts = Array.isArray(snapshot && snapshot.accounts) ? snapshot.accounts : [];
+            const matched = accounts.find(item => String(item && item.id || '') === normalizedAccountId);
+            return String(
+                (matched && (matched.name || matched.nick || matched.username || matched.id))
+                || normalizedAccountId
+            ).trim() || normalizedAccountId;
+        } catch {
+            return normalizedAccountId;
+        }
+    }
+
+    async function recordRuntimeReloadAudit({
+        req,
+        provider,
+        accountId,
+        accountLabel,
+        target,
+        modules,
+        source,
+        error,
+    }) {
+        const actorUsername = String(req.currentUser?.username || '').trim();
+        const actorRole = String(req.currentUser?.role || '').trim();
+        const targetLabel = getRuntimeReloadTargetLabel(target);
+        const moduleNames = Array.isArray(modules) ? modules.map(item => String(item || '').trim()).filter(Boolean) : [];
+        const reason = String(error || '').trim();
+        const actorLabel = actorUsername
+            ? `${actorRole === 'admin' ? '管理员' : '用户'} ${actorUsername}`
+            : '当前用户';
+        const resolvedAccountLabel = String(accountLabel || accountId || '').trim();
+
+        if (provider && typeof provider.addAccountLog === 'function' && accountId) {
+            const action = reason ? 'runtime_reload_failed' : 'runtime_reload';
+            const message = reason
+                ? `${actorLabel} 热重载 ${resolvedAccountLabel} 的${targetLabel}失败: ${reason}`
+                : `${actorLabel} 热重载 ${resolvedAccountLabel} 的${targetLabel}${moduleNames.length ? `，重建 ${moduleNames.join(' / ')}` : ''}`;
+            provider.addAccountLog(action, message, accountId, resolvedAccountLabel, {
+                actorUsername,
+                actorRole,
+                target,
+                targetLabel,
+                modules: moduleNames,
+                source: String(source || 'admin_api').trim() || 'admin_api',
+                result: reason ? 'error' : 'ok',
+                reason,
+            });
+        }
+
+        if (
+            req.currentUser?.role === 'admin'
+            && adminOperationLogService
+            && typeof adminOperationLogService.createAdminOperationLog === 'function'
+            && actorUsername
+        ) {
+            try {
+                await adminOperationLogService.createAdminOperationLog({
+                    actorUsername,
+                    scope: 'runtime',
+                    actionLabel: `热重载 ${targetLabel}`,
+                    status: reason ? 'error' : 'success',
+                    totalCount: 1,
+                    successCount: reason ? 0 : 1,
+                    failedCount: reason ? 1 : 0,
+                    affectedNames: resolvedAccountLabel ? [resolvedAccountLabel] : [],
+                    failedNames: reason && resolvedAccountLabel ? [resolvedAccountLabel] : [],
+                    detailLines: [
+                        resolvedAccountLabel ? `账号：${resolvedAccountLabel}` : '',
+                        `目标模块族：${targetLabel} (${String(target || '').trim() || '-'})`,
+                        moduleNames.length ? `重建模块：${moduleNames.join('、')}` : '',
+                        `来源：${String(source || 'admin_api').trim() || 'admin_api'}`,
+                        reason ? `失败原因：${reason}` : '',
+                    ].filter(Boolean),
+                });
+            } catch {
+                // 审计日志不能影响主流程
+            }
+        }
+    }
 
     function buildPublicWebAssetsSnapshot() {
         if (typeof inspectWebDistState !== 'function') {
@@ -231,8 +331,70 @@ function registerSystemPublicRoutes({
                 const data = await provider.getSchedulerStatus(id);
                 return res.json({ ok: true, data });
             }
-            return res.json({ ok: true, data: { runtime: getSchedulerRegistrySnapshot(), worker: null, workerError: '当前运行环境不支持调度器状态查询' } });
+            return res.json({
+                ok: true,
+                data: {
+                    runtime: getSchedulerRegistrySnapshot(),
+                    worker: null,
+                    workerError: '当前运行环境不支持调度器状态查询',
+                    reloadTargets: [],
+                    reloadHistory: [],
+                    reloadError: '当前运行环境不支持热重载查询',
+                },
+            });
         } catch (e) {
+            return handleApiError(res, e);
+        }
+    });
+
+    app.post('/api/scheduler/reload', async (req, res) => {
+        try {
+            const id = await getAccId(req);
+            const provider = getProvider();
+            const target = String(req.body && req.body.target || '').trim();
+            if (!target) {
+                return res.status(400).json({ ok: false, error: '缺少热重载目标' });
+            }
+            if (!provider || typeof provider.reloadRuntimeModule !== 'function') {
+                return res.status(400).json({ ok: false, error: '当前运行环境不支持热重载' });
+            }
+            const options = (req.body && typeof req.body.options === 'object') ? req.body.options : {};
+            const source = String(options.source || 'admin_api').trim() || 'admin_api';
+            const accountLabel = await resolveRuntimeReloadAccountLabel(id);
+            const data = await provider.reloadRuntimeModule(id, target, {
+                ...options,
+                source,
+            });
+            await recordRuntimeReloadAudit({
+                req,
+                provider,
+                accountId: id,
+                accountLabel,
+                target,
+                modules: Array.isArray(data && data.modules) ? data.modules : [],
+                source,
+                error: '',
+            });
+            return res.json({ ok: true, data });
+        } catch (e) {
+            try {
+                const id = await getAccId(req);
+                const provider = getProvider();
+                const target = String(req.body && req.body.target || '').trim();
+                const options = (req.body && typeof req.body.options === 'object') ? req.body.options : {};
+                await recordRuntimeReloadAudit({
+                    req,
+                    provider,
+                    accountId: id,
+                    accountLabel: await resolveRuntimeReloadAccountLabel(id),
+                    target,
+                    modules: [],
+                    source: String(options.source || 'admin_api').trim() || 'admin_api',
+                    error: e && e.message ? e.message : String(e || 'unknown'),
+                });
+            } catch {
+                // ignore audit failures here
+            }
             return handleApiError(res, e);
         }
     });

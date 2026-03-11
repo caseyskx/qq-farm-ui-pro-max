@@ -12,12 +12,26 @@ const actions = require('./friend/friend-actions');
 const decision = require('./friend/friend-decision');
 const scanner = require('./friend/friend-scanner');
 const state = require('./friend/friend-state');
+const { resetRuntimeAccountModePolicyState } = require('./account-mode-policy');
+
+function resetFriendRuntimeState() {
+    if (typeof scanner.resetFriendScannerRuntimeState === 'function') {
+        scanner.resetFriendScannerRuntimeState();
+    }
+    if (typeof actions.resetFriendActionRuntimeState === 'function') {
+        actions.resetFriendActionRuntimeState();
+    }
+    if (typeof resetRuntimeAccountModePolicyState === 'function') {
+        resetRuntimeAccountModePolicyState();
+    }
+}
 
 module.exports = {
     // 原有的扫描控制入口
     checkFriends: scanner.checkFriends,
     startFriendCheckLoop: scanner.startFriendCheckLoop,
     stopFriendCheckLoop: scanner.stopFriendCheckLoop,
+    resetFriendRuntimeState,
     refreshFriendCheckLoop: scanner.refreshFriendCheckLoop,
 
     // 原有申请入口

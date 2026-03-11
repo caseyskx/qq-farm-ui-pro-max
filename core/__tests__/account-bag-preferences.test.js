@@ -28,7 +28,7 @@ function createMysqlMock(initialState = {}) {
     async function handleQuery(sql, params = []) {
         const normalizedSql = String(sql).replace(/\s+/g, ' ').trim().toLowerCase();
 
-        if (normalizedSql.startsWith('select purchase_memory, activity_history from account_bag_preferences where account_id = ?')) {
+        if (normalizedSql.startsWith('select purchase_memory, activity_history, plantable_seed_snapshot, mall_resolver_cache from account_bag_preferences where account_id = ?')) {
             const accountId = String(params[0] || '');
             const row = state.preferences.find(item => String(item.account_id) === accountId) || null;
             return [row ? [row] : []];
@@ -46,6 +46,8 @@ function createMysqlMock(initialState = {}) {
                 account_id: account.id,
                 purchase_memory: params[0],
                 activity_history: params[1],
+                plantable_seed_snapshot: params[2],
+                mall_resolver_cache: params[3],
             };
             const existingIndex = state.preferences.findIndex(item => String(item.account_id) === accountId);
             if (existingIndex >= 0) {
@@ -124,11 +126,75 @@ test('account bag preferences persist purchase memory and activity history per a
                     details: [],
                 },
             ],
+            plantableSeedSnapshot: {
+                generatedAt: 0,
+                seeds: [],
+            },
+            mallResolverCache: {
+                fertilizerGoodsByType: {
+                    normal: null,
+                    organic: null,
+                },
+                lastAlertAt: 0,
+                lastAlertReason: '',
+            },
         });
 
         const loaded = await getAccountBagPreferences('101');
         assert.deepEqual(loaded, saved);
         assert.equal(mysqlMock.__state.preferences.length, 1);
+    } finally {
+        delete require.cache[accountBagPreferencesModulePath];
+        restoreMysql();
+    }
+});
+
+test('account bag preferences persist plantable seed snapshot and mall resolver cache', async () => {
+    const mysqlMock = createMysqlMock({
+        accounts: [{ id: 202 }],
+    });
+    const restoreMysql = mockModule(mysqlDbModulePath, mysqlMock);
+
+    try {
+        delete require.cache[accountBagPreferencesModulePath];
+        const { getAccountBagPreferences, saveAccountBagPreferences } = require(accountBagPreferencesModulePath);
+
+        await saveAccountBagPreferences('202', {
+            plantableSeedSnapshot: {
+                generatedAt: 1710000001111,
+                seeds: [
+                    { seedId: 20059, name: '银杏树苗', count: 4, usableCount: 3, reservedCount: 1, requiredLevel: 27, plantSize: 2, image: '/seed.png', unlocked: true },
+                ],
+            },
+            mallResolverCache: {
+                fertilizerGoodsByType: {
+                    normal: { goodsId: 1003, type: 'normal', name: '10小时化肥', packHours: 10, priceItemId: 1002, priceValue: 34, resolvedAt: 1710000002222 },
+                    organic: null,
+                },
+                lastAlertAt: 1710000003333,
+                lastAlertReason: 'normal:cache_stale',
+            },
+        });
+
+        const loaded = await getAccountBagPreferences('202');
+        assert.deepEqual(loaded, {
+            purchaseMemory: {},
+            activityHistory: [],
+            plantableSeedSnapshot: {
+                generatedAt: 1710000001111,
+                seeds: [
+                    { seedId: 20059, name: '银杏树苗', count: 4, usableCount: 3, reservedCount: 1, requiredLevel: 27, plantSize: 2, image: '/seed.png', unlocked: true },
+                ],
+            },
+            mallResolverCache: {
+                fertilizerGoodsByType: {
+                    normal: { goodsId: 1003, type: 'normal', name: '10小时化肥', packHours: 10, priceItemId: 1002, priceValue: 34, resolvedAt: 1710000002222 },
+                    organic: null,
+                },
+                lastAlertAt: 1710000003333,
+                lastAlertReason: 'normal:cache_stale',
+            },
+        });
     } finally {
         delete require.cache[accountBagPreferencesModulePath];
         restoreMysql();

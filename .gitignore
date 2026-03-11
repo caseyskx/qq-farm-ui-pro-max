@@ -76,6 +76,7 @@ github-sync/
 
 # Local-only archives and historical materials
 releases/
+release-assets/
 wxcode/
 nc_local_version/
 log开发日志/

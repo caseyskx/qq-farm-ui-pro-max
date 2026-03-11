@@ -1,4 +1,10 @@
 
+2026-03-11 发布链路归一与本地 Release 产物打包 前端：v4.5.20 后端：v4.5.20
+  - 🚀 [发布] 新增 `scripts/release/build-release-assets.sh`，本地可直接输出 Windows、Linux、macOS 二进制包、版本化部署包与离线部署包。
+  - 🐳 [发布] `scripts/docker/docker-build-multiarch.sh` 与 `scripts/docker/docker-sync.sh` 已统一到同一套多架构推送逻辑，默认同步 Docker Hub 与 GHCR。
+  - 🧱 [部署] 一键安装、更新与修复脚本会同时维护 `/opt/qq-farm-current` 与历史 `/opt/qq-farm-bot-current` 兼容软链，旧服修复和新入口可并存。
+  - 📚 [文档] 根 README 仅更新部署章节，并同步部署文档与发布工作流默认版本到 `v4.5.20`。
+
 2026-03-11 宿主机更新代理与部署统一入口上线 前端：v4.5.19 后端：v4.5.19
   - 🚀 [部署] 新增 `install-or-update.sh` 统一安装/更新入口，并补齐手动修复、核验和更新代理脚本。
   - 🛰️ [更新] 系统更新中台支持宿主机更新任务、批次重试、节点排空和更新代理桥接，便于测试服、正式服和旧服务器逐台滚动升级。

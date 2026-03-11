@@ -176,6 +176,7 @@ function createDataProvider(options) {
         doFriendOp: async (accountRef, gid, opType) => callWorkerApi(await resolveAccountRefId(accountRef), 'doFriendOp', gid, opType),
         doFriendBatchOp: async (accountRef, gids, opType, options) => callWorkerApi(await resolveAccountRefId(accountRef), 'doFriendBatchOp', gids, opType, options),
         getBag: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getBag'),
+        getPlantableBagSeeds: async (accountRef, options) => callWorkerApi(await resolveAccountRefId(accountRef), 'getPlantableBagSeeds', options),
         useBagItem: async (accountRef, itemId, count, landIds) => callWorkerApi(await resolveAccountRefId(accountRef), 'useBagItem', itemId, count, landIds),
         getMallGoods: async (accountRef, slotType) => callWorkerApi(await resolveAccountRefId(accountRef), 'getMallGoods', slotType),
         getMallCatalog: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getMallCatalog'),
@@ -188,6 +189,9 @@ function createDataProvider(options) {
         sellSelected: async (accountRef, itemIds, options) => callWorkerApi(await resolveAccountRefId(accountRef), 'sellSelected', itemIds, options),
         getDailyGifts: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getDailyGiftOverview'),
         getSeeds: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getSeeds'),
+        reloadRuntimeModule: async (accountRef, targetName, options) => callWorkerApi(await resolveAccountRefId(accountRef), 'reloadRuntimeModule', targetName, options),
+        getReloadableRuntimeModules: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getReloadableRuntimeModules'),
+        getRuntimeReloadHistory: async (accountRef) => callWorkerApi(await resolveAccountRefId(accountRef), 'getRuntimeReloadHistory'),
 
         setAutomation: async (accountRef, key, value) => {
             const accountId = await resolveAccountRefId(accountRef);
@@ -218,6 +222,8 @@ function createDataProvider(options) {
             const preferredSeedId = (body.preferredSeedId !== undefined)
                 ? body.preferredSeedId
                 : (body.preferredSeed !== undefined ? body.preferredSeed : body.seedId);
+            const bagSeedPriority = body.bagSeedPriority;
+            const bagSeedFallbackStrategy = body.bagSeedFallbackStrategy;
             const inventoryPlanting = body.inventoryPlanting;
             const derivedStealFilter = body.stealFilter !== undefined
                 ? body.stealFilter
@@ -245,6 +251,8 @@ function createDataProvider(options) {
                 plantingStrategy,
                 plantingFallbackStrategy,
                 preferredSeedId,
+                bagSeedPriority,
+                bagSeedFallbackStrategy,
                 inventoryPlanting,
                 intervals: body.intervals,
                 friendQuietHours: body.friendQuietHours,
@@ -296,6 +304,8 @@ function createDataProvider(options) {
                 plantingFallbackStrategy: store.getConfigSnapshot(accountId).plantingFallbackStrategy,
                 preferredSeed: store.getPreferredSeed(accountId),
                 preferredSeedId: store.getPreferredSeed(accountId),
+                bagSeedPriority: store.getConfigSnapshot(accountId).bagSeedPriority,
+                bagSeedFallbackStrategy: store.getConfigSnapshot(accountId).bagSeedFallbackStrategy,
                 inventoryPlanting: store.getConfigSnapshot(accountId).inventoryPlanting,
                 intervals: store.getIntervals(accountId),
                 friendQuietHours: store.getFriendQuietHours(accountId),
@@ -473,13 +483,16 @@ function createDataProvider(options) {
             const runtime = getSchedulerRegistrySnapshot();
             let worker = null;
             let workerError = '';
+            let reloadTargets = [];
+            let reloadHistory = [];
+            let reloadError = '';
 
             if (!accountId) {
-                return { accountId: '', runtime, worker, workerError };
+                return { accountId: '', runtime, worker, workerError, reloadTargets, reloadHistory, reloadError };
             }
 
             if (!workers[accountId]) {
-                return { accountId, runtime, worker, workerError: '账号未运行' };
+                return { accountId, runtime, worker, workerError: '账号未运行', reloadTargets, reloadHistory, reloadError };
             }
 
             try {
@@ -487,7 +500,17 @@ function createDataProvider(options) {
             } catch (e) {
                 workerError = (e && e.message) ? e.message : String(e || 'unknown');
             }
-            return { accountId, runtime, worker, workerError };
+            try {
+                reloadTargets = await callWorkerApi(accountId, 'getReloadableRuntimeModules');
+            } catch (e) {
+                reloadError = (e && e.message) ? e.message : String(e || 'unknown');
+            }
+            try {
+                reloadHistory = await callWorkerApi(accountId, 'getRuntimeReloadHistory');
+            } catch {
+                reloadHistory = [];
+            }
+            return { accountId, runtime, worker, workerError, reloadTargets, reloadHistory, reloadError };
         },
     };
 }

@@ -15,6 +15,20 @@ function registerCommerceRoutes({
     handleApiError,
     formatUseResult,
 }) {
+    function filterOfflinePlantableSeeds(snapshot, options = {}) {
+        const source = (snapshot && typeof snapshot === 'object') ? snapshot : {};
+        const seeds = Array.isArray(source.seeds) ? source.seeds : [];
+        const includeZeroUsable = options.includeZeroUsable === true;
+        const includeLocked = options.includeLocked === true;
+        return seeds.filter((seed) => {
+            const usableCount = Math.max(0, Number(seed && seed.usableCount) || 0);
+            const unlocked = seed && seed.unlocked !== false;
+            if (!includeLocked && !unlocked) return false;
+            if (!includeZeroUsable && usableCount <= 0) return false;
+            return true;
+        });
+    }
+
     app.get('/api/seeds', accountOwnershipRequired, async (req, res) => {
         const id = await getAccId(req);
         if (!id) return res.status(400).json({ ok: false });
@@ -46,6 +60,34 @@ function registerCommerceRoutes({
         }
     });
 
+    app.get('/api/bag/plantable-seeds', accountOwnershipRequired, async (req, res) => {
+        const id = await getAccId(req);
+        if (!id) return res.status(400).json({ ok: false });
+        const includeZeroUsable = String(req.query.includeZeroUsable || '') === '1';
+        const includeLocked = String(req.query.includeLocked || '') === '1';
+        try {
+            const provider = getProvider();
+            if (!provider || typeof provider.getPlantableBagSeeds !== 'function') {
+                const preferences = await getAccountBagPreferences(id).catch(() => null);
+                return res.json({
+                    ok: true,
+                    data: filterOfflinePlantableSeeds(preferences && preferences.plantableSeedSnapshot, { includeZeroUsable, includeLocked }),
+                });
+            }
+            const data = await provider.getPlantableBagSeeds(id, { includeZeroUsable, includeLocked });
+            res.json({ ok: true, data });
+        } catch (e) {
+            if (isSoftRuntimeError(e)) {
+                const preferences = await getAccountBagPreferences(id).catch(() => null);
+                return res.json({
+                    ok: true,
+                    data: filterOfflinePlantableSeeds(preferences && preferences.plantableSeedSnapshot, { includeZeroUsable, includeLocked }),
+                });
+            }
+            handleApiError(res, e);
+        }
+    });
+
     app.get('/api/bag/preferences', accountOwnershipRequired, async (req, res) => {
         const id = await getAccId(req);
         if (!id) return res.status(400).json({ ok: false });
@@ -56,6 +98,8 @@ function registerCommerceRoutes({
                 data: data || {
                     purchaseMemory: {},
                     activityHistory: [],
+                    plantableSeedSnapshot: { generatedAt: 0, seeds: [] },
+                    mallResolverCache: { fertilizerGoodsByType: { normal: null, organic: null }, lastAlertAt: 0, lastAlertReason: '' },
                 },
             });
         } catch (e) {
@@ -71,6 +115,8 @@ function registerCommerceRoutes({
             const data = await saveAccountBagPreferences(id, {
                 purchaseMemory: body.purchaseMemory,
                 activityHistory: body.activityHistory,
+                plantableSeedSnapshot: body.plantableSeedSnapshot,
+                mallResolverCache: body.mallResolverCache,
             });
             return res.json({ ok: true, data });
         } catch (e) {

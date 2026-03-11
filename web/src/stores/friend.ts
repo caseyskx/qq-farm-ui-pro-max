@@ -219,6 +219,10 @@ export const useFriendStore = defineStore('friend', () => {
         cachedFriends.value = res.data.data || []
       }
     }
+    catch (error) {
+      console.error('获取好友缓存失败', error)
+      cachedFriends.value = []
+    }
     finally {
       loading.value = false
     }

@@ -14,6 +14,7 @@ CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
 SOURCE_CACHE_DIR_INPUT="${SOURCE_CACHE_DIR:-}"
 APP_CONTAINER_NAME_INPUT="${APP_CONTAINER_NAME:-}"
 CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
+LEGACY_CURRENT_LINK=""
 SOURCE_CACHE_DIR="${SOURCE_CACHE_DIR_INPUT:-${DEPLOY_BASE_DIR}/.qq-farm-build-src/${REPO_REF}}"
 ACTION_MODE="${ACTION_MODE:-auto}"
 UPDATE_MODE="${UPDATE_MODE:-prompt}"
@@ -83,6 +84,7 @@ refresh_stack_layout() {
     if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
         CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
     fi
+    LEGACY_CURRENT_LINK="$(stack_legacy_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
 }
 
 parse_args() {
@@ -207,6 +209,13 @@ find_existing_deploy_dir() {
     if [ -L "${CURRENT_LINK}" ] || [ -d "${CURRENT_LINK}" ]; then
         if [ -f "${CURRENT_LINK}/docker-compose.yml" ]; then
             canonicalize_dir "${CURRENT_LINK}"
+            return 0
+        fi
+    fi
+
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && { [ -L "${LEGACY_CURRENT_LINK}" ] || [ -d "${LEGACY_CURRENT_LINK}" ]; }; then
+        if [ -f "${LEGACY_CURRENT_LINK}/docker-compose.yml" ]; then
+            canonicalize_dir "${LEGACY_CURRENT_LINK}"
             return 0
         fi
     fi

@@ -113,13 +113,22 @@ function scheduleDeferredStakeout(friendGid, friendName, targetLandIds, delaySec
     return true;
 }
 
-function _resolveFriendIdentifier(friend) {
-    const openId = String(friend && friend.open_id || '').trim();
-    if (openId) return openId;
-    const uin = String(friend && friend.uin || '').trim();
-    if (uin) return uin;
+function _resolveFriendQQUin(friend) {
     const gid = toNum(friend && friend.gid);
-    return gid > 0 ? String(gid) : '';
+    const gidText = gid > 0 ? String(gid) : '';
+    const rawUin = String(friend && friend.uin || '').trim();
+    if (/^\d+$/.test(rawUin) && rawUin !== gidText) return rawUin;
+    return '';
+}
+
+function _resolveFriendOpenId(friend) {
+    const gid = toNum(friend && friend.gid);
+    const gidText = gid > 0 ? String(gid) : '';
+    const openId = String(friend && friend.open_id || '').trim();
+    if (openId && openId !== gidText) return openId;
+    const rawUin = String(friend && friend.uin || '').trim();
+    if (rawUin && rawUin !== gidText && !/^\d+$/.test(rawUin)) return rawUin;
+    return '';
 }
 
 function _logModeScopePolicy(policy) {
@@ -440,7 +449,8 @@ async function getFriendsList() {
         return filtered
             .map(f => ({
                 gid: toNum(f.gid),
-                uin: _resolveFriendIdentifier(f),
+                uin: _resolveFriendQQUin(f),
+                openId: _resolveFriendOpenId(f),
                 name: f.remark || f.name || `GID:${toNum(f.gid)}`,
                 avatarUrl: String(f.avatar_url || '').trim(),
                 farmLevel: Math.max(0, toNum(f.level) || 0),
@@ -1030,7 +1040,18 @@ function stopFriendCheckLoop() {
     state.friendLoopRunning = false;
     state.externalSchedulerMode = false;
     networkEvents.off('friendApplicationReceived', onFriendApplicationReceived);
+    setOperationLimitsCallback(null);
     state.friendScheduler.clearAll();
+}
+
+function resetFriendScannerRuntimeState() {
+    stopFriendCheckLoop();
+    _friendsListDebugLogCache.clear();
+    _periodicStatusLogCache.clear();
+    consecutiveErrors = 0;
+    if (typeof state.resetFriendState === 'function') {
+        state.resetFriendState();
+    }
 }
 
 
@@ -1316,4 +1337,4 @@ function clearAllStakeouts() {
     state.activeStakeouts.clear();
 }
 
-Object.assign(module.exports, { scanAndClassifyFriends, batchStealFromFriends, batchHelpFriends, checkDailyReset, autoDisableHelpByExpLimit, getFriendsList, getFriendLandsDetail, runBatchWithFallback, visitFriend, checkFriends, checkFriendsThreePhase, friendCheckLoop, startFriendCheckLoop, stopFriendCheckLoop, refreshFriendCheckLoop, onFriendApplicationReceived, checkAndAcceptApplications, acceptFriendsWithRetry, scheduleStakeout, runStakeoutSteal, getActiveStakeouts, clearAllStakeouts });
+Object.assign(module.exports, { scanAndClassifyFriends, batchStealFromFriends, batchHelpFriends, checkDailyReset, autoDisableHelpByExpLimit, getFriendsList, getFriendLandsDetail, runBatchWithFallback, visitFriend, checkFriends, checkFriendsThreePhase, friendCheckLoop, startFriendCheckLoop, stopFriendCheckLoop, resetFriendScannerRuntimeState, refreshFriendCheckLoop, onFriendApplicationReceived, checkAndAcceptApplications, acceptFriendsWithRetry, scheduleStakeout, runStakeoutSteal, getActiveStakeouts, clearAllStakeouts });

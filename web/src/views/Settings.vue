@@ -157,7 +157,7 @@ const reportHistoryViewPrefs = loadReportHistoryViewPreferences()
 
 const { settings, loading, reportLogs, reportLogPagination, reportLogStats, systemUpdateOverview, systemUpdateJobs } = storeToRefs(settingStore)
 const { currentAccountId, accounts } = storeToRefs(accountStore)
-const { seeds } = storeToRefs(farmStore)
+const { seeds, bagSeeds } = storeToRefs(farmStore)
 const { friends } = storeToRefs(friendStore)
 
 const saving = ref(false)
@@ -1641,6 +1641,10 @@ const defaultAutomationConfig = {
   fertilizer_gift: false,
   fertilizer_buy: false,
   fertilizer_buy_limit: 100,
+  fertilizer_buy_type: 'organic',
+  fertilizer_buy_mode: 'unlimited',
+  fertilizer_buy_threshold_normal: 24,
+  fertilizer_buy_threshold_organic: 24,
   free_gifts: false,
   share_reward: false,
   vip_gift: false,
@@ -1680,6 +1684,8 @@ function buildAccountSettingsStateFromSources() {
     plantingStrategy: currentSettings?.plantingStrategy || 'preferred',
     plantingFallbackStrategy: currentSettings?.plantingFallbackStrategy || 'level',
     preferredSeedId: currentSettings?.preferredSeedId || 0,
+    bagSeedPriority: Array.isArray(currentSettings?.bagSeedPriority) ? [...currentSettings.bagSeedPriority] : [],
+    bagSeedFallbackStrategy: currentSettings?.bagSeedFallbackStrategy || 'level',
     inventoryPlanting: buildNormalizedInventoryPlantingConfig(currentSettings?.inventoryPlanting),
     intervals: {
       ...defaultIntervals,
@@ -1705,6 +1711,11 @@ function buildAccountSettingsStateFromSources() {
 function buildSettingsPayloadFromState(state: any, keepFruitIdsSource?: any) {
   const payload = JSON.parse(JSON.stringify(state || {}))
   const ids = normalizeTradeKeepFruitIds(keepFruitIdsSource ?? payload?.tradeConfig?.sell?.keepFruitIds)
+  const bagSeedPriority = Array.isArray(payload?.bagSeedPriority)
+    ? payload.bagSeedPriority
+        .map((seedId: any) => Math.max(0, Number.parseInt(String(seedId), 10) || 0))
+        .filter((seedId: number, index: number, arr: number[]) => seedId > 0 && arr.indexOf(seedId) === index)
+    : []
 
   payload.accountMode = resolveAccountMode(payload.accountMode)
   payload.riskPromptEnabled = payload.riskPromptEnabled !== false
@@ -1713,7 +1724,10 @@ function buildSettingsPayloadFromState(state: any, keepFruitIdsSource?: any) {
     min: resolveNumberWithFallback(payload?.harvestDelay?.min, 0),
     max: resolveNumberWithFallback(payload?.harvestDelay?.max, 0),
   }
+  payload.plantingStrategy = String(payload?.plantingStrategy || 'preferred')
   payload.plantingFallbackStrategy = String(payload?.plantingFallbackStrategy || 'level')
+  payload.bagSeedPriority = bagSeedPriority
+  payload.bagSeedFallbackStrategy = String(payload?.bagSeedFallbackStrategy || 'level')
   payload.inventoryPlanting = buildNormalizedInventoryPlantingConfig(payload?.inventoryPlanting)
   payload.intervals = {
     ...defaultIntervals,
@@ -1807,6 +1821,8 @@ const localSettings = ref({
   plantingStrategy: 'preferred',
   plantingFallbackStrategy: 'level',
   preferredSeedId: 0,
+  bagSeedPriority: [] as number[],
+  bagSeedFallbackStrategy: 'level',
   inventoryPlanting: { ...defaultInventoryPlanting, reserveRules: [] as Array<{ seedId: number, keepCount: number }> },
   intervals: { ...defaultIntervals },
   friendQuietHours: { ...defaultFriendQuietHours },
@@ -2054,13 +2070,21 @@ async function loadData() {
     await refreshReportLogs()
     syncLocalSettings()
     // Always fetch seeds to ensure correct locked status for current account
-    await farmStore.fetchSeeds(currentAccountId.value)
+    await Promise.allSettled([
+      farmStore.fetchSeeds(currentAccountId.value),
+      farmStore.fetchPlantableBagSeeds(currentAccountId.value, {
+        includeZeroUsable: true,
+        includeLocked: true,
+      }),
+    ])
     // 好友过滤已开启时自动拉取好友列表
     if (localSettings.value.automation.stealFriendFilterEnabled && friends.value.length === 0) {
       friendStore.fetchFriends(currentAccountId.value)
     }
   }
   else {
+    seeds.value = []
+    bagSeeds.value = []
     reportLogs.value = []
     reportLogPagination.value = { page: 1, pageSize: reportPageSize.value || 10, total: 0, totalPages: 1 }
     await settingStore.fetchReportLogStats('')
@@ -2146,6 +2170,7 @@ const fertilizerScopeText = computed(() => {
 })
 
 const plantingStrategyOptions = [
+  { label: '背包种子优先', value: 'bag_priority' },
   { label: '优先种植种子', value: 'preferred' },
   { label: '最高等级作物', value: 'level' },
   { label: '最大经验/时', value: 'max_exp' },
@@ -2153,6 +2178,8 @@ const plantingStrategyOptions = [
   { label: '最大净利润/时', value: 'max_profit' },
   { label: '最大普通肥净利润/时', value: 'max_fert_profit' },
 ]
+
+const bagSeedFallbackStrategyOptions = plantingStrategyOptions.filter(option => option.value !== 'bag_priority')
 
 const plantingFallbackStrategyOptions = [
   { label: '回退最高等级', value: 'level' },
@@ -2165,6 +2192,17 @@ const inventoryPlantingModeOptions = [
   { label: '关闭库存优先', value: 'disabled' },
   { label: '优先消耗库存', value: 'prefer_inventory' },
   { label: '仅使用库存', value: 'inventory_only' },
+]
+
+const fertilizerBuyTypeOptions = [
+  { label: '仅有机化肥', value: 'organic', description: '只补有机肥容器，保持土壤收益循环。' },
+  { label: '仅普通化肥', value: 'normal', description: '只补普通肥容器，偏向成熟提速。' },
+  { label: '普通 + 有机', value: 'both', description: '两个容器都纳入自动购买，低余量优先补。' },
+]
+
+const fertilizerBuyModeOptions = [
+  { label: '按阈值触发', value: 'threshold', description: '低于设定小时数才购买，适合精细控量。' },
+  { label: '持续补满容器', value: 'unlimited', description: '忽略阈值，尽量把目标容器持续补满。' },
 ]
 
 const rareKeepJudgeOptions = [
@@ -2266,6 +2304,226 @@ const inventoryReserveSeedOptions = computed(() => {
   }))
 })
 
+function normalizeBagSeedPriorityIds(seedIds: any) {
+  const seen = new Set<number>()
+  return (Array.isArray(seedIds) ? seedIds : [])
+    .map(seedId => Number.parseInt(String(seedId), 10) || 0)
+    .filter((seedId) => {
+      if (seedId <= 0 || seen.has(seedId))
+        return false
+      seen.add(seedId)
+      return true
+    })
+}
+
+function compareBagSeedsRecommended(a: any, b: any) {
+  return (
+    Number(b?.requiredLevel || 0) - Number(a?.requiredLevel || 0)
+    || Number(b?.plantSize || 1) - Number(a?.plantSize || 1)
+    || Number(b?.usableCount || 0) - Number(a?.usableCount || 0)
+    || Number(a?.seedId || 0) - Number(b?.seedId || 0)
+  )
+}
+
+function getBagSeedReserveCount(seedId: number) {
+  const reserveRules = Array.isArray(localSettings.value.inventoryPlanting.reserveRules)
+    ? localSettings.value.inventoryPlanting.reserveRules
+    : []
+  const matched = reserveRules.find((rule: any) => Number(rule?.seedId || 0) === Number(seedId || 0))
+  return Math.max(0, Number(matched?.keepCount ?? localSettings.value.inventoryPlanting.globalKeepCount) || 0)
+}
+
+const bagPrioritySeeds = computed(() => {
+  const priorityMap = new Map(normalizeBagSeedPriorityIds(localSettings.value.bagSeedPriority).map((seedId, index) => [seedId, index]))
+  return [...(bagSeeds.value || [])]
+    .map((seed: any) => {
+      const seedId = Number(seed?.seedId || 0)
+      const count = Math.max(0, Number(seed?.count || 0))
+      const reservedCount = Math.max(0, getBagSeedReserveCount(seedId))
+      return {
+        ...seed,
+        seedId,
+        count,
+        reservedCount,
+        usableCount: Math.max(0, count - reservedCount),
+        unlocked: seed?.unlocked !== false,
+        plantSize: Math.max(1, Number(seed?.plantSize || 1)),
+        requiredLevel: Math.max(0, Number(seed?.requiredLevel || 0)),
+      }
+    })
+    .sort((a: any, b: any) => {
+      const aIndex = priorityMap.has(a.seedId) ? Number(priorityMap.get(a.seedId)) : Number.POSITIVE_INFINITY
+      const bIndex = priorityMap.has(b.seedId) ? Number(priorityMap.get(b.seedId)) : Number.POSITIVE_INFINITY
+      return (
+        aIndex - bIndex
+        || b.requiredLevel - a.requiredLevel
+        || b.plantSize - a.plantSize
+        || a.seedId - b.seedId
+      )
+    })
+})
+
+const bagPriorityPreviewLabel = computed(() => {
+  const candidate = bagPrioritySeeds.value.find((seed: any) => seed.unlocked && seed.usableCount > 0)
+  if (!candidate)
+    return '当前背包中没有可参与优先种植的种子'
+  return `优先消耗 ${candidate.requiredLevel}级 ${candidate.name}（可用 ${candidate.usableCount}）`
+})
+
+const bagPriorityDragSeedId = ref<number | null>(null)
+const bagPrioritySorting = ref(false)
+
+const configuredBagPriorityIdSet = computed(() => new Set(normalizeBagSeedPriorityIds(localSettings.value.bagSeedPriority)))
+const unconfiguredBagPrioritySeeds = computed(() => {
+  return bagPrioritySeeds.value.filter((seed: any) => !configuredBagPriorityIdSet.value.has(Number(seed.seedId || 0)))
+})
+
+function syncVisibleBagSeedPriority(seedIds: number[]) {
+  syncBagSeedPriorityOrder(seedIds)
+}
+
+function syncBagSeedPriorityOrder(visibleSeedIds: number[]) {
+  const normalizedVisible = normalizeBagSeedPriorityIds(visibleSeedIds)
+  const visibleSet = new Set(normalizedVisible)
+  const hiddenIds = normalizeBagSeedPriorityIds(localSettings.value.bagSeedPriority).filter(seedId => !visibleSet.has(seedId))
+  localSettings.value.bagSeedPriority = [...normalizedVisible, ...hiddenIds]
+}
+
+function sortBagSeedPriorityRows(sorter: (a: any, b: any) => number) {
+  const ordered = [...bagPrioritySeeds.value].sort(sorter)
+  syncVisibleBagSeedPriority(ordered.map((seed: any) => Number(seed.seedId || 0)))
+}
+
+function resetBagSeedPriorityRecommended() {
+  sortBagSeedPriorityRows(compareBagSeedsRecommended)
+}
+
+function sortBagSeedPriorityByLevel() {
+  sortBagSeedPriorityRows((a: any, b: any) => (
+    Number(b.requiredLevel || 0) - Number(a.requiredLevel || 0)
+    || Number(b.plantSize || 1) - Number(a.plantSize || 1)
+    || Number(a.seedId || 0) - Number(b.seedId || 0)
+  ))
+}
+
+function appendNewBagSeedsToPriority() {
+  const configuredIds = bagPrioritySeeds.value
+    .filter((seed: any) => configuredBagPriorityIdSet.value.has(Number(seed.seedId || 0)))
+    .map((seed: any) => Number(seed.seedId || 0))
+  const newIds = [...unconfiguredBagPrioritySeeds.value]
+    .sort(compareBagSeedsRecommended)
+    .map((seed: any) => Number(seed.seedId || 0))
+  syncVisibleBagSeedPriority([...configuredIds, ...newIds])
+}
+
+function moveSeedIdInOrder(seedIds: number[], fromIndex: number, toIndex: number) {
+  if (fromIndex < 0 || toIndex < 0 || fromIndex >= seedIds.length || toIndex >= seedIds.length)
+    return seedIds
+  const next = [...seedIds]
+  const [moved] = next.splice(fromIndex, 1)
+  if (moved === undefined)
+    return seedIds
+  next.splice(toIndex, 0, moved)
+  return next
+}
+
+async function sortBagSeedPriorityByFallbackStrategy() {
+  const strategy = localSettings.value.bagSeedFallbackStrategy
+  if (strategy === 'level') {
+    sortBagSeedPriorityByLevel()
+    return
+  }
+  if (strategy === 'preferred') {
+    const preferredSeedId = Number(localSettings.value.preferredSeedId || 0)
+    sortBagSeedPriorityRows((a: any, b: any) => {
+      const aPreferred = Number(a.seedId || 0) === preferredSeedId ? 1 : 0
+      const bPreferred = Number(b.seedId || 0) === preferredSeedId ? 1 : 0
+      return bPreferred - aPreferred || compareBagSeedsRecommended(a, b)
+    })
+    return
+  }
+  const sortBy = analyticsSortByMap[strategy]
+  if (!sortBy || !currentAccountId.value) {
+    resetBagSeedPriorityRecommended()
+    return
+  }
+  bagPrioritySorting.value = true
+  try {
+    const res = await api.get('/api/analytics', {
+      params: {
+        sort: sortBy,
+        timingMode: 'actual',
+      },
+    })
+    const rankings: any[] = res.data?.ok ? (res.data.data || []) : []
+    const rankMap = new Map(rankings.map((row: any, index: number) => [Number(row?.seedId || 0), index]))
+    sortBagSeedPriorityRows((a: any, b: any) => {
+      const aIndex = rankMap.has(Number(a.seedId || 0)) ? Number(rankMap.get(Number(a.seedId || 0))) : Number.POSITIVE_INFINITY
+      const bIndex = rankMap.has(Number(b.seedId || 0)) ? Number(rankMap.get(Number(b.seedId || 0))) : Number.POSITIVE_INFINITY
+      return aIndex - bIndex || compareBagSeedsRecommended(a, b)
+    })
+  }
+  catch {
+    resetBagSeedPriorityRecommended()
+  }
+  finally {
+    bagPrioritySorting.value = false
+  }
+}
+
+function moveBagSeedPriority(seedId: number, direction: -1 | 1) {
+  const visibleSeedIds = bagPrioritySeeds.value.map((seed: any) => Number(seed.seedId || 0)).filter((id: number) => id > 0)
+  const currentIndex = visibleSeedIds.findIndex(id => id === Number(seedId || 0))
+  const targetIndex = currentIndex + direction
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= visibleSeedIds.length)
+    return
+  const currentValue = visibleSeedIds[currentIndex]
+  const targetValue = visibleSeedIds[targetIndex]
+  if (currentValue === undefined || targetValue === undefined)
+    return
+  visibleSeedIds[currentIndex] = targetValue
+  visibleSeedIds[targetIndex] = currentValue
+  syncBagSeedPriorityOrder(visibleSeedIds)
+}
+
+function handleBagSeedDragStart(seedId: number) {
+  bagPriorityDragSeedId.value = Number(seedId || 0) || null
+}
+
+function handleBagSeedDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer)
+    event.dataTransfer.dropEffect = 'move'
+}
+
+function handleBagSeedDrop(targetSeedId: number) {
+  const draggedSeedId = Number(bagPriorityDragSeedId.value || 0)
+  const nextTargetSeedId = Number(targetSeedId || 0)
+  bagPriorityDragSeedId.value = null
+  if (!draggedSeedId || !nextTargetSeedId || draggedSeedId === nextTargetSeedId)
+    return
+  const visibleSeedIds = bagPrioritySeeds.value.map((seed: any) => Number(seed.seedId || 0)).filter((id: number) => id > 0)
+  const fromIndex = visibleSeedIds.findIndex(id => id === draggedSeedId)
+  const toIndex = visibleSeedIds.findIndex(id => id === nextTargetSeedId)
+  if (fromIndex < 0 || toIndex < 0)
+    return
+  syncVisibleBagSeedPriority(moveSeedIdInOrder(visibleSeedIds, fromIndex, toIndex))
+}
+
+function handleBagSeedDragEnd() {
+  bagPriorityDragSeedId.value = null
+}
+
+function getBagSeedLabel(seedId: number) {
+  const bagSeed = bagPrioritySeeds.value.find((seed: any) => Number(seed.seedId || 0) === Number(seedId || 0))
+  if (bagSeed)
+    return `${bagSeed.requiredLevel}级 ${bagSeed.name}`
+  const seed = seeds.value?.find((item: any) => Number(item.seedId || 0) === Number(seedId || 0))
+  if (seed)
+    return `${seed.requiredLevel}级 ${seed.name}`
+  return `种子#${seedId}`
+}
+
 function addInventoryReserveRule() {
   const usedSeedIds = new Set((localSettings.value.inventoryPlanting.reserveRules || []).map((rule: any) => Number(rule.seedId || 0)))
   const firstSeed = inventoryReserveSeedOptions.value.find(option => !usedSeedIds.has(Number(option.value || 0)))
@@ -2294,7 +2552,7 @@ watchEffect(async () => {
     strategyPreviewLabel.value = null
     return
   }
-  if (strategy === 'preferred') {
+  if (strategy === 'preferred' || strategy === 'bag_priority') {
     strategyPreviewLabel.value = null
     return
   }
@@ -2368,6 +2626,10 @@ const fieldLabels: Record<string, string> = {
   fertilizer_gift: '自动填充化肥',
   fertilizer_buy: '自动购买化肥',
   fertilizer_buy_limit: '自动购买化肥上限',
+  fertilizer_buy_type: '自动购肥类型',
+  fertilizer_buy_mode: '自动购肥模式',
+  fertilizer_buy_threshold_normal: '普通肥触发阈值',
+  fertilizer_buy_threshold_organic: '有机肥触发阈值',
   fertilizer_60s_anti_steal: '60秒施肥(防偷)',
   fertilizer_smart_phase: '智能二季施肥',
   fastHarvest: '成熟秒收取',
@@ -2386,6 +2648,8 @@ const fieldLabels: Record<string, string> = {
   plantingStrategy: '种植策略',
   plantingFallbackStrategy: '失配回退策略',
   preferredSeedId: '优先种植种子',
+  bagSeedPriority: '背包种子优先顺序',
+  bagSeedFallbackStrategy: '第二优先策略',
   inventoryPlanting: '库存种植',
 }
 
@@ -2397,9 +2661,15 @@ const diffFieldLabels: Record<string, string> = {
   'plantingStrategy': '种植策略',
   'plantingFallbackStrategy': '失配回退策略',
   'preferredSeedId': '优先种植种子',
+  'bagSeedPriority': '背包种子优先顺序',
+  'bagSeedFallbackStrategy': '第二优先策略',
   'inventoryPlanting.mode': '库存种植模式',
   'inventoryPlanting.globalKeepCount': '全局保留数量',
   'inventoryPlanting.reserveRules': '库存保留规则',
+  'automation.fertilizer_buy_type': '自动购肥类型',
+  'automation.fertilizer_buy_mode': '自动购肥模式',
+  'automation.fertilizer_buy_threshold_normal': '普通肥触发阈值',
+  'automation.fertilizer_buy_threshold_organic': '有机肥触发阈值',
   'intervals.farmMin': '农场巡查最小 (秒)',
   'intervals.farmMax': '农场巡查最大 (秒)',
   'intervals.friendMin': '好友巡查最小 (秒)',
@@ -2475,12 +2745,23 @@ function formatDiffValue(path: string, value: any) {
     return findOptionLabel(plantingStrategyOptions, value)
   if (path === 'plantingFallbackStrategy')
     return findOptionLabel(plantingFallbackStrategyOptions, value)
+  if (path === 'bagSeedFallbackStrategy')
+    return findOptionLabel(bagSeedFallbackStrategyOptions, value)
   if (path === 'preferredSeedId')
     return findOptionLabel(preferredSeedOptions.value, value)
+  if (path === 'bagSeedPriority') {
+    return Array.isArray(value) && value.length > 0
+      ? value.map((seedId: number) => getBagSeedLabel(Number(seedId || 0))).join(' → ')
+      : '未设置'
+  }
   if (path === 'inventoryPlanting.mode')
     return findOptionLabel(inventoryPlantingModeOptions, value)
   if (path === 'automation.fertilizer')
     return findOptionLabel(fertilizerOptions, value)
+  if (path === 'automation.fertilizer_buy_type')
+    return findOptionLabel(fertilizerBuyTypeOptions, value)
+  if (path === 'automation.fertilizer_buy_mode')
+    return findOptionLabel(fertilizerBuyModeOptions, value)
   if (path === 'tradeConfig.sell.rareKeep.judgeBy')
     return findOptionLabel(rareKeepJudgeOptions, value)
   if (path === 'automation.stealFilterMode' || path === 'automation.stealFriendFilterMode')
@@ -2493,6 +2774,8 @@ function formatDiffValue(path: string, value: any) {
     return `${value} 秒`
   if (path === 'automation.fertilizer_buy_limit')
     return `${value} 袋`
+  if (path === 'automation.fertilizer_buy_threshold_normal' || path === 'automation.fertilizer_buy_threshold_organic')
+    return `${value} 小时`
   if (path === 'reportConfig.hourlyMinute' || path === 'reportConfig.dailyMinute')
     return `${value} 分`
   if (path === 'reportConfig.dailyHour')
@@ -2513,8 +2796,11 @@ function isPlainObject(value: any) {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-function normalizeLeafForCompare(value: any) {
+function normalizeLeafForCompare(value: any, path = '') {
   if (Array.isArray(value)) {
+    if (path === 'bagSeedPriority') {
+      return value.map(item => String(item))
+    }
     return value.map((item) => {
       if (item && typeof item === 'object')
         return JSON.stringify(item)
@@ -2535,8 +2821,8 @@ function collectPathDiffItems(oldValue: any, newValue: any, currentPath = '', ch
     return changes
   }
 
-  const oldComparable = normalizeLeafForCompare(oldValue)
-  const newComparable = normalizeLeafForCompare(newValue)
+  const oldComparable = normalizeLeafForCompare(oldValue, currentPath)
+  const newComparable = normalizeLeafForCompare(newValue, currentPath)
   if (JSON.stringify(oldComparable) !== JSON.stringify(newComparable)) {
     changes.push({
       label: getDiffFieldLabel(currentPath),
@@ -2555,6 +2841,10 @@ function getAccountSettingsDiffItems() {
     buildSettingsPayload(),
   )
 }
+
+const accountSettingsDiffItems = computed(() => getAccountSettingsDiffItems())
+const accountSettingsDirtyCount = computed(() => accountSettingsDiffItems.value.length)
+const hasUnsavedAccountSettings = computed(() => accountSettingsDirtyCount.value > 0)
 
 function closeDiffModal() {
   diffModalVisible.value = false
@@ -3221,6 +3511,12 @@ async function restoreTimingDefaults() {
               <span class="settings-primary-toolbar-chip ui-meta-chip--brand">
                 {{ localSettings.riskPromptEnabled ? '风控提示已开' : '风控提示已关' }}
               </span>
+              <span
+                v-if="hasUnsavedAccountSettings"
+                class="settings-primary-toolbar-chip ui-meta-chip--warning"
+              >
+                {{ accountSettingsDirtyCount }} 项待保存
+              </span>
             </div>
           </div>
           <!-- 预设配置快捷组 -->
@@ -3260,7 +3556,7 @@ async function restoreTimingDefaults() {
               class="settings-footer-button flex items-center gap-1 text-xs !h-auto !px-3 !py-1"
               @click="saveAccountSettings"
             >
-              <div class="i-carbon-save" /> 快速保存
+              <div class="i-carbon-save" /> 保存当前账号
             </BaseButton>
           </div>
         </div>
@@ -3439,6 +3735,13 @@ async function restoreTimingDefaults() {
               :options="plantingStrategyOptions"
             />
             <BaseSelect
+              v-if="localSettings.plantingStrategy === 'bag_priority'"
+              v-model="localSettings.bagSeedFallbackStrategy"
+              label="第二优先策略"
+              :options="bagSeedFallbackStrategyOptions"
+            />
+            <BaseSelect
+              v-else
               v-model="localSettings.plantingFallbackStrategy"
               label="失配回退"
               :options="plantingFallbackStrategyOptions"
@@ -3453,8 +3756,129 @@ async function restoreTimingDefaults() {
               <span class="glass-text-muted text-xs">策略选种预览</span>
               <div class="settings-strategy-preview h-9 flex items-center rounded-md px-3 text-sm font-bold">
                 <div class="i-carbon-checkmark-filled mr-1.5 text-primary-500" />
-                {{ strategyPreviewLabel ?? '加载中...' }}
+                {{ localSettings.plantingStrategy === 'bag_priority' ? bagPriorityPreviewLabel : (strategyPreviewLabel ?? '加载中...') }}
               </div>
+            </div>
+          </div>
+
+          <div v-if="localSettings.plantingStrategy === 'bag_priority'" class="settings-bag-panel rounded-xl p-4">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div class="settings-bag-title text-sm font-semibold">
+                  背包种子优先顺序
+                </div>
+                <div class="settings-bag-copy mt-1 text-xs leading-5">
+                  会先按下面的顺序尝试消耗背包中的种子。1x1 和 2x2 都参与排序；未解锁或可用数量为 0 的种子只展示，不会参与实际种植。
+                </div>
+              </div>
+              <div class="settings-bag-summary rounded-full px-3 py-1 text-[11px] font-semibold">
+                共 {{ bagPrioritySeeds.length }} 种
+              </div>
+            </div>
+
+            <div class="mb-3 flex flex-wrap items-center gap-2">
+              <BaseButton
+                size="sm"
+                variant="outline"
+                @click="resetBagSeedPriorityRecommended"
+              >
+                推荐重排
+              </BaseButton>
+              <BaseButton
+                size="sm"
+                variant="outline"
+                @click="sortBagSeedPriorityByLevel"
+              >
+                按等级重排
+              </BaseButton>
+              <BaseButton
+                size="sm"
+                variant="outline"
+                :loading="bagPrioritySorting"
+                @click="sortBagSeedPriorityByFallbackStrategy"
+              >
+                按第二优先策略重排
+              </BaseButton>
+              <BaseButton
+                v-if="unconfiguredBagPrioritySeeds.length"
+                size="sm"
+                variant="ghost"
+                @click="appendNewBagSeedsToPriority"
+              >
+                新种子追加到末尾 ({{ unconfiguredBagPrioritySeeds.length }})
+              </BaseButton>
+            </div>
+
+            <div v-if="unconfiguredBagPrioritySeeds.length" class="settings-bag-notice mb-3 rounded-lg px-3 py-2 text-xs leading-5">
+              检测到 {{ unconfiguredBagPrioritySeeds.length }} 个新种子尚未固化到你的优先列表中。当前会先临时显示在列表末尾；你可以直接点“新种子追加到末尾”或“推荐重排”固定顺序。
+            </div>
+
+            <div v-if="bagPrioritySeeds.length > 0" class="space-y-3">
+              <div
+                v-for="(seed, index) in bagPrioritySeeds"
+                :key="`bag-priority-${seed.seedId}`"
+                class="settings-bag-seed-card flex flex-col gap-3 rounded-xl p-3 md:flex-row md:items-center"
+                :class="{ 'settings-bag-seed-card-muted': !seed.unlocked || seed.usableCount <= 0 }"
+                draggable="true"
+                @dragstart="handleBagSeedDragStart(seed.seedId)"
+                @dragover="handleBagSeedDragOver"
+                @drop="handleBagSeedDrop(seed.seedId)"
+                @dragend="handleBagSeedDragEnd"
+              >
+                <div class="flex items-center gap-3">
+                  <div class="settings-bag-drag flex h-9 w-9 items-center justify-center rounded-full text-sm">
+                    <div class="i-carbon-draggable" />
+                  </div>
+                  <div class="settings-bag-index flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold">
+                    {{ index + 1 }}
+                  </div>
+                  <img
+                    :src="seed.image"
+                    :alt="seed.name"
+                    class="h-12 w-12 rounded-xl object-cover"
+                  >
+                </div>
+
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm font-semibold">
+                    {{ seed.name }}
+                  </div>
+                  <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Seed ID: {{ seed.seedId }} · Lv.{{ seed.requiredLevel }} · 占地 {{ seed.plantSize }}x{{ seed.plantSize }}
+                  </div>
+                  <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    背包 {{ seed.count }} · 可用 {{ seed.usableCount }} · 保留 {{ seed.reservedCount }}
+                    <span v-if="!seed.unlocked"> · 当前等级未解锁</span>
+                    <span v-else-if="seed.usableCount <= 0"> · 已被保留规则拦截</span>
+                    <span v-else-if="!configuredBagPriorityIdSet.has(seed.seedId)"> · 新发现，待确认顺序</span>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 md:justify-end">
+                  <BaseBadge surface="glass-soft" tone="warning">
+                    {{ seed.plantSize }}x{{ seed.plantSize }}
+                  </BaseBadge>
+                  <BaseButton
+                    size="sm"
+                    variant="ghost"
+                    :disabled="index === 0"
+                    @click="moveBagSeedPriority(seed.seedId, -1)"
+                  >
+                    上移
+                  </BaseButton>
+                  <BaseButton
+                    size="sm"
+                    variant="ghost"
+                    :disabled="index === bagPrioritySeeds.length - 1"
+                    @click="moveBagSeedPriority(seed.seedId, 1)"
+                  >
+                    下移
+                  </BaseButton>
+                </div>
+              </div>
+            </div>
+            <div v-else class="settings-bag-empty rounded-lg border-dashed px-3 py-4 text-xs">
+              当前背包中没有种子，或该账号尚未完成背包数据刷新。
             </div>
           </div>
 
@@ -3771,17 +4195,48 @@ async function restoreTimingDefaults() {
               <div class="space-y-4">
                 <BaseSwitch v-model="localSettings.automation.fertilizer_gift" label="自动填充化肥" hint="有免费化肥领取机会时自动领取，保证化肥库存不断档。" recommend="on" />
                 <div class="flex flex-col gap-2">
-                  <BaseSwitch v-model="localSettings.automation.fertilizer_buy" label="自动购买化肥" hint="化肥库存不足时自动花费金币购买。注意：会持续消耗金币，金币紧张时建议关闭。" recommend="conditional" />
-                  <div v-show="localSettings.automation.fertilizer_buy" class="ml-7 flex items-center gap-3">
-                    <span class="glass-text-muted text-[11px] font-bold tracking-widest uppercase">
-                      - 单日最大购买上限 (包)：
-                    </span>
-                    <BaseInput
-                      v-model.number="localSettings.automation.fertilizer_buy_limit"
-                      type="number"
-                      min="1"
-                      class="w-24 text-sm shadow-inner !py-1"
-                    />
+                  <BaseSwitch v-model="localSettings.automation.fertilizer_buy" label="自动购买化肥" hint="通过商城点券礼包自动补普通肥/有机肥容器，可按余量阈值触发，也可持续补满。" recommend="conditional" />
+                  <div v-show="localSettings.automation.fertilizer_buy" class="ml-7 space-y-3">
+                    <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <BaseSelect
+                        v-model="localSettings.automation.fertilizer_buy_type"
+                        label="购肥类型"
+                        :options="fertilizerBuyTypeOptions"
+                      />
+                      <BaseSelect
+                        v-model="localSettings.automation.fertilizer_buy_mode"
+                        label="触发模式"
+                        :options="fertilizerBuyModeOptions"
+                      />
+                    </div>
+                    <div v-if="localSettings.automation.fertilizer_buy_mode === 'threshold'" class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <BaseInput
+                        v-model.number="localSettings.automation.fertilizer_buy_threshold_normal"
+                        label="普通肥阈值 (小时)"
+                        type="number"
+                        min="0"
+                      />
+                      <BaseInput
+                        v-model.number="localSettings.automation.fertilizer_buy_threshold_organic"
+                        label="有机肥阈值 (小时)"
+                        type="number"
+                        min="0"
+                      />
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <span class="glass-text-muted text-[11px] font-bold tracking-widest uppercase">
+                        - 单日最大购买上限 (包)：
+                      </span>
+                      <BaseInput
+                        v-model.number="localSettings.automation.fertilizer_buy_limit"
+                        type="number"
+                        min="1"
+                        class="w-24 text-sm shadow-inner !py-1"
+                      />
+                    </div>
+                    <p class="settings-automation-note text-[10px]">
+                      优先使用点券礼包。若选择“双容器”，系统会先补剩余时长更低的一侧。
+                    </p>
                   </div>
                 </div>
                 <BaseSwitch v-model="localSettings.automation.fertilizer_60s_anti_steal" label="60秒施肥(防偷)" hint="核心防盗功能。在果实成熟前60秒内自动施肥催熟并瞬间收获，将被偷窗口压缩到接近0。需消耗化肥，主号必开。" recommend="on" />
@@ -3891,7 +4346,7 @@ async function restoreTimingDefaults() {
             class="settings-footer-button"
             @click="saveAccountSettings"
           >
-            保存策略与自动控制
+            保存当前账号设置
           </BaseButton>
         </div>
       </div>
@@ -4082,7 +4537,10 @@ async function restoreTimingDefaults() {
           </div>
 
           <!-- Save Offline Button -->
-          <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel flex justify-end px-4 py-3">
+          <div class="settings-card-footer settings-sticky-save ui-mobile-action-panel flex items-center justify-end gap-3 px-4 py-3">
+            <p class="settings-sticky-save-note hidden max-w-xs text-right md:block">
+              这里只保存右侧的全局下线提醒，不会保存左侧巡查时间、静默时段和自动控制。
+            </p>
             <BaseButton
               variant="primary"
               size="sm"
@@ -4090,7 +4548,7 @@ async function restoreTimingDefaults() {
               class="settings-footer-button"
               @click="handleSaveOffline"
             >
-              保存全局下线提醒
+              仅保存全局下线提醒
             </BaseButton>
           </div>
         </template>
@@ -6344,6 +6802,29 @@ async function restoreTimingDefaults() {
       </div>
     </Teleport>
 
+    <div
+      v-if="currentAccountId && hasUnsavedAccountSettings"
+      class="settings-account-save-dock hidden lg:flex"
+    >
+      <div class="min-w-0 flex-1">
+        <p class="settings-account-save-dock-title">
+          当前账号有 {{ accountSettingsDirtyCount }} 项设置未保存
+        </p>
+        <p class="settings-account-save-dock-copy">
+          巡查时间、静默时段、策略和自动控制都属于账号级设置；右侧“仅保存全局下线提醒”不会保存这些改动。
+        </p>
+      </div>
+      <BaseButton
+        variant="primary"
+        size="sm"
+        :loading="saving"
+        class="shrink-0"
+        @click="saveAccountSettings"
+      >
+        保存当前账号设置
+      </BaseButton>
+    </div>
+
     <ConfirmModal
       :show="modalVisible"
       :title="modalConfig.title"
@@ -6493,6 +6974,37 @@ async function restoreTimingDefaults() {
 
 .settings-footer-button {
   min-width: 0;
+}
+
+.settings-account-save-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  z-index: 30;
+  width: min(960px, calc(100vw - 2rem));
+  align-items: center;
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--ui-status-warning) 28%, var(--ui-border-subtle));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 92%, transparent);
+  box-shadow: 0 20px 48px -28px var(--ui-shadow-panel);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transform: translateX(-50%);
+}
+
+.settings-account-save-dock-title {
+  color: var(--ui-text-1);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.settings-account-save-dock-copy {
+  color: var(--ui-text-2);
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .settings-empty-icon {
@@ -6955,6 +7467,58 @@ async function restoreTimingDefaults() {
 .settings-inventory-panel {
   border: 1px solid color-mix(in srgb, #0f766e 22%, var(--ui-border-subtle));
   background: color-mix(in srgb, #0f766e 8%, var(--ui-bg-surface-raised));
+}
+
+.settings-bag-panel {
+  border: 1px solid color-mix(in srgb, #b45309 22%, var(--ui-border-subtle));
+  background: color-mix(in srgb, #b45309 8%, var(--ui-bg-surface-raised));
+}
+
+.settings-bag-title {
+  color: color-mix(in srgb, #b45309 84%, var(--ui-text-1));
+}
+
+.settings-bag-copy {
+  color: var(--ui-text-2);
+}
+
+.settings-bag-summary {
+  border: 1px solid color-mix(in srgb, #b45309 22%, var(--ui-border-subtle));
+  background: color-mix(in srgb, #b45309 10%, var(--ui-bg-surface-raised));
+  color: color-mix(in srgb, #b45309 84%, var(--ui-text-1));
+}
+
+.settings-bag-notice {
+  border: 1px solid color-mix(in srgb, #b45309 20%, var(--ui-border-subtle));
+  background: color-mix(in srgb, #b45309 12%, var(--ui-bg-surface-raised));
+  color: color-mix(in srgb, #b45309 84%, var(--ui-text-1));
+}
+
+.settings-bag-seed-card {
+  border: 1px solid color-mix(in srgb, #b45309 18%, var(--ui-border-subtle));
+  background: color-mix(in srgb, var(--ui-bg-surface-raised) 88%, transparent);
+  cursor: grab;
+}
+
+.settings-bag-seed-card-muted {
+  opacity: 0.72;
+}
+
+.settings-bag-drag {
+  border: 1px dashed color-mix(in srgb, #b45309 20%, var(--ui-border-subtle));
+  color: color-mix(in srgb, #b45309 72%, var(--ui-text-2));
+  background: color-mix(in srgb, #b45309 8%, var(--ui-bg-surface-raised));
+}
+
+.settings-bag-index {
+  border: 1px solid color-mix(in srgb, #b45309 20%, var(--ui-border-subtle));
+  background: color-mix(in srgb, #b45309 12%, var(--ui-bg-surface-raised));
+  color: color-mix(in srgb, #b45309 84%, var(--ui-text-1));
+}
+
+.settings-bag-empty {
+  border: 1px dashed color-mix(in srgb, #b45309 24%, var(--ui-border-subtle));
+  color: color-mix(in srgb, #b45309 72%, var(--ui-text-2));
 }
 
 .settings-inventory-title {

@@ -161,9 +161,23 @@ function bufferedInsertLog(accountId, action, result, details) {
 function normalizeFriendCacheEntry(friend) {
     const gid = Number(friend && friend.gid);
     if (!Number.isFinite(gid) || gid <= 0) return null;
+    const rawUin = String((friend && friend.uin) || '').trim();
+    const rawOpenId = String((friend && (friend.openId || friend.open_id)) || '').trim();
+    const gidText = String(gid);
+    let normalizedUin = rawUin === gidText ? '' : rawUin;
+    let normalizedOpenId = rawOpenId === gidText ? '' : rawOpenId;
+
+    // Legacy QQ cache/runtime paths may store openId-like tokens in `uin`.
+    // A real QQ uin is numeric; move non-numeric identifiers back into openId.
+    if (normalizedUin && !/^\d+$/.test(normalizedUin)) {
+        if (!normalizedOpenId) normalizedOpenId = normalizedUin;
+        normalizedUin = '';
+    }
+
     return {
         gid,
-        uin: String((friend && (friend.uin || friend.open_id)) || '').trim(),
+        uin: normalizedUin,
+        openId: normalizedOpenId,
         name: String((friend && (friend.name || friend.remark)) || '').trim(),
         avatarUrl: String((friend && (friend.avatarUrl || friend.avatar_url)) || '').trim(),
     };
@@ -183,6 +197,7 @@ function mergeFriendCacheEntries(currentList = [], incomingList = []) {
         merged.set(normalized.gid, {
             gid: normalized.gid,
             uin: normalized.uin,
+            openId: normalized.openId,
             name: normalized.name || `GID:${normalized.gid}`,
             avatarUrl: normalized.avatarUrl,
         });
@@ -194,6 +209,7 @@ function mergeFriendCacheEntries(currentList = [], incomingList = []) {
         const prev = merged.get(normalized.gid) || {
             gid: normalized.gid,
             uin: '',
+            openId: '',
             name: `GID:${normalized.gid}`,
             avatarUrl: '',
         };
@@ -205,6 +221,7 @@ function mergeFriendCacheEntries(currentList = [], incomingList = []) {
         merged.set(normalized.gid, {
             gid: normalized.gid,
             uin: normalized.uin || prev.uin,
+            openId: normalized.openId || prev.openId,
             name: nextName,
             avatarUrl: normalized.avatarUrl || prev.avatarUrl,
         });
@@ -346,7 +363,14 @@ async function getCachedFriends(accountId) {
         if (!redis) return [];
         const str = await redis.get(`account:${accountId}:friends_cache`);
         circuitBreaker.recordSuccess();
-        if (str) return JSON.parse(str);
+        if (str) {
+            const parsed = JSON.parse(str);
+            const normalized = mergeFriendCacheEntries([], Array.isArray(parsed) ? parsed : []);
+            if (normalized.length > 0 && JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+                writeFriendsCache(accountId, normalized).catch(() => { });
+            }
+            return normalized;
+        }
         return [];
     } catch (e) {
         circuitBreaker.recordFailure();

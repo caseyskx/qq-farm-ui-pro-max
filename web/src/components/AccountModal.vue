@@ -75,6 +75,13 @@ function scheduleNextPoll() {
   pollTimer = setTimeout(() => doQRCheck(), 1500)
 }
 
+function activateManualTab() {
+  activeTab.value = 'manual'
+  stopQRCheck()
+  if (!props.editData && !form.code.trim() && !form.uin.trim())
+    form.platform = 'qq'
+}
+
 async function doQRCheck() {
   // 如果已停止或没有数据，不发请求
   if (pollStopped || !qrData.value)
@@ -93,7 +100,13 @@ async function doQRCheck() {
         stopQRCheck()
         qrStatus.value = '登录成功'
         const { uin, code: authCode, ticket, nickname, avatar } = res.data.data
-        const resolvedUin = String(uin || qrUin.value.trim() || '').trim()
+        const resolvedUin = String(uin || qrUin.value.trim() || props.editData?.uin || props.editData?.qq || '').trim()
+
+        if (qrPlatform.value === 'qq' && !resolvedUin) {
+          errorMessage.value = '本次 QQ 扫码未返回 QQ 号，系统已阻止创建无账号标识的记录。请重新打开扫码登录，并先填写 QQ 号后再扫码，避免策略、缓存和统计无法跟随账号。'
+          qrStatus.value = '未识别到 QQ 号'
+          return
+        }
 
         let accName = form.name.trim()
         if (!accName) {
@@ -306,7 +319,7 @@ watch(() => props.show, (newVal) => {
       form.name = ''
       form.code = ''
       form.uin = ''
-      form.platform = 'wx_car'
+      form.platform = 'qq'
       qrPlatform.value = 'wx_car'
       loadQRCode()
     }
@@ -350,7 +363,7 @@ watch(() => props.show, (newVal) => {
           <button
             class="flex-1 py-2 text-center font-medium transition-colors"
             :class="getTabClass('manual')"
-            @click="activeTab = 'manual'; stopQRCheck()"
+            @click="activateManualTab"
           >
             手动填码
           </button>
@@ -400,14 +413,14 @@ watch(() => props.show, (newVal) => {
           </div>
           <div class="w-full text-center">
             <p class="glass-text-muted text-sm">
-              扫码默认使用登录平台昵称，QQ 默认走官方免 UIN 通道
+              扫码默认使用登录平台昵称。QQ 若要确保策略、缓存和统计稳定跟随账号，建议先填写 QQ 号再扫码。
             </p>
           </div>
 
           <div v-if="qrPlatform === 'qq'" class="w-full">
             <BaseInput
               v-model="qrUin"
-              placeholder="可选：仅当第三方回退要求时再填写 QQ 号"
+              placeholder="建议填写当前 QQ 号，避免重登后产生无标识账号"
             />
             <BaseButton
               v-if="!qrData"

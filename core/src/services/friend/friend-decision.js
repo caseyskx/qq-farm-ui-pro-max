@@ -58,9 +58,9 @@ function getFilterSummary() {
 }
 
 function shouldStealPlant(plantId) {
+    const plant = getPlantById(plantId);
     const skipRadish = getSkipStealRadishConfig();
     if (skipRadish && skipRadish.enabled) {
-        const plant = getPlantById(plantId);
         if (plant && plant.seed_id === 20002) return false;
     }
 
@@ -69,13 +69,15 @@ function shouldStealPlant(plantId) {
 
     const plantIds = config.plantIds || [];
     const pid = String(plantId);
+    const seedId = toNum(plant && plant.seed_id);
+    const matched = plantIds.includes(pid) || (seedId > 0 && plantIds.includes(String(seedId)));
 
     if (config.mode === 'blacklist') {
-        const blocked = plantIds.includes(pid);
+        const blocked = matched;
         if (blocked) state.filterStats.plantBlacklist++;
         return !blocked;
     } else {
-        const allowed = plantIds.includes(pid);
+        const allowed = matched;
         if (!allowed) state.filterStats.plantWhitelist++;
         return allowed;
     }

@@ -9,7 +9,7 @@ on:
       version:
         description: 'Version'
         required: false
-        default: 'v4.5.19'
+        default: 'v4.5.20'
       latest:
         description: 'Latest'
         required: false
@@ -63,42 +63,10 @@ jobs:
       - name: Check Announcements
         run: pnpm check:announcements
 
-      - name: Build
-        run: pnpm package:release
-
-      - name: Package Release Assets
+      - name: Build Release Assets
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          mkdir -p release-assets/qq-farm-deploy
-
-          zip -j "release-assets/qq-farm-bot-${VERSION}-windows-x64.zip" core/dist/qq-farm-bot-win-x64.exe
-          tar -C core/dist -czf "release-assets/qq-farm-bot-${VERSION}-linux-x64.tar.gz" qq-farm-bot-linux-x64
-          tar -C core/dist -czf "release-assets/qq-farm-bot-${VERSION}-macos-x64.tar.gz" qq-farm-bot-macos-x64
-          tar -C core/dist -czf "release-assets/qq-farm-bot-${VERSION}-macos-arm64.tar.gz" qq-farm-bot-macos-arm64
-
-          cp deploy/docker-compose.yml release-assets/qq-farm-deploy/
-          cp deploy/.env.example release-assets/qq-farm-deploy/
-          cp deploy/README.md release-assets/qq-farm-deploy/
-          cp -r deploy/init-db release-assets/qq-farm-deploy/
-          cp scripts/deploy/fresh-install.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/install-or-update.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/update-agent.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/install-update-agent-service.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/manual-config-wizard.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/stack-layout.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/verify-stack.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/repair-mysql.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/repair-deploy.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/update-app.sh release-assets/qq-farm-deploy/
-          cp scripts/deploy/quick-deploy.sh release-assets/qq-farm-deploy/
-
-          tar -C release-assets -czf "release-assets/qq-farm-bot-${VERSION}-deploy.tar.gz" qq-farm-deploy
-          rm -rf release-assets/qq-farm-deploy
-
-      - name: Package Offline Deployment Bundles
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          bash deploy/scripts/export-offline-packages.sh "${VERSION}" --output-dir release-assets
+          bash scripts/release/build-release-assets.sh --version "${VERSION}" --output-dir release-assets
 
       - name: List Artifacts
         run: ls -R release-assets

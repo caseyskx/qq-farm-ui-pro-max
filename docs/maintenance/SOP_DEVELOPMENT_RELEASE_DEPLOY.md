@@ -247,7 +247,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### 10.1 推荐入口：标准完整部署
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/install-or-update.sh) --action install
 ```
 
 ### 10.2 x86 / ARM 包装脚本（按架构显式调用时使用）

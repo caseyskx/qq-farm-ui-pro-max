@@ -1,6 +1,6 @@
 const { getPool } = require('./mysql-db');
 
-const VALID_SCOPES = new Set(['users', 'account_ownership']);
+const VALID_SCOPES = new Set(['users', 'account_ownership', 'runtime']);
 const VALID_STATUSES = new Set(['success', 'warning', 'error']);
 
 function normalizeText(value, maxLength = 120) {

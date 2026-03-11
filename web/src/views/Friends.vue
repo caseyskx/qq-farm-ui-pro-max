@@ -233,7 +233,10 @@ function getFriendAvatar(friend: any) {
   const direct = String(friend?.avatarUrl || friend?.avatar_url || '').trim()
   if (direct)
     return direct
+  const gid = String(friend?.gid || '').trim()
   const uin = String(friend?.uin || '').trim()
+  if (!uin || !/^\d+$/.test(uin) || uin === gid)
+    return ''
   if (uin && !friend?.isWechat)
     return `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=100`
   return ''

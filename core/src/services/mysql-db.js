@@ -400,6 +400,26 @@ async function initMysql() {
                     '检测到缺少 account_bag_preferences 表，正在执行迁移 016-account-bag-preferences.sql',
                 );
             }
+            const [confirmedAccountBagPreferencesTable] = accountBagPreferencesTable.length > 0
+                ? [accountBagPreferencesTable]
+                : await pool.execute(`SHOW TABLES LIKE 'account_bag_preferences'`);
+            if (confirmedAccountBagPreferencesTable.length > 0) {
+                const accountBagPreferenceColumnEnsures = [
+                    ['plantable_seed_snapshot', "ALTER TABLE account_bag_preferences ADD COLUMN plantable_seed_snapshot JSON DEFAULT NULL AFTER activity_history", 'account_bag_preferences.plantable_seed_snapshot'],
+                    ['mall_resolver_cache', "ALTER TABLE account_bag_preferences ADD COLUMN mall_resolver_cache JSON DEFAULT NULL AFTER plantable_seed_snapshot", 'account_bag_preferences.mall_resolver_cache'],
+                ];
+                for (const [columnName, alterSql, label] of accountBagPreferenceColumnEnsures) {
+                    const [columnRows] = await pool.execute(
+                        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'account_bag_preferences' AND COLUMN_NAME = ?`,
+                        [DB_NAME, columnName],
+                    );
+                    if (columnRows.length === 0) {
+                        logger.info(`检测到缺少 ${label}，正在添加...`);
+                        await pool.query(alterSql);
+                        logger.info(`✅ ${label} 添加完成`);
+                    }
+                }
+            }
 
             const [updateJobsTable] = await pool.execute(`SHOW TABLES LIKE 'update_jobs'`);
             if (updateJobsTable.length === 0) {

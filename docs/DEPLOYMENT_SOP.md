@@ -48,19 +48,28 @@ node scripts/utils/check-doc-links.js
 
 ```bash
 cd /path/to/qq-farm-ui-pro-max
-./scripts/docker/docker-build-multiarch.sh 4.5.17
+./scripts/docker/docker-build-multiarch.sh --version 4.5.20
 ```
 
 说明：
 
-- 脚本默认推送 Docker Hub：`smdk000/qq-farm-bot-ui`
-- GitHub Actions 会额外同步 GHCR：`ghcr.io/smdk000/qq-farm-ui-pro-max`
-- Git tag 示例可写作 `v4.5.17`；镜像 tag 示例统一使用 `4.5.17`
+- 脚本默认同步 Docker Hub 与 GHCR：`smdk000/qq-farm-bot-ui`、`ghcr.io/smdk000/qq-farm-ui-pro-max`
+- Git tag 示例可写作 `v4.5.20`；镜像 tag 示例统一使用 `4.5.20`
+- 如只推送单一仓库，可附加 `--docker-hub-only` 或 `--ghcr-only`
 
 ### 2.3 镜像口径
 
-- Docker Hub：`smdk000/qq-farm-bot-ui:latest` / `smdk000/qq-farm-bot-ui:4.5.17`
-- GHCR：`ghcr.io/smdk000/qq-farm-ui-pro-max:latest` / `ghcr.io/smdk000/qq-farm-ui-pro-max:4.5.17`
+- Docker Hub：`smdk000/qq-farm-bot-ui:latest` / `smdk000/qq-farm-bot-ui:4.5.20`
+- GHCR：`ghcr.io/smdk000/qq-farm-ui-pro-max:latest` / `ghcr.io/smdk000/qq-farm-ui-pro-max:4.5.20`
+
+### 2.4 本地 Release 产物
+
+```bash
+cd /path/to/qq-farm-ui-pro-max
+./scripts/release/build-release-assets.sh --version v4.5.20
+```
+
+默认输出目录：`release-assets/`
 
 ---
 
@@ -92,13 +101,13 @@ cd /path/to/qq-farm-ui-pro-max
 - 全新部署入口应优先展示：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/install-or-update.sh) --action install
 ```
 
 - 已部署环境更新入口应优先展示：
 
 ```bash
-/opt/qq-farm-bot-current/update-app.sh
+/opt/qq-farm-current/install-or-update.sh --action update --preserve-current
 ```
 
 - 如果文档保留架构包装器示例，URL 必须使用真实路径：
@@ -124,7 +133,7 @@ git status
 ```bash
 git add -A
 git status
-git commit -m "chore: 更新 v4.5.17 部署文档与发布链路"
+git commit -m "chore: 更新 v4.5.20 部署文档与发布链路"
 git push origin <branch>
 ```
 

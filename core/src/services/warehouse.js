@@ -4,11 +4,12 @@
  */
 
 const protobuf = require('protobufjs');
-const { getFruitName, getPlantByFruitId, getPlantBySeedId, getItemById, getItemImageById } = require('../config/gameConfig');
-const { isAutomationOn, getTradeConfig } = require('../models/store');
+const { getFruitName, getPlantByFruitId, getPlantBySeedId, getPlantNameBySeedId, getSeedImageBySeedId, getItemById, getItemImageById } = require('../config/gameConfig');
+const { isAutomationOn, getTradeConfig, getConfigSnapshot } = require('../models/store');
 const { sendMsgAsync, networkEvents, getUserState } = require('../utils/network');
 const { types } = require('../utils/proto');
 const { toLong, toNum, log, logWarn, sleep } = require('../utils/utils');
+const { getAccountBagPreferences, saveAccountBagPreferences } = require('./account-bag-preferences');
 const { updateStatusGold } = require('./status');
 
 const SELL_BATCH_SIZE = 15;
@@ -29,6 +30,7 @@ const ORGANIC_FERTILIZER_ITEM_HOURS = new Map([
 ]);
 let fertilizerGiftDoneDateKey = '';
 let fertilizerGiftLastOpenAt = 0;
+const plantableSeedSnapshotPersistState = new Map();
 
 function getDateKey() {
     const now = new Date();
@@ -36,6 +38,61 @@ function getDateKey() {
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
+}
+
+function getRuntimeAccountId() {
+    return String(process.env.FARM_ACCOUNT_ID || '').trim();
+}
+
+function buildPlantableSeedSnapshotHash(seeds = []) {
+    return JSON.stringify((Array.isArray(seeds) ? seeds : []).map((seed) => ({
+        seedId: Number(seed && seed.seedId) || 0,
+        count: Math.max(0, Number(seed && seed.count) || 0),
+        usableCount: Math.max(0, Number(seed && seed.usableCount) || 0),
+        reservedCount: Math.max(0, Number(seed && seed.reservedCount) || 0),
+        requiredLevel: Math.max(0, Number(seed && seed.requiredLevel) || 0),
+        plantSize: Math.max(1, Number(seed && seed.plantSize) || 1),
+        unlocked: seed && seed.unlocked !== false,
+        image: String(seed && seed.image || ''),
+        name: String(seed && seed.name || ''),
+    })));
+}
+
+async function persistPlantableSeedSnapshot(accountId, seeds = []) {
+    const normalizedAccountId = String(accountId || '').trim();
+    if (!normalizedAccountId) return;
+
+    const nextSeeds = Array.isArray(seeds) ? seeds : [];
+    const nextHash = buildPlantableSeedSnapshotHash(nextSeeds);
+    const cacheState = plantableSeedSnapshotPersistState.get(normalizedAccountId) || { hash: '', savedAt: 0 };
+    const now = Date.now();
+    if (cacheState.hash === nextHash && now - cacheState.savedAt < 10 * 60 * 1000) {
+        return;
+    }
+
+    try {
+        const current = await getAccountBagPreferences(normalizedAccountId).catch(() => null);
+        const currentHash = buildPlantableSeedSnapshotHash(current && current.plantableSeedSnapshot && current.plantableSeedSnapshot.seeds);
+        if (currentHash === nextHash && now - Math.max(0, Number(current && current.plantableSeedSnapshot && current.plantableSeedSnapshot.generatedAt) || 0) < 10 * 60 * 1000) {
+            plantableSeedSnapshotPersistState.set(normalizedAccountId, { hash: nextHash, savedAt: now });
+            return;
+        }
+        await saveAccountBagPreferences(normalizedAccountId, {
+            ...(current || {}),
+            plantableSeedSnapshot: {
+                generatedAt: now,
+                seeds: nextSeeds,
+            },
+        });
+        plantableSeedSnapshotPersistState.set(normalizedAccountId, { hash: nextHash, savedAt: now });
+    } catch (error) {
+        logWarn('仓库', `保存背包种子快照失败: ${error.message}`, {
+            module: 'warehouse',
+            event: 'bag_seed_snapshot_save',
+            result: 'error',
+            accountId: normalizedAccountId,
+        });
+    }
 }
 
 // ============ API ============
@@ -211,6 +268,33 @@ function getFertilizerItemTypeAndHours(itemId) {
     if (interactionType === 'fertilizer') return { type: 'normal', perItemHours: 1 };
     if (interactionType === 'fertilizerpro') return { type: 'organic', perItemHours: 1 };
     return { type: 'other', perItemHours: 0 };
+}
+
+function normalizeInventoryReserveConfig(config) {
+    const raw = (config && typeof config === 'object') ? config : {};
+    const reserveRules = Array.isArray(raw.reserveRules)
+        ? raw.reserveRules
+            .map(rule => ({
+                seedId: Math.max(0, toNum(rule && rule.seedId)),
+                keepCount: Math.max(0, toNum(rule && rule.keepCount)),
+            }))
+            .filter(rule => rule.seedId > 0)
+        : [];
+    const seen = new Set();
+    return {
+        globalKeepCount: Math.max(0, toNum(raw.globalKeepCount)),
+        reserveRules: reserveRules.filter((rule) => {
+            if (seen.has(rule.seedId)) return false;
+            seen.add(rule.seedId);
+            return true;
+        }),
+    };
+}
+
+function getSeedReserveCount(inventoryPlanting, seedId) {
+    const config = normalizeInventoryReserveConfig(inventoryPlanting);
+    const matchedRule = config.reserveRules.find(rule => Number(rule.seedId) === Number(seedId));
+    return matchedRule ? matchedRule.keepCount : config.globalKeepCount;
 }
 
 function isFertilizerContainerFullError(err) {
@@ -429,6 +513,70 @@ async function getBagDetail() {
         return Number(a.id || 0) - Number(b.id || 0);
     });
     return { totalKinds: items.length, items, originalItems };
+}
+
+async function getPlantableBagSeeds(options = {}) {
+    const accountConfig = (options.accountConfig && typeof options.accountConfig === 'object')
+        ? options.accountConfig
+        : (getConfigSnapshot() || {});
+    const inventoryPlanting = normalizeInventoryReserveConfig(accountConfig.inventoryPlanting);
+    const includeZeroUsable = options.includeZeroUsable === true;
+    const includeLocked = options.includeLocked === true;
+    const state = getUserState() || {};
+    const accountLevel = Math.max(0, toNum(state.level));
+    const bagDetail = await getBagDetail();
+    const allSeeds = [];
+
+    for (const item of ((bagDetail && Array.isArray(bagDetail.items)) ? bagDetail.items : [])) {
+        const seedId = toNum(item && item.id);
+        const count = Math.max(0, toNum(item && item.count));
+        if (seedId <= 0 || count <= 0 || String(item && item.category) !== 'seed') continue;
+
+        const plantCfg = getPlantBySeedId(seedId);
+        if (!plantCfg) continue;
+
+        const requiredLevel = Math.max(0, toNum(plantCfg.land_level_need));
+        const plantSize = Math.max(1, toNum(plantCfg.size) || 1);
+        const reservedCount = Math.max(0, getSeedReserveCount(inventoryPlanting, seedId));
+        const usableCount = Math.max(0, count - reservedCount);
+        const unlocked = requiredLevel <= accountLevel;
+
+        allSeeds.push({
+            seedId,
+            name: getPlantNameBySeedId(seedId),
+            count,
+            usableCount,
+            reservedCount,
+            requiredLevel,
+            plantSize,
+            image: String(item && item.image) || getSeedImageBySeedId(seedId) || '',
+            unlocked,
+        });
+
+        if (!includeLocked && !unlocked) continue;
+        if (!includeZeroUsable && usableCount <= 0) continue;
+    }
+
+    const sortSeeds = (rows) => rows.sort((a, b) => (
+        Number(b.usableCount || 0) - Number(a.usableCount || 0)
+        || Number(b.requiredLevel || 0) - Number(a.requiredLevel || 0)
+        || Number(b.plantSize || 1) - Number(a.plantSize || 1)
+        || Number(a.seedId || 0) - Number(b.seedId || 0)
+    ));
+    const sortedSeeds = sortSeeds(allSeeds.filter((seed) => {
+        if (!includeLocked && seed.unlocked === false) return false;
+        if (!includeZeroUsable && Number(seed.usableCount || 0) <= 0) return false;
+        return true;
+    }));
+
+    if (options.persistSnapshot !== false) {
+        const accountId = String(options.accountId || getRuntimeAccountId() || '').trim();
+        if (accountId) {
+            await persistPlantableSeedSnapshot(accountId, sortSeeds([...allSeeds]));
+        }
+    }
+
+    return sortedSeeds;
 }
 
 function normalizeRewardItems(items = []) {
@@ -845,9 +993,17 @@ async function sellAllFruits() {
     }
 }
 
+function resetWarehouseRuntimeState(options = {}) {
+    if (options.preserveDailyState) return;
+    fertilizerGiftDoneDateKey = '';
+    fertilizerGiftLastOpenAt = 0;
+}
+
 module.exports = {
     getBag,
     getBagDetail,
+    getPlantableBagSeeds,
+    getContainerHoursFromBagItems,
     getSellPreview,
     buildSellPlanByPolicy,
     sellItems,
@@ -859,6 +1015,7 @@ module.exports = {
     summarizeRewardItems,
     formatUseResult,
     openFertilizerGiftPacksSilently,
+    resetWarehouseRuntimeState,
     getFertilizerGiftDailyState: () => ({
         key: 'fertilizer_gift_open',
         doneToday: fertilizerGiftDoneDateKey === getDateKey(),

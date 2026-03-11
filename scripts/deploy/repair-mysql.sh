@@ -7,6 +7,7 @@ DEPLOY_BASE_DIR="${DEPLOY_BASE_DIR:-/opt}"
 STACK_NAME="${STACK_NAME:-qq-farm}"
 CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
 CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
+LEGACY_CURRENT_LINK=""
 REPO_SLUG="${REPO_SLUG:-smdk000/qq-farm-ui-pro-max}"
 REPO_REF="${REPO_REF:-main}"
 RAW_BASE_URL="${RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}}"
@@ -64,6 +65,7 @@ refresh_stack_layout() {
     if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
         CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
     fi
+    LEGACY_CURRENT_LINK="$(stack_legacy_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
 }
 
 trap 'print_error "MySQL 修复脚本执行失败，请检查上方日志。"' ERR
@@ -131,6 +133,14 @@ resolve_deploy_dir() {
     if [ -L "${CURRENT_LINK}" ] || [ -d "${CURRENT_LINK}" ]; then
         if [ -f "${CURRENT_LINK}/docker-compose.yml" ]; then
             DEPLOY_DIR="${CURRENT_LINK}"
+            return 0
+        fi
+    fi
+
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && { [ -L "${LEGACY_CURRENT_LINK}" ] || [ -d "${LEGACY_CURRENT_LINK}" ]; }; then
+        if [ -f "${LEGACY_CURRENT_LINK}/docker-compose.yml" ]; then
+            DEPLOY_DIR="${LEGACY_CURRENT_LINK}"
+            load_deploy_env "${DEPLOY_DIR}/.env"
             return 0
         fi
     fi

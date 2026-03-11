@@ -21,7 +21,7 @@ import BaseTableToolbar from '@/components/ui/BaseTableToolbar.vue'
 import { useCopyFeedbackStore } from '@/stores/copy-feedback'
 import { useToastStore } from '@/stores/toast'
 
-type AdminOperationScope = 'users' | 'account_ownership'
+type AdminOperationScope = 'users' | 'account_ownership' | 'runtime'
 type AdminOperationStatus = 'success' | 'warning' | 'error'
 type ActionType = 'all' | 'create' | 'edit' | 'card' | 'ownership' | 'runtime' | 'delete' | 'batch' | 'other'
 type ScopeFilter = 'all' | AdminOperationScope
@@ -73,6 +73,7 @@ const scopeOptions = [
   { label: '全部范围', value: 'all' },
   { label: '用户管理', value: 'users' },
   { label: '账号归属', value: 'account_ownership' },
+  { label: '运行时 / 热重载', value: 'runtime' },
 ]
 
 const statusOptions = [
@@ -117,7 +118,7 @@ function normalizeLogItem(raw: unknown): AdminOperationLogItem | null {
   return {
     id: String(item.id || '').trim() || `log-${Number(item.timestamp) || Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     actorUsername: String(item.actorUsername || '').trim(),
-    scope: scope === 'users' || scope === 'account_ownership' ? scope : '',
+    scope: scope === 'users' || scope === 'account_ownership' || scope === 'runtime' ? scope : '',
     actionLabel: String(item.actionLabel || '').trim() || '未命名操作',
     status: status as AdminOperationStatus,
     totalCount: Math.max(Number(item.totalCount) || 0, 0),
@@ -156,6 +157,8 @@ function scopeLabel(scope: AdminOperationScope | '') {
     return '用户管理'
   if (scope === 'account_ownership')
     return '账号归属'
+  if (scope === 'runtime')
+    return '运行时'
   return '其他范围'
 }
 
@@ -164,6 +167,8 @@ function scopeSubLabel(scope: AdminOperationScope | '') {
     return '账号、卡密、状态治理'
   if (scope === 'account_ownership')
     return '绑定关系、模式、运行态'
+  if (scope === 'runtime')
+    return '仪表盘热重载、模块重建'
   return '未识别范围'
 }
 
@@ -172,6 +177,8 @@ function resolveScopeRoute(scope: AdminOperationScope | '') {
     return '/users'
   if (scope === 'account_ownership')
     return '/account-ownership'
+  if (scope === 'runtime')
+    return '/dashboard'
   return ''
 }
 
@@ -211,7 +218,7 @@ function resolveActionType(actionLabel: string): ActionType {
     return 'card'
   if (label.includes('归属'))
     return 'ownership'
-  if (label.includes('启动') || label.includes('停止'))
+  if (label.includes('启动') || label.includes('停止') || label.includes('热重载') || label.includes('重载'))
     return 'runtime'
   if (label.includes('删除'))
     return 'delete'
@@ -235,6 +242,8 @@ function scopeClass(scope: AdminOperationScope | '') {
     return 'operation-logs-scope operation-logs-scope-users'
   if (scope === 'account_ownership')
     return 'operation-logs-scope operation-logs-scope-ownership'
+  if (scope === 'runtime')
+    return 'operation-logs-scope operation-logs-scope-runtime'
   return 'operation-logs-scope operation-logs-scope-neutral'
 }
 
@@ -522,6 +531,8 @@ const summary = computed(() => {
       acc.users += 1
     if (item.scope === 'account_ownership')
       acc.ownership += 1
+    if (item.scope === 'runtime')
+      acc.runtime += 1
     if (item.status === 'success')
       acc.success += 1
     else if (item.status === 'warning')
@@ -536,6 +547,7 @@ const summary = computed(() => {
     error: 0,
     users: 0,
     ownership: 0,
+    runtime: 0,
     actors: new Set<string>(),
   })
 })
@@ -555,9 +567,9 @@ const summaryCards = computed(() => [
   },
   {
     key: 'scope',
-    label: '用户 / 归属',
-    value: `${summary.value.users} / ${summary.value.ownership}`,
-    description: '覆盖两个管理域',
+    label: '用户 / 归属 / 运行时',
+    value: `${summary.value.users} / ${summary.value.ownership} / ${summary.value.runtime}`,
+    description: '覆盖三个管理域',
   },
   {
     key: 'actors',
@@ -742,7 +754,7 @@ onBeforeUnmount(() => {
           操作日志中心
         </h1>
         <p class="ui-page-desc">
-          汇总“用户”和“账号归属”页写入的管理员操作日志，支持按管理员、范围、结果、动作类型和时间范围统一回查。
+          汇总用户治理、账号归属和运行时热重载的持久化操作日志，支持按操作者、范围、结果、动作类型和时间范围统一回查。
         </p>
       </div>
       <div class="ui-page-actions">
@@ -1404,6 +1416,11 @@ onBeforeUnmount(() => {
 .operation-logs-scope-ownership {
   background: color-mix(in srgb, var(--ui-status-success) 11%, transparent);
   color: color-mix(in srgb, var(--ui-status-success) 84%, var(--ui-text-1) 16%);
+}
+
+.operation-logs-scope-runtime {
+  background: color-mix(in srgb, var(--ui-status-info) 12%, transparent);
+  color: color-mix(in srgb, var(--ui-status-info) 82%, var(--ui-text-1) 18%);
 }
 
 .operation-logs-scope-neutral,

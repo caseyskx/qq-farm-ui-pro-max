@@ -184,6 +184,7 @@ function createFeatureDeps(overrides = {}) {
             registerAdminOperationLogRoutes: makeRegistrar('registerAdminOperationLogRoutes'),
             registerTrialCardRoutes: makeRegistrar('registerTrialCardRoutes'),
             registerAnnouncementAdminRoutes: makeRegistrar('registerAnnouncementAdminRoutes'),
+            registerSystemUpdateAdminRoutes: makeRegistrar('registerSystemUpdateAdminRoutes'),
             registerLogReadRoutes: makeRegistrar('registerLogReadRoutes'),
             registerNotificationsRoute: makeRegistrar('registerNotificationsRoute'),
             registerQrRoutes: makeRegistrar('registerQrRoutes'),
@@ -224,6 +225,7 @@ test('registerAdminFeatureRoutes keeps feature registration order and shared hel
         'createTrialRateLimiter',
         'registerTrialCardRoutes',
         'registerAnnouncementAdminRoutes',
+        'registerSystemUpdateAdminRoutes',
         'registerLogReadRoutes',
         'registerNotificationsRoute',
         'registerQrRoutes',
@@ -241,6 +243,19 @@ test('registerAdminFeatureRoutes keeps feature registration order and shared hel
     );
     assert.equal(deps.app.uses[0][1], deps.farmToolsRouter);
     assert.equal(deps.app.uses[1][1], fixture.guardFn);
+});
+
+test('registerAdminFeatureRoutes lazy runtime loaders resolve service modules from admin routes', () => {
+    const fixture = createFeatureDeps();
+
+    registerAdminFeatureRoutes(fixture.deps);
+
+    const friendsCacheApi = fixture.registerAccountStateRoutesArgs.loadFriendsCacheApi();
+    assert.equal(typeof friendsCacheApi.getCachedFriends, 'function');
+    assert.equal(typeof friendsCacheApi.mergeFriendsCache, 'function');
+
+    assert.equal(typeof fixture.registerAccountControlRoutesArgs.loadGetPlantRankings(), 'function');
+    assert.doesNotThrow(() => fixture.registerCommerceRoutesArgs.formatUseResult({}, {}));
 });
 
 test('registerAdminFeatureRoutes catch-all route keeps api prefixes at 404 and serves index for web paths', async () => {

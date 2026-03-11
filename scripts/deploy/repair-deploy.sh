@@ -7,6 +7,7 @@ DEPLOY_BASE_DIR="${DEPLOY_BASE_DIR:-/opt}"
 STACK_NAME="${STACK_NAME:-qq-farm}"
 CURRENT_LINK_INPUT="${CURRENT_LINK:-}"
 CURRENT_LINK="${CURRENT_LINK_INPUT:-${DEPLOY_BASE_DIR}/qq-farm-current}"
+LEGACY_CURRENT_LINK=""
 REPO_SLUG="${REPO_SLUG:-smdk000/qq-farm-ui-pro-max}"
 REPO_REF="${REPO_REF:-main}"
 RAW_BASE_URL="${RAW_BASE_URL:-https://raw.githubusercontent.com/${REPO_SLUG}/${REPO_REF}}"
@@ -54,6 +55,7 @@ refresh_stack_layout() {
     if [ "${CURRENT_LINK_EXPLICIT}" != "1" ]; then
         CURRENT_LINK="$(stack_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
     fi
+    LEGACY_CURRENT_LINK="$(stack_legacy_current_link_path "${DEPLOY_BASE_DIR}" "${STACK_NAME}")"
 }
 
 trap 'print_error "部署包修复失败，请检查上方日志。"' ERR
@@ -120,6 +122,13 @@ resolve_deploy_dir() {
         fi
     fi
 
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && { [ -L "${LEGACY_CURRENT_LINK}" ] || [ -d "${LEGACY_CURRENT_LINK}" ]; }; then
+        if [ -f "${LEGACY_CURRENT_LINK}/docker-compose.yml" ] || [ -f "${LEGACY_CURRENT_LINK}/.env" ]; then
+            DEPLOY_DIR="${LEGACY_CURRENT_LINK}"
+            return 0
+        fi
+    fi
+
     local latest=""
     latest="$(find "${DEPLOY_BASE_DIR}" -mindepth 2 -maxdepth 2 -type d -name "${STACK_DIR_NAME:-$(stack_dir_name "${STACK_NAME}")}" 2>/dev/null | sort | tail -n 1)"
     if [ -n "${latest}" ]; then
@@ -170,6 +179,9 @@ mark_current_release() {
     current_parent="$(dirname "${CURRENT_LINK}")"
     mkdir -p "${current_parent}"
     ln -sfn "${DEPLOY_DIR}" "${CURRENT_LINK}"
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && [ "${LEGACY_CURRENT_LINK}" != "${CURRENT_LINK}" ]; then
+        ln -sfn "${DEPLOY_DIR}" "${LEGACY_CURRENT_LINK}"
+    fi
 }
 
 sync_bundle() {
@@ -343,6 +355,9 @@ main() {
     print_success "部署包修复完成。"
     echo "部署目录: ${DEPLOY_DIR}"
     echo "当前版本链接: ${CURRENT_LINK}"
+    if [ -n "${LEGACY_CURRENT_LINK}" ] && [ "${LEGACY_CURRENT_LINK}" != "${CURRENT_LINK}" ]; then
+        echo "历史兼容链接: ${LEGACY_CURRENT_LINK}"
+    fi
     echo "主程序更新命令: ${DEPLOY_DIR}/update-app.sh"
     echo "统一安装/更新入口: ${DEPLOY_DIR}/install-or-update.sh"
     echo "手动修复向导: ${DEPLOY_DIR}/manual-config-wizard.sh"

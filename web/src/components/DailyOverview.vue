@@ -9,6 +9,7 @@ const props = defineProps<{
 const GIFT_ICONS: Record<string, string> = {
   task_claim: 'i-carbon-task-complete',
   email_rewards: 'i-carbon-email',
+  fertilizer_buy: 'i-carbon-shopping-cart',
   mall_free_gifts: 'i-carbon-shopping-bag',
   daily_share: 'i-carbon-share',
   vip_daily_gift: 'i-carbon-star',
@@ -45,6 +46,23 @@ function formatTime(timestamp: number) {
 function getGiftStatusText(gift: any) {
   if (!gift)
     return '未知'
+  if (gift.key === 'fertilizer_buy') {
+    if (!gift.enabled)
+      return '未开启'
+    if (gift.result === 'purchased')
+      return '已自动购买'
+    if (gift.reason === 'threshold_not_reached')
+      return '阈值未触发'
+    if (gift.reason === 'daily_limit')
+      return '今日已达上限'
+    if (gift.reason === 'no_coupon')
+      return '点券不足'
+    if (gift.reason === 'missing_goods')
+      return '商城礼包失配'
+    if (gift.result === 'error')
+      return '执行异常'
+    return '等待执行'
+  }
   if (gift.key === 'vip_daily_gift' && gift.hasGift === false)
     return '未开通'
   if (gift.key === 'month_card_gift' && gift.hasCard === false)
@@ -59,6 +77,21 @@ function getGiftStatusText(gift: any) {
 function formatGiftSubText(gift: any) {
   if (!gift)
     return ''
+  if (gift.key === 'fertilizer_buy') {
+    if (!gift.enabled)
+      return ''
+    const normalHours = Number(gift.containerHours?.normal || 0)
+    const organicHours = Number(gift.containerHours?.organic || 0)
+    const normalTarget = Number(gift.targetHours?.normal || 0)
+    const organicTarget = Number(gift.targetHours?.organic || 0)
+    const normalBought = Number(gift.typeCounts?.normal || 0)
+    const organicBought = Number(gift.typeCounts?.organic || 0)
+    if (gift.message)
+      return `${gift.message} · 容器 ${normalHours.toFixed(1)}h/${normalTarget.toFixed(0)}h · 有机 ${organicHours.toFixed(1)}h/${organicTarget.toFixed(0)}h`
+    if (normalBought > 0 || organicBought > 0)
+      return `今日购买 普通 ${normalBought} / 有机 ${organicBought}`
+    return `容器 普通 ${normalHours.toFixed(1)}h / 有机 ${organicHours.toFixed(1)}h`
+  }
   if (gift.key === 'vip_daily_gift' && gift.hasGift === false)
     return '未开通QQ会员或无每日礼包'
   if (gift.key === 'month_card_gift' && gift.hasCard === false)

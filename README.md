@@ -267,7 +267,7 @@ pnpm check:doc-links
 标准部署栈固定为 4 个服务：`主程序 + MySQL + Redis + ipad860`。后续版本主要更新主程序；MySQL、Redis、ipad860 默认复用已部署版本。
 如果你的服务器在中国大陆网络环境，优先查看 [deploy/README.cn.md](deploy/README.cn.md)。
 
-自 `v4.5.19` 起，部署目录固定带上两类修复脚本，并统一附带安装/更新/核验辅助脚本：
+自 `v4.5.20` 起，部署目录固定带上两类修复脚本，并统一附带安装/更新/核验辅助脚本：
 
 - `repair-mysql.sh`：修复旧 MySQL 结构、补齐缺失表/列并回填历史数据
 - `repair-deploy.sh`：修复旧部署目录缺脚本、缺 `docker-compose.yml`、缺 `init-db`、缺 `/opt/qq-farm-current`（以及历史 `/opt/qq-farm-bot-current`）链接的问题
@@ -309,7 +309,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/m
 如需固定镜像版本或覆盖仓库，可在 `.env` 中设置：
 
 ```bash
-APP_IMAGE=smdk000/qq-farm-bot-ui:4.5.19
+APP_IMAGE=smdk000/qq-farm-bot-ui:4.5.20
 MYSQL_IMAGE=mysql:8.0
 REDIS_IMAGE=redis:7-alpine
 IPAD860_IMAGE=smdk000/ipad860:latest
@@ -364,7 +364,7 @@ bash install-or-update.sh --action update --preserve-current
 bash update-app.sh
 
 # 如需切到指定版本
-bash update-app.sh --image smdk000/qq-farm-bot-ui:4.5.19
+bash update-app.sh --image smdk000/qq-farm-bot-ui:4.5.20
 
 # 弱网 / 离线环境：先 docker load，再用离线镜像包更新
 bash update-app.sh --image-archive /root/qq-farm-bot-images-amd64.tar.gz
@@ -419,8 +419,8 @@ curl http://localhost:3080/api/ping
 
 - `qq-farm-bot-images-amd64.tar.gz`
 - `qq-farm-bot-images-arm64.tar.gz`
-- `qq-farm-bot-v4.5.19-offline-amd64.tar.gz`
-- `qq-farm-bot-v4.5.19-offline-arm64.tar.gz`
+- `qq-farm-bot-v4.5.20-offline-amd64.tar.gz`
+- `qq-farm-bot-v4.5.20-offline-arm64.tar.gz`
 
 其中 `arm64` 离线包里的 `ipad860` 仍是 `linux/amd64`，目标宿主机需支持 QEMU。
 
@@ -454,7 +454,7 @@ echo $GH_PAT | docker login ghcr.io -u smdk000 --password-stdin
 **使用脚本构建（推荐）**:
 ```bash
 chmod +x scripts/docker/docker-build-multiarch.sh
-./scripts/docker/docker-build-multiarch.sh 4.5.18
+./scripts/docker/docker-build-multiarch.sh --version 4.5.20
 ```
 
 **手动构建**:
@@ -462,7 +462,7 @@ chmod +x scripts/docker/docker-build-multiarch.sh
 # 构建并推送到 Docker Hub
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t smdk000/qq-farm-bot-ui:4.5.18 \
+  -t smdk000/qq-farm-bot-ui:4.5.20 \
   -t smdk000/qq-farm-bot-ui:latest \
   -f core/Dockerfile . \
   --push
@@ -470,17 +470,27 @@ docker buildx build \
 # 构建并推送到 GitHub Container Registry
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/smdk000/qq-farm-ui-pro-max:4.5.18 \
+  -t ghcr.io/smdk000/qq-farm-ui-pro-max:4.5.20 \
   -t ghcr.io/smdk000/qq-farm-ui-pro-max:latest \
   -f core/Dockerfile . \
   --push
 ```
 
-#### 3. 验证构建
+#### 3. 输出 GitHub Release 同款二进制与部署包
+
+```bash
+chmod +x scripts/release/build-release-assets.sh
+./scripts/release/build-release-assets.sh --version v4.5.20
+
+# 产物默认输出到 ./release-assets
+ls release-assets
+```
+
+#### 4. 验证构建
 
 ```bash
 # 查看镜像信息
-docker manifest inspect smdk000/qq-farm-bot-ui:4.5.18
+docker buildx imagetools inspect smdk000/qq-farm-bot-ui:4.5.20
 
 # Docker Hub 查看
 # https://hub.docker.com/r/smdk000/qq-farm-bot-ui/tags
@@ -586,7 +596,7 @@ lsof -i :3080
 
 # 使用不同端口
 export WEB_PORT=3081
-bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/install-or-update.sh) --action install
 ```
 
 ---
@@ -601,7 +611,7 @@ permission denied while trying to connect to the Docker daemon socket
 **解决方案**:
 ```bash
 # 使用 sudo
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/fresh-install.sh)
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/main/scripts/deploy/install-or-update.sh) --action install
 
 # 或将用户添加到 docker 组
 sudo usermod -aG docker $USER

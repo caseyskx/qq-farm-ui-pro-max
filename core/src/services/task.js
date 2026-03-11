@@ -314,10 +314,18 @@ function cleanupTaskSystem() {
     checking = false;
 }
 
+function resetTaskRuntimeState(options = {}) {
+    cleanupTaskSystem();
+    if (options.preserveDailyState) return;
+    taskClaimDoneDateKey = '';
+    taskClaimLastAt = 0;
+}
+
 module.exports = {
     checkAndClaimTasks,
     initTaskSystem,
     cleanupTaskSystem,
+    resetTaskRuntimeState,
     claimTaskReward,
     doClaim, // 供手动领取使用
     getTaskClaimDailyState: () => ({

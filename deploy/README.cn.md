@@ -26,7 +26,7 @@
 
 ```bash
 cd deploy/scripts
-bash build-all-and-push.sh 4.5.19
+bash build-all-and-push.sh 4.5.20
 ```
 
 脚本中选择：
@@ -40,14 +40,14 @@ bash build-all-and-push.sh 4.5.19
 deploy/offline/qq-farm-bot-deploy.tar.gz
 deploy/offline/qq-farm-bot-images-amd64.tar.gz
 deploy/offline/qq-farm-bot-images-arm64.tar.gz
-deploy/offline/qq-farm-bot-v4.5.19-offline-amd64.tar.gz
-deploy/offline/qq-farm-bot-v4.5.19-offline-arm64.tar.gz
+deploy/offline/qq-farm-bot-v4.5.20-offline-amd64.tar.gz
+deploy/offline/qq-farm-bot-v4.5.20-offline-arm64.tar.gz
 ```
 
 上传到服务器后执行：
 
 ```bash
-tar xzf qq-farm-bot-v4.5.19-offline-amd64.tar.gz
+tar xzf qq-farm-bot-v4.5.20-offline-amd64.tar.gz
 cd qq-farm-bot-release-amd64
 cp .env.example .env
 vi .env
@@ -69,7 +69,7 @@ curl http://127.0.0.1:3080/api/ping
 
 ```bash
 cd deploy/scripts
-bash build-all-and-push.sh 4.5.19
+bash build-all-and-push.sh 4.5.20
 ```
 
 需要的文件：
@@ -141,9 +141,9 @@ chmod +x repair-deploy.sh
 
 补充说明：
 
-- 从 `v4.5.19` 开始，部署目录会额外提供统一安装/更新/核验脚本，并继续保留 `repair-deploy.sh` 用于补齐旧部署目录缺失的脚本、编排文件、初始化 SQL 和 current 链接。
+- 从 `v4.5.20` 开始，部署目录会额外提供统一安装/更新/核验脚本，并继续保留 `repair-deploy.sh` 用于补齐旧部署目录缺失的脚本、编排文件、初始化 SQL 和 current 链接。
 - `repair-deploy.sh` 只修部署包本身；需要修数据库结构时，用 `repair-mysql.sh`。
-- 所以旧服务器要彻底消除“添加账号后切换/刷新消失”、体验卡异常，以及卡密管理结构缺失问题，关键是修完部署包后再把主程序镜像升级到 `v4.5.19+`。
+- 所以旧服务器要彻底消除“添加账号后切换/刷新消失”、体验卡异常，以及卡密管理结构缺失问题，关键是修完部署包后再把主程序镜像升级到 `v4.5.20+`。
 - 从这次开始，`fresh-install.sh` / `update-app.sh` 会先做主程序镜像架构预检，避免把 `arm64` 镜像误导入到 `amd64` 服务器。
 - 主程序镜像会按 `APP_IMAGE -> Docker Hub -> GHCR -> 本地缓存 -> 源码构建` 顺序回退；离线包里如果主程序镜像来自 GHCR，脚本也会自动识别并写回 `.env`。
 
@@ -164,6 +164,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/smdk000/qq-farm-ui-pro-max/m
 
 - 本文档不改变默认部署脚本行为，只提供更适合国内网络的交付方式。
 - 国内网络最稳定的方案仍然是“离线包”或“预载镜像后再启动”。
-- `amd64` 服务器用 `qq-farm-bot-images-amd64.tar.gz` / `qq-farm-bot-v4.5.19-offline-amd64.tar.gz`。
-- `arm64` 服务器用 `qq-farm-bot-images-arm64.tar.gz` / `qq-farm-bot-v4.5.19-offline-arm64.tar.gz`。
+- `amd64` 服务器用 `qq-farm-bot-images-amd64.tar.gz` / `qq-farm-bot-v4.5.20-offline-amd64.tar.gz`。
+- `arm64` 服务器用 `qq-farm-bot-images-arm64.tar.gz` / `qq-farm-bot-v4.5.20-offline-arm64.tar.gz`。
 - `arm64` 离线包里的 `ipad860` 仍是 `linux/amd64`，目标宿主机需支持 QEMU。

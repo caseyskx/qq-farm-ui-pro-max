@@ -156,6 +156,9 @@ function recomputeSessionTotals(currentGold, currentExp, currentCoupon) {
 function getStats(statusData, userState, connected, limits) {
     const statusObj = (statusData && typeof statusData === 'object') ? statusData : {};
     const userObj = (userState && typeof userState === 'object') ? userState : {};
+    const liveUin = String((userObj.uin ?? statusObj.uin) || '').trim();
+    const liveOpenId = String((userObj.openId ?? statusObj.openId) || '').trim();
+    const liveAvatarUrl = String((userObj.avatarUrl ?? statusObj.avatarUrl ?? statusObj.avatar) || '').trim();
 
     // 优先使用 network 层 userState（通常是最新实时值），statusData 仅作为兜底
     const rawGold = (userObj.gold !== null && userObj.gold !== undefined) ? userObj.gold : statusObj.gold;
@@ -182,6 +185,10 @@ function getStats(statusData, userState, connected, limits) {
             gold: currentGold,
             coupon: Number.isFinite(Number(userObj.coupon)) ? Number(userObj.coupon) : 0,
             exp: currentExp,
+            uin: liveUin,
+            openId: liveOpenId,
+            avatar: liveAvatarUrl,
+            avatarUrl: liveAvatarUrl,
             platform: statusObj.platform || userObj.platform || 'qq',
         },
         uptime: Math.max(0, Math.floor((Date.now() - workerBootAtMs) / 1000)),

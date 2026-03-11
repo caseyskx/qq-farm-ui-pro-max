@@ -9,6 +9,170 @@ const { createModuleLogger } = require('./logger');
 const ChromeUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const qrLogger = createModuleLogger('qrlogin');
 
+function normalizeTextValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'bigint') return String(value);
+    return '';
+}
+
+function readPathValue(source, path) {
+    const root = (source && typeof source === 'object') ? source : null;
+    if (!root || !path) return undefined;
+    const parts = String(path).split('.').filter(Boolean);
+    let cursor = root;
+    for (const part of parts) {
+        if (!cursor || typeof cursor !== 'object' || !(part in cursor)) {
+            return undefined;
+        }
+        cursor = cursor[part];
+    }
+    return cursor;
+}
+
+function pickFirstTextValue(source, paths = []) {
+    for (const path of paths) {
+        const text = normalizeTextValue(readPathValue(source, path));
+        if (text) return text;
+    }
+    return '';
+}
+
+function normalizeNumericQQUin(value) {
+    const text = normalizeTextValue(value);
+    return /^\d+$/.test(text) ? text : '';
+}
+
+function extractQQIdentity(source, fallback = {}) {
+    const root = (source && typeof source === 'object') ? source : {};
+    const backup = (fallback && typeof fallback === 'object') ? fallback : {};
+
+    const rawUin = pickFirstTextValue(root, [
+        'uin',
+        'qq',
+        'qq_number',
+        'qqNumber',
+        'qq_uin',
+        'qqUin',
+        'uin_str',
+        'uinStr',
+        'user.uin',
+        'user.qq',
+        'user.qq_number',
+        'user.mobileqq',
+        'user_info.uin',
+        'user_info.qq',
+        'user_info.qq_number',
+        'user_info.mobileqq',
+        'userInfo.uin',
+        'userInfo.qq',
+        'userInfo.qqNumber',
+        'userInfo.mobileqq',
+        'account.uin',
+        'account.qq',
+        'account.mobileqq',
+        'account_info.uin',
+        'accountInfo.uin',
+        'profile.uin',
+        'profile.qq',
+        'profile.mobileqq',
+    ]) || normalizeTextValue(backup.uin);
+
+    const rawOpenId = pickFirstTextValue(root, [
+        'open_id',
+        'openId',
+        'openid',
+        'openID',
+        'user.open_id',
+        'user.openId',
+        'user.openid',
+        'user_info.open_id',
+        'user_info.openId',
+        'user_info.openid',
+        'userInfo.openId',
+        'userInfo.openid',
+        'account.open_id',
+        'account.openId',
+        'profile.open_id',
+        'profile.openId',
+    ]) || normalizeTextValue(backup.openId);
+
+    const nickname = pickFirstTextValue(root, [
+        'nick',
+        'nickname',
+        'nick_name',
+        'nickName',
+        'name',
+        'user.nick',
+        'user.nickname',
+        'user.nick_name',
+        'user.nickName',
+        'user.name',
+        'user_info.nick',
+        'user_info.nickname',
+        'user_info.nick_name',
+        'user_info.nickName',
+        'user_info.name',
+        'userInfo.nick',
+        'userInfo.nickname',
+        'userInfo.nickName',
+        'userInfo.name',
+        'profile.nick',
+        'profile.nickname',
+        'profile.name',
+    ]) || normalizeTextValue(backup.nickname);
+
+    const avatar = pickFirstTextValue(root, [
+        'avatar_url',
+        'avatarUrl',
+        'avatar',
+        'head_url',
+        'headUrl',
+        'head_img_url',
+        'headImgUrl',
+        'head_image',
+        'headImage',
+        'face_url',
+        'faceUrl',
+        'faceimg',
+        'faceImg',
+        'figureurl',
+        'figureUrl',
+        'portrait',
+        'qlogo',
+        'user.avatar_url',
+        'user.avatarUrl',
+        'user.avatar',
+        'user.head_url',
+        'user.headUrl',
+        'user_info.avatar_url',
+        'user_info.avatarUrl',
+        'user_info.avatar',
+        'user_info.head_url',
+        'user_info.headUrl',
+        'userInfo.avatarUrl',
+        'userInfo.avatar',
+        'profile.avatar_url',
+        'profile.avatarUrl',
+        'profile.avatar',
+    ]) || normalizeTextValue(backup.avatar);
+
+    let uin = normalizeNumericQQUin(rawUin);
+    if (!uin) {
+        uin = normalizeNumericQQUin(rawOpenId);
+    }
+
+    const openId = rawOpenId && rawOpenId !== uin ? rawOpenId : '';
+
+    return {
+        uin,
+        openId,
+        nickname,
+        avatar,
+    };
+}
+
 class QRLoginSession {
     static async requestQRCode() {
         return MiniProgramLoginSession.requestLoginCode();
@@ -83,13 +247,21 @@ class MiniProgramLoginSession {
             if (!authCode) {
                 return { status: 'Error', msg: '获取 QQ 授权码失败' };
             }
+            const identity = extractQQIdentity(data, {
+                uin: data.uin,
+                openId: data.open_id || data.openid,
+                nickname: data.nick || data.nickname,
+                avatar: data.avatar_url || data.avatarUrl || data.avatar,
+            });
 
             return {
                 status: 'OK',
                 ticket,
                 authCode,
-                uin: data.uin ? String(data.uin) : '',
-                nickname: data.nick || '',
+                uin: identity.uin,
+                openId: identity.openId,
+                nickname: identity.nickname,
+                avatar: identity.avatar,
             };
         }
 
@@ -177,12 +349,22 @@ class MiniProgramLoginSession {
             const ticket = typeof data.data === 'string'
                 ? data.data
                 : (data.data && data.data.token ? data.data.token : 'TICKET');
+            const identity = extractQQIdentity(
+                (data.data && typeof data.data === 'object') ? data.data : data,
+                {
+                    uin: trimmedUin,
+                    nickname: data.nickname || data.nick,
+                    avatar: data.avatar_url || data.avatarUrl || data.avatar,
+                },
+            );
             return {
                 status: 'OK',
                 ticket,
                 authCode: ticket,
-                uin: (data.data && data.data.uin) || trimmedUin,
-                nickname: (data.data && data.data.nickname) || '',
+                uin: identity.uin || trimmedUin,
+                openId: identity.openId,
+                nickname: identity.nickname,
+                avatar: identity.avatar,
             };
         } else if (data.code === 10001 || data.msg?.includes('等待验证') || data.msg?.includes('请扫描')) {
             return { status: 'Wait' };
@@ -252,4 +434,8 @@ class MiniProgramLoginSession {
     }
 }
 
-module.exports = { QRLoginSession, MiniProgramLoginSession };
+module.exports = {
+    QRLoginSession,
+    MiniProgramLoginSession,
+    __testExtractQQIdentity: extractQQIdentity,
+};

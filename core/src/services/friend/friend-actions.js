@@ -178,6 +178,10 @@ function isGetAllMode() {
     return fetchState?.mode === FRIEND_FETCH_MODE.GET_ALL;
 }
 
+function resetFriendActionRuntimeState() {
+    resetGetAllMode();
+}
+
 function _isSelfOnly(friends, userState) {
     if (!friends || friends.length !== 1 || !userState) return false;
     const selfGid = toNum(userState.gid);
@@ -595,7 +599,7 @@ async function _getCachedFriendsReply(accountId, fetchState, options = {}) {
                 return {
                     gid,
                     uin: String((friend && friend.uin) || ''),
-                    open_id: String((friend && friend.uin) || ''),
+                    open_id: String((friend && (friend.openId || friend.open_id || '')) || ''),
                     name,
                     remark: '',
                     avatar_url: String((friend && friend.avatarUrl) || ''),
@@ -1113,4 +1117,4 @@ async function doFriendBatchOperation(friendGids = [], opType, options = {}) {
     };
 }
 
-Object.assign(module.exports, { getAllFriends, getApplications, acceptFriends, enterFriendFarm, leaveFriendFarm, updateOperationLimits, canGetExp, canGetExpByCandidates, canOperate, getRemainingTimes, getOperationLimits, helpWater, helpWeed, helpInsecticide, stealHarvest, putPlantItems, putPlantItemsDetailed, putInsects, putWeeds, putInsectsDetailed, putWeedsDetailed, checkCanOperateRemote, doFriendOperation, doFriendBatchOperation, resetGetAllMode, isGetAllMode });
+Object.assign(module.exports, { getAllFriends, getApplications, acceptFriends, enterFriendFarm, leaveFriendFarm, updateOperationLimits, canGetExp, canGetExpByCandidates, canOperate, getRemainingTimes, getOperationLimits, helpWater, helpWeed, helpInsecticide, stealHarvest, putPlantItems, putPlantItemsDetailed, putInsects, putWeeds, putInsectsDetailed, putWeedsDetailed, checkCanOperateRemote, doFriendOperation, doFriendBatchOperation, resetGetAllMode, resetFriendActionRuntimeState, isGetAllMode });

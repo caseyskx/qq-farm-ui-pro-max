@@ -146,6 +146,7 @@ function registerAdminFeatureRoutes({
         getAccId: routeRuntime.getAccId,
         getProvider,
         getSchedulerRegistrySnapshot,
+        adminOperationLogService,
         handleApiError: routeRuntime.handleApiError,
     });
 
@@ -162,7 +163,7 @@ function registerAdminFeatureRoutes({
         getProvider,
         handleApiError: routeRuntime.handleApiError,
         getLevelExpProgress,
-        loadFriendsCacheApi: () => require('../services/database'),
+        loadFriendsCacheApi: () => require('../../services/database'),
     });
 
     registerAutomationRoutes({
@@ -205,7 +206,7 @@ function registerAdminFeatureRoutes({
         saveAccountBagPreferences,
         isSoftRuntimeError: routeRuntime.isSoftRuntimeError,
         handleApiError: routeRuntime.handleApiError,
-        formatUseResult: (data, payload) => require('../services/warehouse').formatUseResult(data, payload),
+        formatUseResult: (data, payload) => require('../../services/warehouse').formatUseResult(data, payload),
     });
 
     registerAccountControlRoutes({
@@ -220,7 +221,7 @@ function registerAdminFeatureRoutes({
         adminLogger,
         handleApiError: routeRuntime.handleApiError,
         loadGenerateSafeModeBlacklist: () => require('../../services/friend').generateSafeModeBlacklist,
-        loadGetPlantRankings: () => require('../services/analytics').getPlantRankings,
+        loadGetPlantRankings: () => require('../../services/analytics').getPlantRankings,
     });
 
     registerAccountSettingsRoutes({

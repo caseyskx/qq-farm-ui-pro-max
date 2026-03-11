@@ -71,7 +71,12 @@ function createDeps(overrides = {}) {
         findShopGoodsById: () => null,
         buildOfflineMallCatalog: () => ({ sections: [{ slotType: 1, goods: [] }], monthCards: [] }),
         buildOfflineMallGoods: (slotType) => [{ slotType }],
-        getAccountBagPreferences: async () => ({ purchaseMemory: {}, activityHistory: [] }),
+        getAccountBagPreferences: async () => ({
+            purchaseMemory: {},
+            activityHistory: [],
+            plantableSeedSnapshot: { generatedAt: 0, seeds: [] },
+            mallResolverCache: { fertilizerGoodsByType: { normal: null, organic: null }, lastAlertAt: 0, lastAlertReason: '' },
+        }),
         saveAccountBagPreferences: async (_accountId, payload) => payload,
         isSoftRuntimeError: () => false,
         handleApiError: (res, err) => res.status(500).json({ ok: false, error: err.message }),
@@ -177,12 +182,16 @@ test('bag preferences routes return persisted snapshot and keep account middlewa
         getAccountBagPreferences: async () => ({
             purchaseMemory: { 'mall:1': { count: 2, lastPurchasedAt: 1, name: '化肥' } },
             activityHistory: [{ ts: 2, type: 'purchase', title: '化肥 x2' }],
+            plantableSeedSnapshot: { generatedAt: 11, seeds: [{ seedId: 20059 }] },
+            mallResolverCache: { fertilizerGoodsByType: { normal: null, organic: null }, lastAlertAt: 0, lastAlertReason: '' },
         }),
         saveAccountBagPreferences: async (...args) => {
             calls.push(args);
             return {
                 purchaseMemory: {},
                 activityHistory: [{ ts: 3, type: 'sell', title: '出售果实' }],
+                plantableSeedSnapshot: { generatedAt: 12, seeds: [] },
+                mallResolverCache: { fertilizerGoodsByType: { normal: null, organic: null }, lastAlertAt: 0, lastAlertReason: '' },
             };
         },
     });
@@ -199,6 +208,8 @@ test('bag preferences routes return persisted snapshot and keep account middlewa
         data: {
             purchaseMemory: { 'mall:1': { count: 2, lastPurchasedAt: 1, name: '化肥' } },
             activityHistory: [{ ts: 2, type: 'purchase', title: '化肥 x2' }],
+            plantableSeedSnapshot: { generatedAt: 11, seeds: [{ seedId: 20059 }] },
+            mallResolverCache: { fertilizerGoodsByType: { normal: null, organic: null }, lastAlertAt: 0, lastAlertReason: '' },
         },
     });
 
@@ -217,6 +228,8 @@ test('bag preferences routes return persisted snapshot and keep account middlewa
         {
             purchaseMemory: { 'mall:9': { count: 1, lastPurchasedAt: 9, name: '礼包' } },
             activityHistory: [{ ts: 9, type: 'purchase', title: '礼包 x1' }],
+            plantableSeedSnapshot: undefined,
+            mallResolverCache: undefined,
         },
     ]]);
     assert.deepEqual(postRes.body, {
@@ -224,6 +237,66 @@ test('bag preferences routes return persisted snapshot and keep account middlewa
         data: {
             purchaseMemory: {},
             activityHistory: [{ ts: 3, type: 'sell', title: '出售果实' }],
+            plantableSeedSnapshot: { generatedAt: 12, seeds: [] },
+            mallResolverCache: { fertilizerGoodsByType: { normal: null, organic: null }, lastAlertAt: 0, lastAlertReason: '' },
         },
+    });
+});
+
+test('plantable bag seeds route forwards query flags to provider and keeps account middleware', async () => {
+    const { app, routes } = createFakeApp();
+    const calls = [];
+    const deps = createDeps({
+        getProvider: () => ({
+            getPlantableBagSeeds: async (...args) => {
+                calls.push(args);
+                return [{ seedId: 20059, usableCount: 3 }];
+            },
+        }),
+    });
+
+    registerCommerceRoutes({ app, ...deps });
+    const { middleware, handler } = getRouteHandler(routes, 'get', '/api/bag/plantable-seeds');
+    assert.equal(middleware, deps.accountOwnershipRequired);
+
+    const res = createResponse();
+    await handler({ query: { includeZeroUsable: '1', includeLocked: '1' } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(calls, [['acc-1', { includeZeroUsable: true, includeLocked: true }]]);
+    assert.deepEqual(res.body, {
+        ok: true,
+        data: [{ seedId: 20059, usableCount: 3 }],
+    });
+});
+
+test('plantable bag seeds route falls back to offline snapshot when worker is unavailable', async () => {
+    const { app, routes } = createFakeApp();
+    const deps = createDeps({
+        getProvider: () => null,
+        getAccountBagPreferences: async () => ({
+            purchaseMemory: {},
+            activityHistory: [],
+            plantableSeedSnapshot: {
+                generatedAt: 99,
+                seeds: [
+                    { seedId: 20059, usableCount: 3, unlocked: true },
+                    { seedId: 20061, usableCount: 0, unlocked: true },
+                    { seedId: 20062, usableCount: 5, unlocked: false },
+                ],
+            },
+            mallResolverCache: { fertilizerGoodsByType: { normal: null, organic: null }, lastAlertAt: 0, lastAlertReason: '' },
+        }),
+    });
+
+    registerCommerceRoutes({ app, ...deps });
+    const { handler } = getRouteHandler(routes, 'get', '/api/bag/plantable-seeds');
+    const res = createResponse();
+    await handler({ query: { includeZeroUsable: '0', includeLocked: '0' } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, {
+        ok: true,
+        data: [{ seedId: 20059, usableCount: 3, unlocked: true }],
     });
 });

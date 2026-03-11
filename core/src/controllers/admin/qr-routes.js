@@ -44,6 +44,18 @@ function getThirdPartyConfig(store) {
     return store.getThirdPartyApiConfig ? store.getThirdPartyApiConfig() : {};
 }
 
+function buildQQUinAvatarUrl(uin, size = 640) {
+    const qq = String(uin || '').trim();
+    if (!qq) return '';
+    return `https://q1.qlogo.cn/g?b=qq&nk=${qq}&s=${Math.max(1, Number(size) || 640)}`;
+}
+
+function buildQQOpenIdAvatarUrl(openId, appid = '1112386029', size = 100) {
+    const token = String(openId || '').trim();
+    if (!token) return '';
+    return `https://thirdqq.qlogo.cn/qqapp/${encodeURIComponent(String(appid || '1112386029'))}/${encodeURIComponent(token)}/${Math.max(1, Number(size) || 100)}`;
+}
+
 function registerQrRoutes({
     app,
     store,
@@ -326,8 +338,9 @@ function registerQrRoutes({
 
             if (result.status === 'OK') {
                 const ticket = result.ticket;
-                const qqUin = result.uin || '';
-                const nickname = result.nickname || '';
+                const qqUin = String(result.uin || '').trim();
+                const openId = String(result.openId || '').trim();
+                const nickname = String(result.nickname || '').trim();
                 const appid = '1112386029';
 
                 const authCode = result.authCode || await miniProgramLoginSession.getAuthCode(ticket, appid);
@@ -336,9 +349,12 @@ function registerQrRoutes({
                 }
                 consoleRef.log(`[QR登录] 代理登录成功, authCode=${authCode ? `${authCode.substring(0, 20)}...` : '空'}`);
 
-                let avatar = '';
-                if (qqUin) {
-                    avatar = `https://q1.qlogo.cn/g?b=qq&nk=${qqUin}&s=640`;
+                let avatar = String(result.avatar || '').trim();
+                if (!avatar && qqUin) {
+                    avatar = buildQQUinAvatarUrl(qqUin, 640);
+                }
+                if (!avatar && openId) {
+                    avatar = buildQQOpenIdAvatarUrl(openId, appid, 100);
                 }
 
                 return res.json({ ok: true, data: { status: 'OK', code: authCode, ticket, uin: qqUin, avatar, nickname } });

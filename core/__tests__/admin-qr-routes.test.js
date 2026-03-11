@@ -280,3 +280,49 @@ test('qr check route returns QQ authCode fallback result and avatar url', async 
         },
     });
 });
+
+test('qr check route falls back to openId avatar when qq uin is unavailable', async () => {
+    const { app, routes } = createFakeApp();
+    const calls = [];
+    const deps = createDeps({
+        app,
+        miniProgramLoginSession: {
+            requestLoginCode: async () => ({ code: 'qq-code' }),
+            queryStatus: async (...args) => {
+                calls.push(['queryStatus', ...args]);
+                return {
+                    status: 'OK',
+                    ticket: 'ticket-openid',
+                    uin: '',
+                    openId: '68AF60B1D1B712B9F41693B3FA378DE1',
+                    nickname: 'QQ开放平台昵称',
+                };
+            },
+            getAuthCode: async (...args) => {
+                calls.push(['getAuthCode', ...args]);
+                return 'qq-auth-openid';
+            },
+        },
+    });
+
+    registerQrRoutes(deps);
+    const handler = getHandler(routes, '/api/qr/check');
+    const res = createResponse();
+    await handler({ body: { platform: 'qq', code: 'qq-openid' } }, res);
+
+    assert.deepEqual(calls, [
+        ['queryStatus', 'qq-openid', ''],
+        ['getAuthCode', 'ticket-openid', '1112386029'],
+    ]);
+    assert.deepEqual(res.body, {
+        ok: true,
+        data: {
+            status: 'OK',
+            code: 'qq-auth-openid',
+            ticket: 'ticket-openid',
+            uin: '',
+            avatar: 'https://thirdqq.qlogo.cn/qqapp/1112386029/68AF60B1D1B712B9F41693B3FA378DE1/100',
+            nickname: 'QQ开放平台昵称',
+        },
+    });
+});

@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS `account_bag_preferences` (
     `account_id` INT NOT NULL,
     `purchase_memory` JSON DEFAULT NULL,
     `activity_history` JSON DEFAULT NULL,
+    `plantable_seed_snapshot` JSON DEFAULT NULL,
+    `mall_resolver_cache` JSON DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),

@@ -6,6 +6,7 @@
     "dev:web": "pnpm -C web dev",
     "dev": "pnpm build:web && pnpm dev:core",
     "start": "pnpm -C core start",
+    "build:release-assets": "bash scripts/release/build-release-assets.sh",
     "check:announcements": "node scripts/utils/check-announcements.js",
     "check:doc-links": "node scripts/utils/check-doc-links.js",
     "check:readme-links": "node scripts/utils/check-readme-links.js",

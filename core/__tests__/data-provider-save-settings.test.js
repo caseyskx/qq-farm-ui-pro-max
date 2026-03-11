@@ -193,3 +193,69 @@ test('saveSettings applies account mode and persists downgraded sibling accounts
     );
     assert.deepEqual(broadcasted, ['1', '2']);
 });
+
+test('saveSettings persists bag priority planting fields and fertilizer buy automation fields', async () => {
+    const store = createStoreMock([]);
+    const provider = createDataProvider({
+        workers: {},
+        globalLogs: [],
+        accountLogs: [],
+        store,
+        accountRepository: {
+            async updateConfig() {
+                return { changes: 1 };
+            },
+        },
+        getAccounts: async () => ({
+            accounts: [
+                { id: '1', username: 'admin', platform: 'qq' },
+            ],
+        }),
+        callWorkerApi: async () => ({}),
+        buildDefaultStatus: () => ({}),
+        normalizeStatusForPanel: status => status,
+        filterLogs: logs => logs,
+        addAccountLog: () => {},
+        nextConfigRevision: () => 10,
+        broadcastConfigToWorkers: () => {},
+        startWorker: async () => {},
+        stopWorker: async () => {},
+        restartWorker: async () => {},
+    });
+
+    await provider.saveSettings('1', {
+        plantingStrategy: 'bag_priority',
+        bagSeedPriority: [20061, 20059],
+        bagSeedFallbackStrategy: 'max_profit',
+        inventoryPlanting: {
+            mode: 'prefer_inventory',
+            globalKeepCount: 1,
+            reserveRules: [{ seedId: 20059, keepCount: 2 }],
+        },
+        automation: {
+            fertilizer_buy: true,
+            fertilizer_buy_limit: 12,
+            fertilizer_buy_type: 'both',
+            fertilizer_buy_mode: 'threshold',
+            fertilizer_buy_threshold_normal: 18,
+            fertilizer_buy_threshold_organic: 9,
+        },
+    });
+
+    assert.equal(store.getConfigSnapshot('1').plantingStrategy, 'bag_priority');
+    assert.deepEqual(store.getConfigSnapshot('1').bagSeedPriority, [20061, 20059]);
+    assert.equal(store.getConfigSnapshot('1').bagSeedFallbackStrategy, 'max_profit');
+    assert.deepEqual(store.getConfigSnapshot('1').inventoryPlanting, {
+        mode: 'prefer_inventory',
+        globalKeepCount: 1,
+        reserveRules: [{ seedId: 20059, keepCount: 2 }],
+    });
+    assert.deepEqual(store.getConfigSnapshot('1').automation, {
+        fertilizer_buy: true,
+        fertilizer_buy_limit: 12,
+        fertilizer_buy_type: 'both',
+        fertilizer_buy_mode: 'threshold',
+        fertilizer_buy_threshold_normal: 18,
+        fertilizer_buy_threshold_organic: 9,
+    });
+});

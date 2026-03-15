@@ -143,6 +143,19 @@ function createRuntimeState(options) {
             collaborationEnabled: false,
             degradeReason: '',
             degradeReasonLabel: '',
+            protection: {
+                nowSec: 0,
+                suspended: false,
+                suspendUntil: 0,
+                suspendRemainSec: 0,
+                networkBreaker: {
+                    state: '',
+                    coolDownMs: 0,
+                    cooldownRemainingSec: 0,
+                    failures: 0,
+                    threshold: 0,
+                },
+            },
         };
     }
 

@@ -3,7 +3,7 @@ const { CONFIG, PlantPhase, PHASE_NAMES } = require('../../config/config');
 const { getPlantName, getPlantById, getSeedImageBySeedId } = require('../../config/gameConfig');
 const { isAutomationOn, getFriendBlacklist, getStakeoutStealConfig, getFriendQuietHours } = require('../../models/store');
 const { getUserState, networkEvents } = require('../../utils/network');
-const { toLong, toNum, toTimeSec, getServerTimeSec, log, logWarn, sleep } = require('../../utils/utils');
+const { toNum, toTimeSec, getServerTimeSec, log, logWarn, sleep } = require('../../utils/utils');
 const { getCurrentPhase, setOperationLimitsCallback } = require('../farm');
 const { recordOperation } = require('../stats');
 const { sellAllFruits } = require('../warehouse');
@@ -579,6 +579,8 @@ async function runBatchWithFallback(ids, batchFn, singleFn) {
 async function visitFriend(friend, totalActions, myGid, modePolicy = null) {
     const { gid, name } = friend;
     const effectiveMode = String((modePolicy && modePolicy.effectiveMode) || 'main').trim().toLowerCase() || 'main';
+    const platformInst = PlatformFactory.createPlatform(CONFIG.platform);
+    const allowAutoSteal = !!platformInst.allowAutoSteal();
 
     let enterReply;
     try {
@@ -640,7 +642,7 @@ async function visitFriend(friend, totalActions, myGid, modePolicy = null) {
     }
 
     // 2. 偷菜操作
-    if (effectiveMode !== 'safe' && isAutomationOn('friend_steal') && status.stealable.length > 0) {
+    if (effectiveMode !== 'safe' && allowAutoSteal && isAutomationOn('friend_steal') && status.stealable.length > 0) {
         const precheck = await actions.checkCanOperateRemote(gid, 10008);
         if (precheck.canOperate) {
             const canStealNum = precheck.canStealNum > 0 ? precheck.canStealNum : status.stealable.length;
@@ -752,6 +754,29 @@ async function checkFriends(mode = 'full') {
     }
 
     const platformInst = PlatformFactory.createPlatform(CONFIG.platform);
+    const platformAllowsAutoSteal = !!platformInst.allowAutoSteal();
+    if (!platformAllowsAutoSteal) {
+        stealEnabled = false;
+        if (baseStealEnabled) {
+            _logPeriodicStatus(
+                'friend_platform_auto_steal_block',
+                `当前平台 ${CONFIG.platform} 已强制关闭自动偷菜，避免触发微信链路风控`,
+                {
+                    level: 'warn',
+                    tag: '安全',
+                    stateValue: `steal_block:${CONFIG.platform}`,
+                    meta: {
+                        module: 'friend',
+                        event: 'platform_guard',
+                        result: 'auto_steal_disabled',
+                        platform: CONFIG.platform,
+                    },
+                },
+            );
+        }
+    } else {
+        _clearPeriodicStatus('friend_platform_auto_steal_block');
+    }
 
     const hasAnyFriendOp = helpEnabled || stealEnabled || badEnabled;
     if (state.isCheckingFriends || !state.gid || !hasAnyFriendOp) return false;
@@ -765,7 +790,7 @@ async function checkFriends(mode = 'full') {
         const friendsReply = await actions.getAllFriends();
         const friends = friendsReply.game_friends || [];
         if (friends.length === 0) {
-            if (!platformInst.allowAutoSteal() && stealEnabled) {
+            if (!platformAllowsAutoSteal && baseStealEnabled) {
                 _logPeriodicStatus(
                     'friend_wx_safety',
                     '微信环境安全降级：受限模式已生效，确认无好友可访问[不执行任何偷取与批处理]',
@@ -925,9 +950,11 @@ async function checkFriends(mode = 'full') {
 
 async function checkFriendsThreePhase(friends, state, helpEnabled, badEnabled, modePolicy = null) {
     const effectiveMode = String((modePolicy && modePolicy.effectiveMode) || 'main').trim().toLowerCase() || 'main';
+    const platformInst = PlatformFactory.createPlatform(CONFIG.platform);
+    const allowAutoSteal = !!platformInst.allowAutoSteal();
     const actualBadEnabled = effectiveMode === 'safe' ? false : badEnabled;
     const actualHelpEnabled = helpEnabled;
-    const actualStealEnabled = effectiveMode === 'safe' ? false : true;
+    const actualStealEnabled = effectiveMode === 'safe' ? false : allowAutoSteal;
     log('好友', '开始三阶段巡查: 扫描→偷菜→帮助', {
         module: 'friend', event: 'three_phase_start', result: 'ok', effectiveMode,
     });
@@ -1331,7 +1358,7 @@ function getActiveStakeouts() {
 }
 
 function clearAllStakeouts() {
-    for (const [key, { timer }] of state.activeStakeouts) {
+    for (const [, { timer }] of state.activeStakeouts) {
         if (timer) clearTimeout(timer);
     }
     state.activeStakeouts.clear();

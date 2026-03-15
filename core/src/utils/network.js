@@ -14,7 +14,7 @@ const { cacheFriendSeeds, buildFriendSeedsFromLands } = require('../services/fri
 const { types } = require('./proto');
 const { toLong, toNum, syncServerTime, log, logWarn } = require('./utils');
 const store = require('../models/store'); // Phase 3: 引入 store 用于持久化风控锁
-const { circuitBreaker } = require('../services/circuit-breaker');
+const { networkCircuitBreaker } = require('../services/circuit-breaker');
 const cryptoWasm = require('./crypto-wasm');
 
 // ============ 事件发射器 (用于推送通知) ============
@@ -29,12 +29,25 @@ let wsErrorState = { code: 0, at: 0, message: '' };
 let networkScheduler = null;
 const verboseWsConnectLogsEnabled = String(process.env.FARM_VERBOSE_WS_CONNECT || '') === '1';
 const verboseLoginDetailsEnabled = String(process.env.FARM_VERBOSE_LOGIN_DETAILS || '') === '1';
+const HEARTBEAT_SILENCE_TIMEOUT_MS = 60 * 1000;
+const HEARTBEAT_MAX_MISS = 2;
 
 function getNetworkScheduler() {
     if (!networkScheduler) {
         networkScheduler = createScheduler('network');
     }
     return networkScheduler;
+}
+
+function rejectAndClearPendingCallbacks(reason = '请求被中断') {
+    pendingCallbacks.forEach((cb) => {
+        try {
+            cb(new Error(reason));
+        } catch {
+            // ignore callback failure
+        }
+    });
+    pendingCallbacks.clear();
 }
 
 // ============ 用户状态 (登录后设置) ============
@@ -240,11 +253,11 @@ async function drainQueue() {
         }
 
         // Phase 4: Circuit Breaker Interception. If OPEN, suspend all outgoing traffic and drop queues.
-        if (!circuitBreaker.allowRequest()) {
+        if (!networkCircuitBreaker.allowRequest()) {
             while (normalQueue.length > 0) {
                 const dropped = normalQueue.shift();
                 if (dropped.reject) {
-                    const err = new Error(`全局断路器已开启，请求被强制熔断放弃`);
+                    const err = new Error('网络断路器已开启，请求被强制熔断放弃');
                     err.code = 'CIRCUIT_BREAKER_OPEN';
                     err.isRecoverable = false;
                     dropped.reject(err);
@@ -253,7 +266,7 @@ async function drainQueue() {
             while (urgentQueue.length > 0) {
                 const dropped = urgentQueue.shift();
                 if (dropped.reject) {
-                    const err = new Error(`全局断路器已开启，紧急请求被强制熔断放弃`);
+                    const err = new Error('网络断路器已开启，紧急请求被强制熔断放弃');
                     err.code = 'CIRCUIT_BREAKER_OPEN';
                     err.isRecoverable = false;
                     dropped.reject(err);
@@ -420,7 +433,7 @@ function handleMessage(data) {
             // Phase 2/4: 拦截 1002003 封禁信号，拉响断路器并启动自恢复休眠 (30分钟)
             if (errorCode === 1002003) {
                 // 向 CircuitBreaker 报告严重错误
-                circuitBreaker.recordFailure('1002003风控验证码拦截');
+                networkCircuitBreaker.recordFailure('1002003风控验证码拦截');
 
                 userState.suspendUntil = Date.now() + 30 * 60 * 1000;
                 if (CONFIG.accountId) {
@@ -430,7 +443,7 @@ function handleMessage(data) {
                 networkEvents.emit('ban', { reason: '1002003' });
             } else if (errorCode === 0) {
                 // 请求健康，如果有半开状态，则尝试恢复
-                circuitBreaker.recordSuccess();
+                networkCircuitBreaker.recordSuccess();
             }
 
             const cb = pendingCallbacks.get(clientSeqVal);
@@ -716,18 +729,20 @@ function startHeartbeat() {
     getNetworkScheduler().setIntervalTask('heartbeat_interval', CONFIG.heartbeatInterval, () => {
         if (!userState.gid) return;
 
-        // 检查上次心跳响应时间，超过 60 秒没响应说明连接有问题
+        // 检查上次心跳响应时间，超过阈值没响应说明连接有问题
         const timeSinceLastResponse = Date.now() - lastHeartbeatResponse;
-        if (timeSinceLastResponse > 60000) {
+        if (timeSinceLastResponse > HEARTBEAT_SILENCE_TIMEOUT_MS) {
             heartbeatMissCount++;
             logWarn('心跳', `连接可能已断开 (${Math.round(timeSinceLastResponse / 1000)}s 无响应, 待处理=${pendingCallbacks.size})`);
-            if (heartbeatMissCount >= 2) {
-                log('心跳', '尝试重连...');
-                // 清理待处理的回调，避免堆积
-                pendingCallbacks.forEach((cb, _seq) => {
-                    try { cb(new Error('连接超时，已清理')); } catch { }
+            if (heartbeatMissCount >= HEARTBEAT_MAX_MISS) {
+                log('心跳', '触发强制重连，清理悬挂请求');
+                rejectAndClearPendingCallbacks('连接超时，已清理');
+                heartbeatMissCount = 0;
+                getNetworkScheduler().clear('heartbeat_interval');
+                getNetworkScheduler().setTimeoutTask('heartbeat_force_reconnect', 300, () => {
+                    reconnect(null);
                 });
-                pendingCallbacks.clear();
+                return;
             }
         }
 
@@ -836,7 +851,7 @@ function cleanup() {
     if (networkScheduler) {
         networkScheduler.clearAll();
     }
-    pendingCallbacks.clear();
+    rejectAndClearPendingCallbacks('请求已中断: 网络清理');
     // 清空令牌桶排队队列，避免残留请求被发到新连接
     normalQueue.length = 0;
     urgentQueue.length = 0;

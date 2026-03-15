@@ -21,6 +21,23 @@ function getDuplicateIdentityRef(body) {
     return String((body && (body.uin || body.qq)) || '').trim();
 }
 
+function findDuplicateAccountByIdentity(snapshot, options = {}) {
+    const identityRef = String(options.identityRef || '').trim();
+    const platform = String(options.platform || '').trim();
+    const excludeId = String(options.excludeId || '').trim();
+    if (!identityRef || !platform) return null;
+
+    return getAccountEntries(snapshot).find((account) => {
+        if (!account) return false;
+        const accountId = String((account && account.id) || '').trim();
+        if (excludeId && accountId === excludeId) return false;
+        const accountPlatform = String((account && account.platform) || 'qq').trim() || 'qq';
+        if (accountPlatform !== platform) return false;
+        const accountIdentityRef = String((account && (account.uin || account.qq)) || '').trim();
+        return accountIdentityRef === identityRef;
+    }) || null;
+}
+
 function hasFreshLoginCredential(body) {
     const loginType = String((body && body.loginType) || '').trim().toLowerCase();
     if (loginType !== 'qr' && loginType !== 'manual') {
@@ -84,10 +101,12 @@ function registerAccountManagementRoutes({
             }
 
             const duplicateIdentityRef = getDuplicateIdentityRef(body);
-            if (isCreateRequest && duplicateIdentityRef && body.platform) {
-                const duplicateEntry = getAccountEntries(createSnapshot).find(
-                    a => String((a && (a.uin || a.qq)) || '') === duplicateIdentityRef && a.platform === body.platform
-                );
+            const requestPlatform = String(body.platform || 'qq').trim() || 'qq';
+            if (isCreateRequest && duplicateIdentityRef) {
+                const duplicateEntry = findDuplicateAccountByIdentity(createSnapshot, {
+                    platform: requestPlatform,
+                    identityRef: duplicateIdentityRef,
+                });
                 if (duplicateEntry) {
                     consoleRef.log(`[API /api/accounts] 拦截重复创建: 标识 ${duplicateIdentityRef} 已存在，转为更新 (ID: ${duplicateEntry.id})`);
                     body.id = duplicateEntry.id;
@@ -142,6 +161,39 @@ function registerAccountManagementRoutes({
                 const freshSnapshot = createSnapshot || await getAccountsSnapshot({ force: true });
                 payload.id = allocateNextAccountId(freshSnapshot);
                 payload.__createIfMissing = true;
+            }
+
+            if (isUpdate) {
+                const payloadIdentityRef = getDuplicateIdentityRef(payload);
+                if (payloadIdentityRef && payload.platform) {
+                    const identitySnapshot = await getAccountsSnapshot({ force: true });
+                    const duplicateEntry = findDuplicateAccountByIdentity(identitySnapshot, {
+                        platform: payload.platform,
+                        identityRef: payloadIdentityRef,
+                        excludeId: payload.id,
+                    });
+                    if (duplicateEntry) {
+                        if (req.currentUser && req.currentUser.role !== 'admin') {
+                            const duplicateOwner = String(duplicateEntry.username || '').trim();
+                            if (duplicateOwner && duplicateOwner !== req.currentUser.username) {
+                                return res.status(409).json({ ok: false, error: `该账号已被用户 ${duplicateOwner} 绑定，无法覆盖` });
+                            }
+                        }
+
+                        const previousId = String(payload.id || '').trim();
+                        payload.id = String(duplicateEntry.id || '').trim();
+                        existingAccount = duplicateEntry;
+                        if (!payload.name || payload.name === '扫码账号' || payload.name === payloadIdentityRef) {
+                            payload.name = duplicateEntry.name || payload.name;
+                        }
+                        if (provider.isAccountRunning) {
+                            wasRunning = await provider.isAccountRunning(payload.id);
+                        } else {
+                            wasRunning = false;
+                        }
+                        consoleRef.log(`[API /api/accounts] 检测到同平台重复标识 ${payloadIdentityRef}，更新目标从 ${previousId || '-'} 切换到 ${payload.id}`);
+                    }
+                }
             }
 
             const data = await addOrUpdateAccount(payload);

@@ -20,6 +20,7 @@ const { initStatusBar, setStatusPlatform, statusData } = require('../services/st
 const { setRecordGoldExpHook } = require('../services/status');
 const { getInteractRecords } = require('../services/interact');
 const { getShopCatalog, buyShopGoods } = require('../services/shop');
+const { networkCircuitBreaker } = require('../services/circuit-breaker');
 const { connect, cleanup, getWs, getUserState, networkEvents } = require('../utils/network');
 const { loadProto } = require('../utils/proto');
 const { setLogHook, log, toNum } = require('../utils/utils');
@@ -644,7 +645,7 @@ async function startBot(config) {
 
     await loadProto();
 
-    log('系统', '正在连接服务器...');
+    log('系统', `正在连接服务器... (platform=${CONFIG.platform}, version=${CONFIG.clientVersion})`);
 
     // 加载保存的配置
     applyRuntimeConfig(getConfigSnapshot(), false);
@@ -1121,6 +1122,15 @@ function syncStatus() {
 
     const limits = require('../services/friend').getOperationLimits();
     const fullStats = require('../services/stats').getStats(statusData, userState, connected, limits);
+    const breakerSnapshot = (networkCircuitBreaker && typeof networkCircuitBreaker.getSnapshot === 'function')
+        ? networkCircuitBreaker.getSnapshot()
+        : null;
+    const suspendUntil = Number(userState && userState.suspendUntil) || 0;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const breakerRemainSec = breakerSnapshot
+        ? Math.max(0, Math.ceil((Number(breakerSnapshot.cooldownRemainingMs) || 0) / 1000))
+        : 0;
+    const suspendRemainSec = suspendUntil > 0 ? Math.max(0, Math.ceil((suspendUntil - Date.now()) / 1000)) : 0;
     const nowMs = Date.now();
     const friendAutoAcceptRemainSec = Math.max(0, Math.ceil((Number(nextFriendRunAt || 0) - nowMs) / 1000));
     const helpRemainSec = Math.max(0, Math.ceil((Number(nextHelpRunAt || 0) - nowMs) / 1000));
@@ -1137,6 +1147,19 @@ function syncStatus() {
     fullStats.preferredSeed = getPreferredSeed();
     fullStats.levelProgress = expProgress;
     fullStats.configRevision = appliedConfigRevision;
+    fullStats.protection = {
+        nowSec,
+        suspended: suspendUntil > Date.now(),
+        suspendUntil: suspendUntil > 0 ? suspendUntil : 0,
+        suspendRemainSec,
+        networkBreaker: {
+            state: breakerSnapshot ? String(breakerSnapshot.state || '') : '',
+            coolDownMs: breakerSnapshot ? Number(breakerSnapshot.coolDownMs || 0) : 0,
+            cooldownRemainingSec: breakerRemainSec,
+            failures: breakerSnapshot ? Number(breakerSnapshot.failures || 0) : 0,
+            threshold: breakerSnapshot ? Number(breakerSnapshot.threshold || 0) : 0,
+        },
+    };
     const modePolicy = getAccountModePolicyService().getRuntimeAccountModePolicy();
     fullStats.accountMode = modePolicy.accountMode || 'main';
     fullStats.effectiveMode = modePolicy.effectiveMode || fullStats.accountMode;

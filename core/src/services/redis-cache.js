@@ -1,7 +1,7 @@
 const { loadProjectEnv } = require('../config/load-env');
 const Redis = require('ioredis');
 const { createModuleLogger } = require('./logger');
-const { circuitBreaker } = require('./circuit-breaker');
+const { cacheCircuitBreaker } = require('./circuit-breaker');
 
 loadProjectEnv();
 
@@ -82,13 +82,13 @@ function bindRedisEvents(redis) {
             return;
         }
         if (!redisDisabled)
-            circuitBreaker.recordFailure(message);
+            cacheCircuitBreaker.recordFailure(message);
     });
 
     redis.on('close', () => {
         if (redisDisabled) return;
         logger.warn('⚠️ Redis 连接已断开');
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
     });
 
     redis.on('reconnecting', () => {
@@ -146,7 +146,7 @@ async function initRedis() {
             await redis.connect();
         }
         await redis.ping();
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
         logger.info('✅ Redis PING 验证成功');
         return true;
     } catch (e) {
@@ -155,7 +155,7 @@ async function initRedis() {
             disableRedis(getRedisAuthFailureReason(message));
             return false;
         }
-        circuitBreaker.recordFailure(message);
+        cacheCircuitBreaker.recordFailure(message);
         logger.error(`❌ Redis PING 验证失败: ${message}`);
         throw e;
     }
@@ -171,7 +171,7 @@ async function setCache(key, value, expireSecs = 0) {
     const redis = getRedisClient();
     if (!redis) return;
     // 熔断器检查：Redis 不可用时直接跳过写入
-    if (!circuitBreaker.allowRequest()) return;
+    if (!cacheCircuitBreaker.allowRequest()) return;
     try {
         const strVal = typeof value === 'object' ? JSON.stringify(value) : String(value);
         if (expireSecs > 0) {
@@ -179,9 +179,9 @@ async function setCache(key, value, expireSecs = 0) {
         } else {
             await redis.set(key, strVal);
         }
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
     } catch (e) {
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
         logger.error(`setCache error [${key}]:`, e.message);
     }
 }
@@ -194,10 +194,10 @@ async function getCache(key) {
     const redis = getRedisClient();
     if (!redis) return null;
     // 熔断器检查：Redis 不可用时直接返回 null
-    if (!circuitBreaker.allowRequest()) return null;
+    if (!cacheCircuitBreaker.allowRequest()) return null;
     try {
         const val = await redis.get(key);
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
         if (!val) return null;
         try {
             return JSON.parse(val);
@@ -205,7 +205,7 @@ async function getCache(key) {
             return val;
         }
     } catch (e) {
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
         logger.error(`getCache error [${key}]:`, e.message);
         return null;
     }
@@ -217,14 +217,14 @@ async function getCache(key) {
 async function acquireLock(lockKey, expireMs = 5000) {
     const redis = getRedisClient();
     if (!redis) return false;
-    if (!circuitBreaker.allowRequest()) return false;
+    if (!cacheCircuitBreaker.allowRequest()) return false;
     try {
         // PX = 毫秒， NX = 不存在才创建
         const result = await redis.set(lockKey, 'LOCKED', 'PX', expireMs, 'NX');
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
         return result === 'OK';
     } catch (e) {
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
         logger.error(`acquireLock error [${lockKey}]:`, e.message);
         return false;
     }
@@ -233,12 +233,12 @@ async function acquireLock(lockKey, expireMs = 5000) {
 async function releaseLock(lockKey) {
     const redis = getRedisClient();
     if (!redis) return;
-    if (!circuitBreaker.allowRequest()) return;
+    if (!cacheCircuitBreaker.allowRequest()) return;
     try {
         await redis.del(lockKey);
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
     } catch (e) {
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
         logger.error(`releaseLock error [${lockKey}]:`, e.message);
     }
 }

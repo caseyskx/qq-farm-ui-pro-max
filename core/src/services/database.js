@@ -1,6 +1,6 @@
 const { initMysql, closeMysql, getPool, isMysqlInitialized } = require('./mysql-db');
 const { initRedis, closeRedis, getRedisClient } = require('./redis-cache');
-const { circuitBreaker } = require('./circuit-breaker');
+const { cacheCircuitBreaker } = require('./circuit-breaker');
 const { createModuleLogger } = require('./logger');
 const { initJwtSecretPersistence } = require('./jwt-service');
 
@@ -357,7 +357,7 @@ async function mergeFriendsCache(accountId, friendsList) {
 
 async function getCachedFriends(accountId) {
     // 熔断器检查：Redis 不可用时直接返回空数组，防止回源 MySQL 造成雪崩
-    if (!circuitBreaker.isAvailable()) {
+    if (!cacheCircuitBreaker.isAvailable()) {
         logger.warn(`Redis 熔断中，跳过好友缓存查询 (account: ${accountId})`);
         return [];
     }
@@ -365,7 +365,7 @@ async function getCachedFriends(accountId) {
         const redis = getRedisClient();
         if (!redis) return [];
         const str = await redis.get(`account:${accountId}:friends_cache`);
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
         if (str) {
             const parsed = JSON.parse(str);
             const normalized = mergeFriendCacheEntries([], Array.isArray(parsed) ? parsed : []);
@@ -376,14 +376,14 @@ async function getCachedFriends(accountId) {
         }
         return [];
     } catch (e) {
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
         logger.error(`get friends cache failed: ${e.message}`);
         return [];
     }
 }
 
 async function findReusableFriendsCache(accountId, options = {}) {
-    if (!circuitBreaker.isAvailable()) {
+    if (!cacheCircuitBreaker.isAvailable()) {
         logger.warn(`Redis 熔断中，跳过共享好友缓存查询 (account: ${accountId})`);
         return null;
     }
@@ -447,21 +447,21 @@ async function findReusableFriendsCache(accountId, options = {}) {
             }
         }
 
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
         if (!bestMatch) return null;
         return {
             sourceAccountId: bestMatch.sourceAccountId,
             friends: bestMatch.friends,
         };
     } catch (e) {
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
         logger.error(`find reusable friends cache failed: ${e.message}`);
         return null;
     }
 }
 
 async function findFriendInSharedCaches(friendGid, options = {}) {
-    if (!circuitBreaker.isAvailable()) {
+    if (!cacheCircuitBreaker.isAvailable()) {
         logger.warn(`Redis 熔断中，跳过共享好友昵称查询 (gid: ${friendGid})`);
         return null;
     }
@@ -506,7 +506,7 @@ async function findFriendInSharedCaches(friendGid, options = {}) {
                 friend: matched,
             };
             if (!isGenericFriendName(matched.name, numericGid)) {
-                circuitBreaker.recordSuccess();
+                cacheCircuitBreaker.recordSuccess();
                 return candidate;
             }
             if (!genericMatch) {
@@ -514,10 +514,10 @@ async function findFriendInSharedCaches(friendGid, options = {}) {
             }
         }
 
-        circuitBreaker.recordSuccess();
+        cacheCircuitBreaker.recordSuccess();
         return genericMatch;
     } catch (e) {
-        circuitBreaker.recordFailure();
+        cacheCircuitBreaker.recordFailure();
         logger.error(`find friend in shared caches failed: ${e.message}`);
         return null;
     }
@@ -527,7 +527,7 @@ async function findFriendInSharedCaches(friendGid, options = {}) {
  * 检查 Redis 缓存是否可用（供 Worker 层查询）
  */
 function isRedisCacheAvailable() {
-    return circuitBreaker.isAvailable();
+    return cacheCircuitBreaker.isAvailable();
 }
 
 // ============ 公告管理 (支持多版本历史) ============

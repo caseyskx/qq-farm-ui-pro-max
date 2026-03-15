@@ -1,5 +1,5 @@
 const { sleep } = require('../utils/utils');
-const QRCode = require('qrcode');
+const { NETWORK_COOL_DOWN_MS } = require('../services/circuit-breaker');
 
 function buildTemplateContext(payload, title, content) {
     const now = new Date();
@@ -16,7 +16,7 @@ function buildTemplateContext(payload, title, content) {
 }
 
 function renderTemplate(text, context) {
-    return String(text || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+    return String(text || '').replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => {
         const value = context[key];
         if (value === undefined || value === null) return '';
         if (typeof value === 'object') return JSON.stringify(value);
@@ -202,7 +202,11 @@ function createReloginReminderService(options) {
 
             // Phase 4: 特殊 P0 级告警覆盖文案
             if (payload.reason && payload.reason.startsWith('ban:')) {
-                content = `【P0系统告警】账号 [${accountName}] 触发腾讯防刷安全策略(1002003)，系统已自动进入 30 分钟保护性自愈休眠。建议排查设置是否过快，此为最后防线。`;
+                const coolDownMs = Number(payload.offlineMs) > 0
+                    ? Number(payload.offlineMs)
+                    : (Number(NETWORK_COOL_DOWN_MS) || (30 * 60 * 1000));
+                const coolDownMin = Math.ceil(coolDownMs / 60000);
+                content = `【P0系统告警】账号 [${accountName}] 触发腾讯防刷安全策略(1002003)，系统已自动进入 ${coolDownMin} 分钟保护性自愈休眠。建议排查设置是否过快，此为最后防线。`;
             } else if (payload.reason && payload.reason.startsWith('kickout:')) {
                 const pureReason = payload.reason.replace('kickout:', '');
                 content = `【P0跑路告警】账号 [${accountName}] 被踢下线被登出，请紧急上线检查状态！可能异地登录或被封禁！原因: ${pureReason}`;

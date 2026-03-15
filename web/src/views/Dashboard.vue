@@ -323,6 +323,31 @@ const timeToLevel = computed(() => {
   return `约 ${(minsToLevel / 60).toFixed(1)} 小时后升级`
 })
 
+const protectionHint = computed(() => {
+  const protection = status.value?.protection
+  if (!protection || typeof protection !== 'object')
+    return ''
+
+  const suspendRemainSec = Number(protection.suspendRemainSec || 0)
+  if (protection.suspended && suspendRemainSec > 0) {
+    const minutes = Math.max(1, Math.ceil(suspendRemainSec / 60))
+    return `账号休眠中（约 ${minutes} 分钟）`
+  }
+
+  const breaker = protection.networkBreaker || {}
+  const breakerState = String(breaker.state || '').trim().toUpperCase()
+  const breakerRemainSec = Number(breaker.cooldownRemainingSec || 0)
+  if (breakerState === 'OPEN' && breakerRemainSec > 0) {
+    const minutes = Math.max(1, Math.ceil(breakerRemainSec / 60))
+    return `风控保护中（约 ${minutes} 分钟）`
+  }
+
+  if (breakerState === 'HALF_OPEN')
+    return '风控保护试探恢复中'
+
+  return ''
+})
+
 // Fertilizer & Collection
 const fertilizerNormal = computed(() => dashboardItems.value.find((i: any) => Number(i.id) === 1011))
 const fertilizerOrganic = computed(() => dashboardItems.value.find((i: any) => Number(i.id) === 1012))
@@ -1899,6 +1924,9 @@ async function handleDashboardTrialRenew() {
               <div class="i-fas-clock text-purple-400" />
               {{ formatDuration(localUptime) }}
             </div>
+          </div>
+          <div v-if="protectionHint" class="dashboard-runtime-guard-hint mt-1.5 text-[11px]">
+            {{ protectionHint }}
           </div>
         </div>
       </div>
@@ -3551,6 +3579,24 @@ async function handleDashboardTrialRenew() {
 
 .dashboard-op-tone--neutral {
   color: var(--ui-text-3);
+}
+
+.dashboard-runtime-guard-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: color-mix(in srgb, var(--ui-status-warning) 74%, var(--ui-text-2) 26%);
+  line-height: 1.35;
+}
+
+.dashboard-runtime-guard-hint::before {
+  content: '';
+  width: 0.38rem;
+  height: 0.38rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-status-warning) 82%, transparent);
+  box-shadow: 0 0 0 0.18rem color-mix(in srgb, var(--ui-status-warning) 25%, transparent);
 }
 
 @media (min-width: 768px) {

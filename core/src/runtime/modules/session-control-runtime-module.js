@@ -1,4 +1,5 @@
 const { RuntimeModuleBase } = require('../runtime-module-base');
+const { CONFIG } = require('../../config/config');
 
 class SessionControlRuntimeModule extends RuntimeModuleBase {
     constructor(context = {}) {
@@ -52,8 +53,15 @@ class SessionControlRuntimeModule extends RuntimeModuleBase {
         const sendToMaster = this.context && this.context.sendToMaster;
         const requestStop = this.context && this.context.requestStop;
         const reason = payload && payload.reason ? payload.reason : '未知';
+        const versionLow = /版本.*过低|升级到最新版本/.test(String(reason));
         if (typeof log === 'function') {
             log('系统', `检测到踢下线，准备自动停止账号。原因: ${reason}`);
+            if (versionLow) {
+                log(
+                    '系统',
+                    `当前 clientVersion=${CONFIG.clientVersion}，可通过环境变量 FARM_CLIENT_VERSION 覆盖版本后重试`,
+                );
+            }
         }
         if (typeof sendToMaster === 'function') {
             sendToMaster({ type: 'account_kicked', reason });

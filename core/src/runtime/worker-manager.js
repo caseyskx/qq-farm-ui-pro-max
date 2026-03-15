@@ -3,6 +3,7 @@ const { getPool } = require('../services/mysql-db');
 const store = require('../models/store');
 const { CONFIG } = require('../config/config');
 const { MiniProgramLoginSession } = require('../services/qrlogin');
+const { NETWORK_COOL_DOWN_MS } = require('../services/circuit-breaker');
 
 let systemLogBatch = [];
 let systemLogFlushHandle = null;
@@ -637,14 +638,18 @@ function createWorkerManager(options) {
             stopWorker(accountId);
         } else if (msg.type === 'account_banned') {
             const reason = msg.reason || '未知';
+            const coolDownMin = Math.ceil((Number(NETWORK_COOL_DOWN_MS) || (30 * 60 * 1000)) / 60000);
             log('系统', `账号 ${worker.name} 被判定限制 (${reason})，记录日志并推送 Webhook 告警`, { accountId: String(accountId), accountName: worker.name });
             triggerOfflineReminder({
                 accountId,
                 accountName: worker.name,
                 reason: `ban:${reason}`,
-                offlineMs: 30 * 60 * 1000,
+                offlineMs: Number(NETWORK_COOL_DOWN_MS) || (30 * 60 * 1000),
             });
-            addAccountLog('ban_sleep', `账号 ${worker.name} 触发防刷保护，进入 30 分钟休眠`, accountId, worker.name, { reason });
+            addAccountLog('ban_sleep', `账号 ${worker.name} 触发防刷保护，进入 ${coolDownMin} 分钟休眠`, accountId, worker.name, {
+                reason,
+                coolDownMs: Number(NETWORK_COOL_DOWN_MS) || (30 * 60 * 1000),
+            });
         } else if (msg.type === 'friend_blacklist_add') {
             const gid = Number(msg.gid);
             if (!Number.isFinite(gid) || gid <= 0) return;
